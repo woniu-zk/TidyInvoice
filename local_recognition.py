@@ -16,6 +16,7 @@ The produced payload keeps the legacy payload shape consumed by
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import re
@@ -54,12 +55,46 @@ ENGINE_OCR_IMAGE = "local_ocr_image"
 ENGINE_OFD_TEXT = "local_ofd_text"
 ENGINE_XML = "local_xml"
 ENGINE_UNSUPPORTED = "local_unsupported"
+ENGINE_QR_IMAGE = "local_qr_image"
+ENGINE_QR_PDF = "local_qr_pdf"
 
 REASON_OK = "LOCAL_PARSE_OK"
 REASON_TEXT_UNAVAILABLE = "LOCAL_TEXT_UNAVAILABLE"
 REASON_OCR_UNAVAILABLE = "LOCAL_OCR_ENGINE_UNAVAILABLE"
 REASON_UNSUPPORTED = "LOCAL_UNSUPPORTED_SOURCE"
 REASON_NOT_INVOICE = "LOCAL_NOT_INVOICE"
+
+# Structured supporting documents that the deterministic rules can classify even
+# though they are not single invoices.
+TYPE_TOLL_SUMMARY = "通行费汇总单"
+TYPE_QR_INVOICE = "开票二维码"
+TOLL_SUMMARY_MARKERS = ("收费公路通行费电子票据汇总单", "通行费电子票据汇总单")
+
+# A QR code is treated as an invoice-issuing entry point when its payload points
+# at a known invoicing platform or contains invoicing keywords.
+QR_INVOICE_TEXT_HINTS = (
+    "扫码开票",
+    "扫码获取电子发票",
+    "扫码获取发票",
+    "扫码领取",
+    "扫码领取电子发票",
+    "扫一扫领取电子发票",
+    "扫一扫开票",
+    "领取电子发票",
+    "开票二维码",
+)
+QR_INVOICE_PAYLOAD_HINTS = (
+    "baiwang",
+    "nuonuo",
+    "fapiao",
+    "invoice",
+    "issue-scan",
+    "chinatax",
+    "jss.com.cn",
+    "vpiaotong",
+    "piaotong",
+    "fpkj",
+)
 
 
 class LocalRecognitionUnavailable(RuntimeError):
@@ -673,8 +708,325 @@ class _FieldExtractor:
         return result
 
 
+# ---------------------------------------------------------------------------
+# Structured supporting documents: toll summary sheets and invoice QR codes
+# ---------------------------------------------------------------------------
+
+def _lazy_cv2():
+    try:
+        import cv2  # type: ignore
+
+        return cv2
+    except Exception as exc:  # pragma: no cover - optional dependency
+        raise LocalRecognitionUnavailable("LOCAL_QR_DECODER_UNAVAILABLE", str(exc)) from exc
+
+
+def _decode_qr_bgr(bgr) -> list[str]:
+    """Decode QR payloads with OpenCV, retrying common photo scales."""
+    cv2 = _lazy_cv2()
+    detector = cv2.QRCodeDetector()
+    payloads: list[str] = []
+    for scale in (1.0, 0.5, 0.25):
+        image = bgr
+        if scale != 1.0:
+            image = cv2.resize(bgr, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+        try:
+            ok, decoded, _points, _ = detector.detectAndDecodeMulti(image)
+        except Exception:
+            continue
+        if ok:
+            payloads.extend(str(text) for text in decoded if text)
+        if payloads:
+            break
+    if payloads:
+        return payloads
+    for scale in (1.0, 0.5, 0.25):
+        image = bgr
+        if scale != 1.0:
+            image = cv2.resize(bgr, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+        try:
+            text, _points, _ = detector.detectAndDecode(image)
+        except Exception:
+            continue
+        if text:
+            return [str(text)]
+    return []
+
+
+def decode_qr_payloads(path: str | Path | None, *, max_pages: int = 2) -> list[str]:
+    """Decode QR payloads from an image attachment or PDF pages (local only)."""
+    if not path or not os.path.exists(str(path)):
+        return []
+    suffix = Path(path).suffix.lower()
+    cv2 = _lazy_cv2()
+    if suffix in IMAGE_EXTENSIONS:
+        try:
+            import numpy as np
+            from PIL import Image
+
+            with Image.open(str(path)) as image:
+                rgb = np.asarray(image.convert("RGB"))
+        except Exception:
+            return []
+        try:
+            return _decode_qr_bgr(cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))
+        except Exception:
+            return []
+    if suffix not in PDF_TEXT_EXTENSIONS:
+        return []
+    try:
+        import numpy as np
+
+        fitz = _require_fitz()
+    except LocalRecognitionUnavailable:
+        return []
+    payloads: list[str] = []
+    try:
+        with fitz.open(str(path)) as document:
+            for index in range(min(max_pages, len(document))):
+                try:
+                    page = document.load_page(index)
+                    pixmap = page.get_pixmap(dpi=200, alpha=False)
+                    samples = np.frombuffer(pixmap.samples, dtype=np.uint8).reshape(
+                        pixmap.height, pixmap.width, pixmap.n
+                    )
+                    if pixmap.n == 4:
+                        bgr = cv2.cvtColor(samples, cv2.COLOR_RGBA2BGR)
+                    elif pixmap.n == 3:
+                        bgr = cv2.cvtColor(samples, cv2.COLOR_RGB2BGR)
+                    else:
+                        bgr = cv2.cvtColor(samples, cv2.COLOR_GRAY2BGR)
+                except Exception:
+                    continue
+                payloads.extend(_decode_qr_bgr(bgr))
+                if payloads:
+                    break
+    except Exception:
+        return []
+    return payloads
+
+
+def _qr_host(payload: str) -> str:
+    match = re.match(r"^https?://([^/]+)", str(payload or ""), re.IGNORECASE)
+    return match.group(1).lower() if match else ""
+
+
+def _qr_provider_label(payload: str) -> str:
+    host = _qr_host(payload)
+    if "baiwang" in host:
+        return "百望云"
+    if "nuonuo" in host:
+        return "诺诺发票"
+    if "chinatax" in host or "jss" in host:
+        return "税务平台"
+    if "piaotong" in host:
+        return "票通"
+    if "fapiao" in host or "invoice" in host:
+        return "开票平台"
+    return host or TYPE_QR_INVOICE
+
+
+def _is_invoice_issuing_qr(payload: str) -> bool:
+    text = str(payload or "").lower()
+    if not text:
+        return False
+    return any(hint in text for hint in QR_INVOICE_PAYLOAD_HINTS)
+
+
+_QR_AMOUNT_LABELED_PATTERNS = (
+    re.compile(r"(?:合计|总计|实付|应付|消费|金额)[^\d\n]{0,10}([0-9][0-9,]*\.[0-9]{2})"),
+    re.compile(r"[￥¥]\s*([0-9][0-9,]*\.[0-9]{2})"),
+)
+
+
+def _find_qr_amount(text: str) -> Decimal | None:
+    """Pick the receipt total from OCR text without merging adjacent numbers."""
+    source = str(text or "")
+    for pattern in _QR_AMOUNT_LABELED_PATTERNS:
+        match = pattern.search(source)
+        if match:
+            amount = _parse_money(match.group(1))
+            if amount is not None and Decimal("0") < amount < Decimal("1000000"):
+                return amount
+    # Line-level scan avoids "0321" + "158.80" becoming 321158.80 when spaces are
+    # stripped by the compact form; the receipt total is usually the largest
+    # two-decimal figure on the ticket.
+    line_amounts: list[Decimal] = []
+    for line in source.splitlines():
+        for match in re.finditer(r"(?<![\d.])([0-9][0-9,]*\.[0-9]{2})(?![\d])", line):
+            amount = _parse_money(match.group(1))
+            if amount is not None and Decimal("0") < amount < Decimal("1000000"):
+                line_amounts.append(amount)
+    return max(line_amounts) if line_amounts else None
+
+
+def _build_qr_invoice_payload(
+    text: str,
+    qr_payloads: Sequence[str],
+    *,
+    engine: str,
+    document_context: dict[str, Any] | None = None,
+) -> RecognitionResult | None:
+    """Classify an image/PDF whose invoice-issuing QR code is the real content."""
+    invoice_payloads = [payload for payload in qr_payloads if _is_invoice_issuing_qr(payload)]
+    text_hint = any(hint in str(text or "") for hint in QR_INVOICE_TEXT_HINTS)
+    if not invoice_payloads and not text_hint:
+        return None
+    qr_payload = invoice_payloads[0] if invoice_payloads else ""
+    provider = _qr_provider_label(qr_payload) if qr_payload else TYPE_QR_INVOICE
+    host = _qr_host(qr_payload)
+    date_value = _find_date(text)
+    if date_value is None:
+        email_date = str((document_context or {}).get("email_date") or "")
+        date_value = _find_date(email_date) or _parse_int_date(email_date)
+    amount = _find_qr_amount(text)
+    warnings: list[str] = []
+    if not qr_payload:
+        warnings.append("qr_payload_not_decoded")
+    if date_value is None:
+        warnings.append("date_missing")
+    if amount is None:
+        warnings.append("amount_missing")
+    confidence = 0.92 if invoice_payloads else 0.72
+    payload: dict[str, Any] = {
+        "is_invoice": True,
+        "Date": date_value.strftime("%Y-%m-%d") if date_value else "",
+        "Purchaser": "",
+        "Seller": provider,
+        "Amount": format(amount, "f") if amount is not None else "",
+        "InvoiceCode": "",
+        "InvoiceNumber": "",
+        "Type": TYPE_QR_INVOICE,
+        "category": TYPE_QR_INVOICE,
+        "Departure_Date": "",
+        "Departure_City": "",
+        "Destination_City": "",
+        "local_recognition": {
+            "engine": engine,
+            "confidence": confidence,
+            "warnings": warnings,
+            "qr_provider": provider,
+            "qr_host": host,
+            "qr_payload_sha256": (
+                hashlib.sha256(qr_payload.encode("utf-8", errors="replace")).hexdigest()
+                if qr_payload
+                else ""
+            ),
+        },
+    }
+    return RecognitionResult(
+        payload=payload,
+        engine=engine,
+        reason_code=REASON_OK,
+        confidence=confidence,
+        text_length=len(_compact(text)),
+        warnings=warnings,
+    )
+
+
+def _parse_toll_summary(text: str, engine: str) -> RecognitionResult | None:
+    """Recognize 收费公路通行费电子票据汇总单 (toll trip/invoice summary sheet)."""
+    flat = _compact(text)
+    if not any(marker in flat for marker in TOLL_SUMMARY_MARKERS) and not (
+        "通行费" in flat and "汇总单" in flat
+    ):
+        return None
+
+    date_value = None
+    label_index = flat.find("开票申请日期")
+    if label_index >= 0:
+        date_value = _find_date(flat[label_index : label_index + 40])
+    if date_value is None:
+        date_value = _find_date(flat)
+
+    amount = None
+    for pattern in (
+        re.compile(r"交易金额[￥¥]?([0-9][0-9,]*\.[0-9]{2})"),
+        re.compile(r"价税合计(?:\(小写\)|（小写）|小写)?[￥¥]?([0-9][0-9,]*\.[0-9]{2})"),
+    ):
+        match = pattern.search(flat)
+        if match:
+            amount = _parse_money(match.group(1))
+            if amount is not None:
+                break
+
+    plate_match = re.search(
+        r"车牌号码([京津沪渝冀豫云辽黑湘皖鲁新苏浙赣鄂桂甘晋蒙陕吉闽贵粤青藏川宁琼][A-Z][0-9A-Z]{4,6})",
+        flat,
+    )
+    plate = plate_match.group(1) if plate_match else ""
+
+    purchaser = ""
+    text_lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
+    for index, line in enumerate(text_lines):
+        if "购买方名称" not in line:
+            continue
+        tail = line.split("购买方名称", 1)[1].strip(" :：\t")
+        if tail:
+            purchaser = _plausible_company_name(tail)
+        if not purchaser and index + 1 < len(text_lines):
+            purchaser = _plausible_company_name(text_lines[index + 1])
+        if purchaser:
+            break
+    if not purchaser:
+        for match in re.finditer(
+            r"购买方名称\s*[:：]?\s*([^\n]{2,80}?)(?=\s*(?:行程数量|票据数量|纳税人识别号|车牌号码|票据信息|行程信息)|$)",
+            text,
+            re.S,
+        ):
+            purchaser = _plausible_company_name(match.group(1))
+            if purchaser:
+                break
+
+    summary_number = ""
+    match = re.search(r"汇总单号[:：]?([0-9A-Z]{6,})", flat)
+    if match:
+        summary_number = match.group(1)
+
+    seller = "通行费电子票据平台"
+    if plate:
+        seller = f"通行费电子票据平台·{plate}"
+    warnings: list[str] = []
+    if date_value is None:
+        warnings.append("date_missing")
+    if amount is None:
+        warnings.append("amount_missing")
+    confidence = 0.9 if date_value is not None and amount is not None else 0.6
+    payload: dict[str, Any] = {
+        "is_invoice": True,
+        "Date": date_value.strftime("%Y-%m-%d") if date_value else "",
+        "Purchaser": purchaser,
+        "Seller": seller,
+        "Amount": format(amount, "f") if amount is not None else "",
+        "InvoiceCode": "",
+        "InvoiceNumber": summary_number,
+        "Type": TYPE_TOLL_SUMMARY,
+        "category": TYPE_TOLL_SUMMARY,
+        "Departure_Date": "",
+        "Departure_City": "",
+        "Destination_City": "",
+        "local_recognition": {
+            "engine": engine,
+            "confidence": confidence,
+            "warnings": warnings,
+            "plate": plate,
+        },
+    }
+    return RecognitionResult(
+        payload=payload,
+        engine=engine,
+        reason_code=REASON_OK,
+        confidence=confidence,
+        text_length=len(flat),
+        warnings=warnings,
+    )
+
+
 def extract_invoice_payload(text: str, *, engine: str, confidence_cap: float = 0.95) -> RecognitionResult:
     """Map an invoice text blob to the legacy payload shape."""
+    toll_summary = _parse_toll_summary(text, engine)
+    if toll_summary is not None:
+        return toll_summary
     extractor = _FieldExtractor(text)
     invoice_number = extractor.invoice_number()
     invoice_code = extractor.invoice_code()
@@ -828,6 +1180,7 @@ def recognize_document(
     path: str | Path | None,
     *,
     ocr_engine: Any = None,
+    document_context: dict[str, Any] | None = None,
 ) -> RecognitionResult:
     """Recognize one invoice document locally. Never performs network access."""
     started = time.perf_counter()
@@ -858,6 +1211,36 @@ def recognize_document(
                 )
             else:
                 result = extract_invoice_payload(text, engine=engine)
+            qr_engine = (
+                ENGINE_QR_IMAGE if suffix in IMAGE_EXTENSIONS else ENGINE_QR_PDF
+            )
+            qr_payloads: list[str] = []
+            needs_qr = result.payload is None
+            if suffix in IMAGE_EXTENSIONS:
+                qr_payloads = decode_qr_payloads(path)
+                if not needs_qr:
+                    invoice_info = result.payload or {}
+                    text_hint = any(hint in text for hint in QR_INVOICE_TEXT_HINTS)
+                    invoice_qr = any(
+                        _is_invoice_issuing_qr(payload) for payload in qr_payloads
+                    )
+                    # Receipts/photos carry the invoice-issuing QR as their real
+                    # content; do not let a weak text match hide that.
+                    needs_qr = bool(
+                        not str(invoice_info.get("InvoiceNumber") or "").strip()
+                        and (text_hint or invoice_qr)
+                    )
+            elif suffix in PDF_TEXT_EXTENSIONS and needs_qr:
+                qr_payloads = decode_qr_payloads(path)
+            if needs_qr:
+                qr_result = _build_qr_invoice_payload(
+                    text,
+                    qr_payloads,
+                    engine=qr_engine,
+                    document_context=document_context,
+                )
+                if qr_result is not None:
+                    result = qr_result
     except LocalRecognitionUnavailable as exc:
         result = RecognitionResult(
             payload=None,
@@ -906,7 +1289,11 @@ class LocalRecognitionWorker:
         document_context: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         del base64_images, custom_rules  # local recognition needs neither
-        result = recognize_document(pdf_path, ocr_engine=self._ocr_engine)
+        result = recognize_document(
+            pdf_path,
+            ocr_engine=self._ocr_engine,
+            document_context=document_context,
+        )
         self.last_extraction_trace = {
             "engine": result.engine,
             "reason_code": result.reason_code,

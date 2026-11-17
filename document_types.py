@@ -30,6 +30,10 @@ DOCUMENT_TYPES = {
     "住宿确认单": {"exempt_from_purchaser_check": True, "archive_folder": "住宿发票"},
     # 差旅服务费 (GBT Travel Services SCCT 发票)
     "差旅服务费": {"exempt_from_purchaser_check": True, "archive_folder": "差旅服务费"},
+    # 通行费电子票据汇总单（按票据/行程索引的行程汇总，本身不是单张发票）
+    "通行费汇总单": {"exempt_from_purchaser_check": True, "archive_folder": "通行费汇总单"},
+    # 小票/邮件中的扫码开票入口（百望云、诺诺等二维码），用于后续开票
+    "开票二维码": {"exempt_from_purchaser_check": True, "archive_folder": "开票二维码"},
     # 隔离类型
     "非目标公司发票": {"exempt_from_purchaser_check": True, "archive_folder": NON_TARGET_COMPANY_FOLDER},
     "个人非报销发票": {"exempt_from_purchaser_check": True, "archive_folder": PERSONAL_NON_REIMBURSEMENT_FOLDER},
@@ -145,6 +149,10 @@ def normalize_document_type(doc_type: object) -> DocumentType:
     if text in DOCUMENT_TYPES:
         return cast(DocumentType, text)
 
+    if "通行费" in text and "汇总" in text:
+        return "通行费汇总单"
+    if "开票二维码" in text or "扫码开票" in text:
+        return "开票二维码"
     if "火车" in text or "高铁" in text:
         return "火车票"
     if "航班行程" in text:

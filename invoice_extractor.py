@@ -1962,6 +1962,14 @@ class InvoiceExtractor:
         date_value = invoice_info.get("Departure_Date") if invoice_type == "火车票" else invoice_info.get("Date")
         if invoice_type == "非目标公司发票":
             return _has_meaningful_date(date_value) and _has_positive_amount(invoice_info.get("Amount"))
+        if invoice_type == "开票二维码":
+            # The QR entry point itself is the archived evidence; field anchors
+            # come from the surrounding receipt OCR when available.
+            return True
+        if invoice_type == "通行费汇总单":
+            return _has_meaningful_date(date_value) and _has_positive_amount(
+                invoice_info.get("Amount")
+            )
         return (
             _has_meaningful_date(date_value)
             and _has_meaningful_seller(invoice_info.get("Seller"))
