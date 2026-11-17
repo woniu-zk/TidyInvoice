@@ -9,6 +9,8 @@ param(
     [switch]$RunInstaller,
     [switch]$SignArtifacts,
     [switch]$SkipPythonVersionCheck,
+    [ValidateSet("fixed", "evergreen")]
+    [string]$WebView2Mode = "fixed",
     [switch]$SkipWebView2Prune,
     [switch]$WebView2PruneDryRun,
     [switch]$SkipFrontendPrecompile
@@ -749,8 +751,19 @@ function Write-Sha256Manifest {
 }
 
 $manifest = Get-Content -Raw -Encoding UTF8 $ManifestPath | ConvertFrom-Json
+$webView2Config = $manifest.webview2
+$webView2FixedRuntimeSource = ([string]$webView2Config.fixedRuntimeSource).Replace("\", "/")
+if ([string]::IsNullOrWhiteSpace($webView2FixedRuntimeSource)) {
+    $webView2FixedRuntimeSource = "build/runtime/webview2-fixed"
+}
 
 foreach ($requiredPath in $manifest.requiredPaths) {
+    $normalizedRequiredPath = ([string]$requiredPath).Replace("\", "/")
+    if ($WebView2Mode -eq "evergreen" -and $normalizedRequiredPath.StartsWith($webView2FixedRuntimeSource, [System.StringComparison]::OrdinalIgnoreCase)) {
+        # Evergreen builds use the machine-wide WebView2 runtime; the fixed
+        # runtime payload is neither required nor packaged.
+        continue
+    }
     Assert-PathExists -PathValue (Resolve-RepoPath $requiredPath) -Label "Required source"
 }
 
@@ -832,7 +845,8 @@ Write-Host "Installer script: $installerScriptPath"
 if ($chromiumExcludeEntries.Count -gt 0) {
     Write-Host "Chromium packaging exclusions: $($chromiumExcludeEntries -join ', ')"
 }
-$webView2PruneMode = if ($SkipWebView2Prune) { "skipped" } elseif ($WebView2PruneDryRun) { "dry-run" } else { "enabled" }
+$webView2PruneMode = if ($WebView2Mode -eq "evergreen") { "not-applicable (evergreen)" } elseif ($SkipWebView2Prune) { "skipped" } elseif ($WebView2PruneDryRun) { "dry-run" } else { "enabled" }
+Write-Host "WebView2 delivery mode: $WebView2Mode"
 Write-Host "WebView2 runtime prune step: $webView2PruneMode"
 if ($SkipFrontendPrecompile) {
     Write-Host "Frontend precompile step: skipped"
@@ -868,7 +882,10 @@ if ($RunPyInstaller) {
     Remove-PathIfExists -PathValue $installerOutputDir
     Remove-PathIfExists -PathValue $sha256OutputPath
 
-    if ($SkipWebView2Prune) {
+    if ($WebView2Mode -eq "evergreen") {
+        Write-Host "WebView2 delivery: evergreen (system runtime + optional bootstrapper; fixed runtime not packaged)."
+    }
+    elseif ($SkipWebView2Prune) {
         Write-Warning "Skipping WebView2 runtime pruning (-SkipWebView2Prune)."
     }
     else {
@@ -883,6 +900,8 @@ if ($RunPyInstaller) {
     }
 
     $env:INVOICEFLOW_RUNTIME_SOURCE = $chromiumStageDir
+    $previousWebView2Mode = $env:INVOICEFLOW_WEBVIEW2_MODE
+    $env:INVOICEFLOW_WEBVIEW2_MODE = $WebView2Mode
     try {
         $arguments = @(
             "-m",
@@ -903,6 +922,12 @@ if ($RunPyInstaller) {
     }
     finally {
         Remove-Item Env:INVOICEFLOW_RUNTIME_SOURCE -ErrorAction SilentlyContinue
+        if ($null -ne $previousWebView2Mode) {
+            $env:INVOICEFLOW_WEBVIEW2_MODE = $previousWebView2Mode
+        }
+        else {
+            Remove-Item Env:INVOICEFLOW_WEBVIEW2_MODE -ErrorAction SilentlyContinue
+        }
     }
 
     Assert-DistributionTree -PathValue $distDir -AppName $manifest.appName

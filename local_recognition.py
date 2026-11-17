@@ -24,14 +24,13 @@ import time
 import unicodedata
 import zipfile
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Callable, Iterable, Sequence
+from typing import Any, Sequence
 from xml.etree import ElementTree as ET
 
 from document_types import normalize_document_type
-from invoice_domain import parse_amount
 
 logger = logging.getLogger(__name__)
 

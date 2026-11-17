@@ -13,8 +13,25 @@ env:
   PYTHONUTF8: '1'
 
 jobs:
+  lint:
+    name: Ruff lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install ruff
+        # Keep this pin in sync with requirements.test.txt;
+        # tests/test_engineering_contract.py enforces the match.
+        run: python -m pip install ruff==0.17.5
+      - name: Run ruff
+        run: ruff check .
+
   test:
     name: Python 3.12 / ${{ matrix.os }}
+    needs: lint
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     strategy:

@@ -2,8 +2,6 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
 from app_api import InvoiceAppAPI
 from glm_runtime import (
     DEEPSEEK_CHAT_ENDPOINT,

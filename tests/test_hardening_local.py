@@ -19,7 +19,6 @@ from __future__ import annotations
 import copy
 import functools
 import io
-import json
 import subprocess
 import sys
 import time
@@ -27,8 +26,6 @@ import tracemalloc
 import zipfile
 from email.message import EmailMessage
 from pathlib import Path
-
-import pytest
 
 import email_fetcher
 import run_state_store

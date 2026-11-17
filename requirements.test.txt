@@ -2,3 +2,6 @@
 pytest==9.1.1
 tzdata==2026.4
 cryptography==46.0.5
+# Keep this pin in sync with .github/workflows/core-tests.yml (lint job);
+# tests/test_engineering_contract.py enforces the match.
+ruff==0.17.5

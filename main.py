@@ -20,6 +20,15 @@ WINDOW_TITLE = "InvoiceFlowAI"
 WEBVIEW2_RUNTIME_RELATIVE_DIR = Path("runtime") / "webview2-fixed"
 STARTUP_DIAGNOSTIC_CONTEXT = {}
 PACKAGED_UNBLOCK_SUFFIXES = {".dll", ".pyd", ".exe", ".json"}
+# WebView2 can be delivered two ways:
+#   fixed     - ship the pinned fixed-version runtime inside the app (offline)
+#   evergreen - use the machine-wide WebView2 runtime (Win11 has it) and fall
+#               back to a bundled bootstrapper when it is missing (small installer)
+WEBVIEW2_MODE_ENV = "INVOICEFLOW_WEBVIEW2_MODE"
+WEBVIEW2_MODES = ("fixed", "evergreen")
+WEBVIEW2_BOOTSTRAPPER_RELATIVE = Path("runtime") / "MicrosoftEdgeWebView2Setup.exe"
+WEBVIEW2_CLIENT_GUID = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+WEBVIEW2_DOWNLOAD_URL = "https://developer.microsoft.com/microsoft-edge/webview2/"
 SINGLE_INSTANCE_MUTEX_NAME = "Local\\InvoiceFlowAI.SingleInstance"
 SINGLE_INSTANCE_LOCK_FILE_NAME = "instance.lock"
 ERROR_ALREADY_EXISTS = 183
@@ -59,6 +68,16 @@ def _parse_args(argv=None):
         dest="url_recovery_worker_path",
         default="",
         help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--webview2-mode",
+        dest="webview2_mode",
+        choices=list(WEBVIEW2_MODES),
+        default="",
+        help=(
+            "Override WebView2 delivery: 'fixed' uses the bundled runtime, "
+            "'evergreen' uses the system runtime. Auto-detected when omitted."
+        ),
     )
     argv = sys.argv[1:] if argv is None else list(argv)
     args, unknown_args = parser.parse_known_args(argv)
@@ -334,14 +353,143 @@ def _validate_webview2_runtime_dir(runtime_dir):
         )
 
 
-def _configure_webview_runtime(webview_module, current_dir):
-    if os.name != "nt":
-        return None
+def _webview2_runtime_dir_complete(runtime_dir):
+    try:
+        _validate_webview2_runtime_dir(runtime_dir)
+    except (FileNotFoundError, OSError):
+        return False
+    return True
 
+
+def _resolve_webview2_mode(current_dir, requested_mode=""):
+    """Resolve fixed vs evergreen: explicit arg/env wins, otherwise auto-detect."""
+    requested = str(
+        requested_mode or os.environ.get(WEBVIEW2_MODE_ENV) or ""
+    ).strip().lower()
+    if requested:
+        if requested not in WEBVIEW2_MODES:
+            raise ValueError(
+                f"Unsupported WebView2 mode: {requested}. "
+                f"Expected one of: {', '.join(WEBVIEW2_MODES)}."
+            )
+        return requested
     runtime_dir = _resolve_webview2_runtime_dir(current_dir)
-    _validate_webview2_runtime_dir(runtime_dir)
-    webview_module.settings["WEBVIEW2_RUNTIME_PATH"] = str(runtime_dir)
-    return runtime_dir
+    return "fixed" if _webview2_runtime_dir_complete(runtime_dir) else "evergreen"
+
+
+def _read_system_webview2_version():
+    """Read the installed machine-wide WebView2 runtime version from the registry."""
+    if os.name != "nt":
+        return ""
+    try:
+        import winreg
+    except ImportError:  # pragma: no cover - Windows only stdlib
+        return ""
+    locations = (
+        (
+            winreg.HKEY_LOCAL_MACHINE,
+            rf"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{WEBVIEW2_CLIENT_GUID}",
+        ),
+        (
+            winreg.HKEY_LOCAL_MACHINE,
+            rf"SOFTWARE\Microsoft\EdgeUpdate\Clients\{WEBVIEW2_CLIENT_GUID}",
+        ),
+        (
+            winreg.HKEY_CURRENT_USER,
+            rf"SOFTWARE\Microsoft\EdgeUpdate\Clients\{WEBVIEW2_CLIENT_GUID}",
+        ),
+    )
+    for root, path in locations:
+        try:
+            with winreg.OpenKey(root, path) as key:
+                version, _ = winreg.QueryValueEx(key, "pv")
+        except OSError:
+            continue
+        version_text = str(version or "").strip()
+        if version_text:
+            return version_text
+    return ""
+
+
+def _find_webview2_bootstrapper(current_dir):
+    app_root = _resolve_packaged_app_root(current_dir)
+    candidates = [
+        app_root / WEBVIEW2_BOOTSTRAPPER_RELATIVE,
+        current_dir / WEBVIEW2_BOOTSTRAPPER_RELATIVE,
+        current_dir / "build" / WEBVIEW2_BOOTSTRAPPER_RELATIVE,
+    ]
+    for candidate in candidates:
+        try:
+            if candidate.is_file():
+                return candidate.resolve()
+        except OSError:
+            continue
+    return None
+
+
+def _install_webview2_bootstrapper(bootstrapper_path):
+    import subprocess
+
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = subprocess.SW_HIDE
+    completed = subprocess.run(
+        [str(bootstrapper_path), "/silent", "/install"],
+        capture_output=True,
+        text=True,
+        timeout=300,
+        startupinfo=startupinfo,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+        check=False,
+    )
+    return completed.returncode
+
+
+def _ensure_system_webview2_runtime(current_dir):
+    version = _read_system_webview2_version()
+    if version:
+        return {"mode": "evergreen", "source": "system", "version": version}
+
+    bootstrapper = _find_webview2_bootstrapper(current_dir)
+    if bootstrapper is not None:
+        returncode = _install_webview2_bootstrapper(bootstrapper)
+        version = _read_system_webview2_version()
+        if version:
+            return {
+                "mode": "evergreen",
+                "source": "bootstrapper",
+                "version": version,
+                "bootstrapper_exit_code": returncode,
+            }
+        raise RuntimeError(
+            "未能安装 Microsoft Edge WebView2 Runtime（安装程序返回码 "
+            f"{returncode}）。请从 {WEBVIEW2_DOWNLOAD_URL} 手动安装后重试。\n\n"
+            "Microsoft Edge WebView2 Runtime could not be installed. "
+            f"Install it manually from {WEBVIEW2_DOWNLOAD_URL} and try again."
+        )
+
+    raise RuntimeError(
+        "未找到 Microsoft Edge WebView2 Runtime，当前构建使用系统运行时模式。"
+        f"请从 {WEBVIEW2_DOWNLOAD_URL} 安装后重试。\n\n"
+        "Microsoft Edge WebView2 Runtime was not found. This build uses the "
+        "system runtime; install it and try again."
+    )
+
+
+def _configure_webview_runtime(webview_module, current_dir, requested_mode=""):
+    """Configure WebView2 delivery and return a diagnostics-friendly summary."""
+    if os.name != "nt":
+        return {"mode": "system", "runtime_dir": "", "version": ""}
+
+    mode = _resolve_webview2_mode(current_dir, requested_mode)
+    if mode == "fixed":
+        runtime_dir = _resolve_webview2_runtime_dir(current_dir)
+        _validate_webview2_runtime_dir(runtime_dir)
+        webview_module.settings["WEBVIEW2_RUNTIME_PATH"] = str(runtime_dir)
+        return {"mode": "fixed", "runtime_dir": str(runtime_dir), "version": ""}
+
+    runtime_info = _ensure_system_webview2_runtime(current_dir)
+    return {"mode": "evergreen", "runtime_dir": "", **runtime_info}
 
 
 def _resolve_working_area(screen):
@@ -487,10 +635,14 @@ def main(argv=None):
 
     webview.settings["DRAG_REGION_SELECTOR"] = ".window-drag-region"
 
-    runtime_dir = _configure_webview_runtime(webview, current_dir)
+    runtime_info = _configure_webview_runtime(
+        webview, current_dir, requested_mode=str(getattr(args, "webview2_mode", "") or "")
+    )
     _write_startup_diagnostic(
         "preflight_ok",
-        runtime_dir=str(runtime_dir) if runtime_dir else "",
+        runtime_dir=runtime_info.get("runtime_dir", ""),
+        webview2_mode=runtime_info.get("mode", ""),
+        webview2_version=runtime_info.get("version", ""),
         packaged=bool(getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS")),
     )
     html_path = _ensure_expected_frontend_assets(current_dir)
@@ -516,7 +668,8 @@ def main(argv=None):
     def _record_renderer():
         _write_startup_diagnostic(
             "ui_started",
-            runtime_dir=str(runtime_dir) if runtime_dir else "",
+            runtime_dir=runtime_info.get("runtime_dir", ""),
+            webview2_mode=runtime_info.get("mode", ""),
             renderer=str(getattr(webview, "renderer", "") or ""),
         )
 

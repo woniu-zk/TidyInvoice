@@ -23,6 +23,16 @@
     "packageDir": "runtime/ms-playwright",
     "downloadAllowed": false
   },
+  "webview2": {
+    "defaultMode": "fixed",
+    "modes": [
+      "fixed",
+      "evergreen"
+    ],
+    "fixedRuntimeSource": "build/runtime/webview2-fixed",
+    "bootstrapperSource": "build/runtime/MicrosoftEdgeWebView2Setup.exe",
+    "bootstrapperTarget": "runtime"
+  },
   "portable": {
     "outputFile": "dist/InvoiceFlowAI-portable-unsigned.zip",
     "copyRootName": "InvoiceFlowAI"
@@ -96,7 +106,12 @@
     {
       "source": "build/runtime/webview2-fixed",
       "target": "runtime/webview2-fixed",
-      "optional": false
+      "optional": true
+    },
+    {
+      "source": "build/runtime/MicrosoftEdgeWebView2Setup.exe",
+      "target": "runtime",
+      "optional": true
     },
     {
       "source": "build/windows/build-identity.generated.json",

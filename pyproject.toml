@@ -1,0 +1,58 @@
+# Tool configuration for the InvoiceFlowAI Windows desktop application.
+#
+# This repository is a source tree (not an installable Python distribution), so
+# there is no [build-system]/[project] table on purpose. The tables below are
+# the canonical entry points for linting, tests, and the opt-in type checker.
+
+[tool.ruff]
+# Match the interpreter/runtime used by the release build (Python 3.12).
+target-version = "py312"
+# Keep the line-length budget explicit even though E501 is not enabled yet: it
+# is the agreed target for future style cleanup and for formatter adoption.
+line-length = 100
+# Exclude generated / vendored / runtime / release-output trees. Most of these
+# are also covered by .gitignore, but CI checkouts must not depend on git state
+# and `ruff check .` is expected to be deterministic on any machine.
+exclude = [
+    ".git",
+    ".venv",
+    ".superpowers",
+    "build",
+    "dist",
+    "tmp",
+    "staging",
+    "extracted_invoices",
+    "release-assets",
+    "release-bundle",
+    "design",
+    "plugins/dsh-invoice-downloader/node_modules",
+    "plugins/dsh-invoice-downloader/lib",
+    "plugins/dsh-invoice-downloader/runtime",
+    "tests/fixtures",
+]
+
+[tool.ruff.lint]
+# Start from the high-signal, low-noise rule set: import ordering/duplication
+# (E4), statement-level style (E7), syntax/runtime errors (E9) and pyflakes (F).
+# Broader pycodestyle rules (E501 line length), naming (N), bugbear (B), etc.
+# are intentionally out of scope for this baseline to avoid rewriting business
+# code just to satisfy the linter.
+select = ["E4", "E7", "E9", "F"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Registered custom markers: avoids PytestUnknownMarkWarning and documents which
+# tests are safe to run on a hosted CI runner vs. only on the reference machine.
+markers = [
+    "env_bound: test asserts a machine/environment-bound baseline; hosted CI runners deselect it",
+    "slow: test is noticeably slower than the suite median",
+    "network: test performs real network I/O and must not be part of offline CI",
+]
+
+[tool.mypy]
+# Opt-in entry point only: mypy is deliberately NOT wired into CI yet (the
+# codebase is not fully annotated). Run it locally with `mypy <paths>`.
+python_version = "3.12"
+ignore_missing_imports = true
+check_untyped_defs = false
+warn_unused_ignores = false

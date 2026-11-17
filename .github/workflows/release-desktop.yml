@@ -8,11 +8,20 @@ on:
         required: true
         default: v2026.07.29.1
         type: string
+      webview2_mode:
+        description: Windows WebView2 delivery (fixed = bundled offline runtime, evergreen = system runtime + bootstrapper)
+        required: false
+        default: fixed
+        type: choice
+        options:
+          - fixed
+          - evergreen
 
 permissions: {}
 
 env:
   RELEASE_TAG: ${{ inputs.tag }}
+  WEBVIEW2_MODE: ${{ inputs.webview2_mode || 'fixed' }}
 
 jobs:
   test:
@@ -159,7 +168,7 @@ jobs:
 
       - name: Build and qualify unsigned Windows release assets
         shell: pwsh
-        run: .\.github\scripts\qualify-windows-release.ps1 -Tag $env:RELEASE_TAG
+        run: .\.github\scripts\qualify-windows-release.ps1 -Tag $env:RELEASE_TAG -WebView2Mode $env:WEBVIEW2_MODE
 
       - name: Upload immutable Windows qualification output
         uses: actions/upload-artifact@v4

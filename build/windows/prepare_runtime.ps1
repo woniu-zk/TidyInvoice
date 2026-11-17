@@ -1,5 +1,7 @@
 param(
     [string]$PythonExe = ".\\.venv\\Scripts\\python.exe",
+    [ValidateSet("fixed", "evergreen", "both")]
+    [string]$WebView2Mode = "fixed",
     [switch]$SkipPlaywright,
     [switch]$SkipWebView2,
     [switch]$SkipWebView2Prune,
@@ -171,17 +173,53 @@ function Invoke-WebView2Prune {
     & $pruneScriptPath @pruneArguments
 }
 
+function Install-WebView2Bootstrapper {
+    # Evergreen builds rely on the machine-wide WebView2 runtime. Ship the small
+    # Microsoft bootstrapper so a machine without WebView2 can install it on first
+    # start instead of downloading the full fixed runtime into the installer.
+    $relativePath = [string]$RuntimeManifest.webview2.bootstrapper.path
+    if ([string]::IsNullOrWhiteSpace($relativePath)) {
+        $relativePath = "build/runtime/MicrosoftEdgeWebView2Setup.exe"
+    }
+    $targetPath = Resolve-RepoPath $relativePath
+    if (Test-Path $targetPath -PathType Leaf) {
+        Write-Host "WebView2 bootstrapper already present: $targetPath"
+        return
+    }
+
+    $downloadUrl = [string]$RuntimeManifest.webview2.bootstrapper.download_url
+    if ([string]::IsNullOrWhiteSpace($downloadUrl)) {
+        Write-Warning "WebView2 bootstrapper download URL is not configured; evergreen builds will rely on the system runtime."
+        return
+    }
+
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $targetPath) | Out-Null
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $targetPath -UseBasicParsing -TimeoutSec 120
+        Write-Host "Downloaded WebView2 bootstrapper: $targetPath"
+    }
+    catch {
+        Remove-Item -LiteralPath $targetPath -Force -ErrorAction SilentlyContinue
+        Write-Warning "Could not download the WebView2 bootstrapper ($downloadUrl). Evergreen builds will rely on the system runtime. Error: $($_.Exception.Message)"
+    }
+}
+
 if (-not $SkipPlaywright) {
     Install-PlaywrightRuntime -PythonExecutable $resolvedPythonExe
 }
 
-if (-not $SkipWebView2) {
+if (-not $SkipWebView2 -and ($WebView2Mode -eq "fixed" -or $WebView2Mode -eq "both")) {
     Install-WebView2Runtime
 }
 
-if (-not $SkipWebView2 -and -not $SkipWebView2Prune) {
+if (-not $SkipWebView2 -and ($WebView2Mode -eq "evergreen" -or $WebView2Mode -eq "both")) {
+    Install-WebView2Bootstrapper
+}
+
+if (-not $SkipWebView2 -and $WebView2Mode -ne "evergreen" -and -not $SkipWebView2Prune) {
     Invoke-WebView2Prune
 }
 
-Write-Host "Runtime hydration completed."
+Write-Host "Runtime hydration completed (WebView2 mode: $WebView2Mode)."
 

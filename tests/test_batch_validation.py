@@ -821,6 +821,7 @@ def test_caller_cannot_replace_pinned_baseline_with_fake_5000_seconds(
     assert exc_info.value.code == "invalid_baseline_contract"
 
 
+@pytest.mark.env_bound
 def test_pinned_baseline_contract_uses_current_stable_hardware_fingerprint():
     import batch_validation as module
 

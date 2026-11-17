@@ -1,6 +1,8 @@
 param(
     [Parameter(Mandatory = $true)]
-    [string]$Tag
+    [string]$Tag,
+    [ValidateSet("fixed", "evergreen")]
+    [string]$WebView2Mode = "fixed"
 )
 
 Set-StrictMode -Version Latest
@@ -98,12 +100,13 @@ try {
     }
     python -m pip install --upgrade pip
     python -m pip install -r requirements.release.txt pyinstaller
-    & .\build\windows\prepare_runtime.ps1 -PythonExe $PythonExe
+    & .\build\windows\prepare_runtime.ps1 -PythonExe $PythonExe -WebView2Mode $WebView2Mode
     & .\build\windows\build_release.ps1 `
         -Version $Version `
         -PythonExe $PythonExe `
         -BuildPythonExe $PythonExe `
         -InstallerCompilerPath $CompilerPath `
+        -WebView2Mode $WebView2Mode `
         -RunPyInstaller `
         -RunPortableZip `
         -RunInstaller

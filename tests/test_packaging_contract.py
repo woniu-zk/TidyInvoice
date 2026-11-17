@@ -489,7 +489,6 @@ def test_webview2_pruner_dry_run_is_non_destructive_and_idempotent(tmp_path):
 
 
 def test_webview2_pruner_refuses_partial_runtime(tmp_path):
-    policy = _load_prune_policy()
     runtime_dir = tmp_path / "partial-webview2"
     runtime_dir.mkdir()
     (runtime_dir / "Locales").mkdir()

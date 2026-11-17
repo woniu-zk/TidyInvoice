@@ -18,6 +18,21 @@
     "download_url": "https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/3e67708f-9219-4931-b406-b9ec9f32c070/Microsoft.WebView2.FixedVersionRuntime.146.0.3856.84.x64.cab",
     "archive_sha256": "39CEEF46975F365C8BA3D41D41B9D4A3A85256981AA43AF86424969A961C2248",
     "prune_policy": "build/windows/webview2-prune-policy.json",
+    "modes": {
+      "default": "fixed",
+      "supported": [
+        "fixed",
+        "evergreen"
+      ]
+    },
+    "bootstrapper": {
+      "path": "build/runtime/MicrosoftEdgeWebView2Setup.exe",
+      "download_url": "https://go.microsoft.com/fwlink/p/?LinkId=2124703",
+      "install_args": [
+        "/silent",
+        "/install"
+      ]
+    },
     "required_files": [
       "msedgewebview2.exe",
       "msedge.dll",
@@ -26,4 +41,3 @@
     ]
   }
 }
-

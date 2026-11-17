@@ -28,7 +28,26 @@ def _require_module(module_name):
 
 datas = []
 runtime_source_override = os.environ.get("INVOICEFLOW_RUNTIME_SOURCE", "").strip()
+webview2_config = MANIFEST.get("webview2") or {}
+webview2_mode = (
+    os.environ.get("INVOICEFLOW_WEBVIEW2_MODE")
+    or str(webview2_config.get("defaultMode") or "fixed")
+).strip().lower()
+if webview2_mode not in (webview2_config.get("modes") or ["fixed"]):
+    raise SystemExit(
+        f"Unsupported WebView2 mode for packaging: {webview2_mode}. "
+        f"Expected one of: {', '.join(webview2_config.get('modes') or ['fixed'])}."
+    )
+fixed_runtime_source = str(webview2_config.get("fixedRuntimeSource") or "").strip()
+bootstrapper_source = str(webview2_config.get("bootstrapperSource") or "").strip()
 for item in MANIFEST["datas"]:
+    item_source = str(item["source"])
+    if item_source == fixed_runtime_source and webview2_mode == "evergreen":
+        # Evergreen builds use the machine-wide runtime; never ship the fixed runtime.
+        continue
+    if item_source == bootstrapper_source and webview2_mode != "evergreen":
+        # Fixed-runtime builds are self-contained; the bootstrapper is not needed.
+        continue
     source_path = ROOT / item["source"]
     if runtime_source_override and item["source"] == MANIFEST["chromium"]["stagingDir"]:
         source_path = Path(runtime_source_override)
