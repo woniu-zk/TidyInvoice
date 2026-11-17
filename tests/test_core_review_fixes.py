@@ -486,6 +486,8 @@ def test_business_records_restore_from_output_scoped_state(tmp_path, monkeypatch
     state = tmp_path / "state"
     monkeypatch.setattr(api, "_output_state_dir", lambda _path: str(state))
     records = {"_26000000000000000001::invoice": {"file": "invoice.pdf", "artifact_role": "invoice"}}
+    # The ledger self-heal only keeps records whose archived file still exists.
+    (output / "invoice.pdf").write_bytes(b"%PDF-1.4\nsynthetic")
     api._commit_output_state(str(state), {"history-key"}, records)
     extractor = InvoiceExtractor(api_key="", output_dir=str(output))
     session = api._create_processing_pipeline_session([], "", str(output), _extractor=extractor)
@@ -504,6 +506,8 @@ def test_completed_old_state_survives_first_failed_upgraded_run(tmp_path, monkey
     state.mkdir()
     monkeypatch.setattr(api, "_output_state_dir", lambda _path: str(state))
     records = {"old-invoice": {"file": "invoice.pdf"}}
+    # The ledger self-heal only keeps records whose archived file still exists.
+    (output / "invoice.pdf").write_bytes(b"%PDF-1.4\nsynthetic")
     (state / "processed_records.json").write_text(json.dumps(records), encoding="utf-8")
     (state / ".antigravity_history.json").write_text(json.dumps(["old-history"]), encoding="utf-8")
     (state / "run_state.json").write_text(json.dumps({"status": "completed"}), encoding="utf-8")
@@ -616,6 +620,9 @@ def test_business_records_merge_legacy_and_scoped_history_without_overwriting(tm
     state = tmp_path / "state"
     monkeypatch.setattr(api, "_output_state_dir", lambda _path: str(state))
     legacy = {"legacy-key": {"file": "old.pdf"}, "shared-key": {"file": "old-name.pdf"}}
+    # The ledger self-heal only keeps records whose archived file still exists.
+    for name in ("old.pdf", "new-name.pdf", "new.pdf"):
+        (output / name).write_bytes(b"%PDF-1.4\nsynthetic")
     (output / "processed_records.json").write_text(json.dumps(legacy), encoding="utf-8")
     api._commit_output_state(str(state), {"history-key"}, {"shared-key": {"file": "new-name.pdf"}, "state-key": {"file": "new.pdf"}})
     extractor = InvoiceExtractor(api_key="", output_dir=str(output))
@@ -645,6 +652,8 @@ def test_failed_state_commit_keeps_last_complete_business_snapshot(tmp_path, mon
     output.mkdir()
     state = tmp_path / "state"
     monkeypatch.setattr(api, "_output_state_dir", lambda _path: str(state))
+    # The ledger self-heal only keeps records whose archived file still exists.
+    (output / "old.pdf").write_bytes(b"%PDF-1.4\nsynthetic")
     api._commit_output_state(str(state), {"old-history"}, {"old-key": {"file": "old.pdf"}})
     real_write = api._write_json_file
 

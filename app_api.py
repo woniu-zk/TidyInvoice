@@ -2306,6 +2306,105 @@ class InvoiceAppAPI:
             raise ValueError("Scoped business records must be an object")
         return {**legacy, **scoped}
 
+    def _archived_filename_index(self, save_path):
+        """Collect the file names currently present under the user-visible archive root."""
+        names = set()
+        root = os.path.abspath(str(save_path or ""))
+        if not os.path.isdir(root):
+            return names
+        try:
+            for dirpath, dirnames, filenames in os.walk(root):
+                relative = os.path.relpath(dirpath, root)
+                depth = 0 if relative == "." else relative.count(os.sep) + 1
+                # Audit-retention evidence is not an archived invoice; never use it
+                # to prove that a business record's file still exists.
+                dirnames[:] = [name for name in dirnames if name != "_audit_retention"]
+                if depth >= 4:
+                    dirnames[:] = []
+                for name in filenames:
+                    names.add(name)
+        except OSError:
+            return names
+        return names
+
+    def _repair_stale_archive_ledger(
+        self, save_path, output_state_dir, business_records, history_keys
+    ):
+        """Rebuild the dedupe ledger when the files it references have disappeared.
+
+        Business records only store the archived file *name*; the opaque history
+        ids that suppress re-processing cannot be mapped back to a single record.
+        When any recorded file is missing we therefore drop the stale records and
+        reset the history set, so a normal scan can fetch and archive those
+        invoices again. Records whose files still exist stay in the ledger, and
+        archive-level dedupe keeps protecting them.
+        """
+        records = dict(business_records or {})
+        if not records:
+            return records, history_keys
+        existing_names = self._archived_filename_index(save_path)
+        stale_keys = []
+        for key, record in records.items():
+            if not isinstance(record, dict):
+                continue
+            filename = os.path.basename(str(record.get("file") or "").strip())
+            if filename and filename not in existing_names:
+                stale_keys.append(key)
+        if not stale_keys:
+            return records, history_keys
+
+        backup_path = os.path.join(
+            output_state_dir, f"ledger-repair-{time.strftime('%Y%m%d_%H%M%S')}.json"
+        )
+        try:
+            self._write_json_file(
+                backup_path,
+                {
+                    "reason": "ARCHIVED_FILES_MISSING",
+                    "stale_records": {key: records[key] for key in stale_keys},
+                    "history": sorted(str(item) for item in (history_keys or ())),
+                },
+            )
+        except Exception:
+            backup_path = ""
+
+        for key in stale_keys:
+            records.pop(key, None)
+        repaired_history = set()
+        try:
+            # Persist the repair immediately so an interrupted run cannot leave
+            # the stale ledger in place for the next attempt.
+            self._write_json_file(self._history_file_path(output_state_dir), [])
+            self._write_json_file(
+                os.path.join(output_state_dir, "processed_records.json"), records
+            )
+            self._write_json_file(
+                self._committed_state_file_path(output_state_dir),
+                {"history": [], "business_records": records},
+            )
+        except Exception:
+            pass
+
+        self._append_log(
+            "维护",
+            (
+                f"检测到 {len(stale_keys)} 条历史归档文件缺失，已重建去重台账；"
+                "本次扫描会重新处理这些发票。"
+            ),
+            "text-amber-500",
+        )
+        emit = getattr(self, "_safe_emit_stage_event", None)
+        if callable(emit):
+            try:
+                emit(
+                    "ledger_repair",
+                    "repaired",
+                    {"stale_records": len(stale_keys), "backup_path": backup_path},
+                )
+            except Exception:
+                pass
+        return records, repaired_history
+
     def _commit_output_state(self, output_state_dir, history_keys, business_records):
         committed_history = sorted({str(item).strip() for item in (history_keys or set()) if str(item).strip()})
         self._write_json_file(self._history_file_path(output_state_dir), committed_history)
@@ -2927,6 +3026,9 @@ class InvoiceAppAPI:
         self._migrate_completed_output_state(output_state_dir)
         business_records = self._load_business_records(save_path, output_state_dir, _extractor)
         working_history = set(self._load_committed_history(output_state_dir))
+        business_records, working_history = self._repair_stale_archive_ledger(
+            save_path, output_state_dir, business_records, working_history
+        )
         sidecar = {}
         sidecar_lock = threading.Lock()
         self._pipeline_sidecar = sidecar
