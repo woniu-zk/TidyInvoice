@@ -865,12 +865,14 @@ def test_real_shaped_same_machine_candidate_passes_pinned_hardware_gate(
 
 
 def test_cli_remains_path_only_and_credential_free(tmp_path):
+    from run_evidence import RevisionUnavailable, default_revision
+
     root = _run_root(tmp_path)
     manifest_path = _write_json(tmp_path / "manifest.json", _manifest())
-    current_revision = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=Path(__file__).resolve().parents[1],
-        capture_output=True, text=True, check=True,
-    ).stdout.strip()
+    try:
+        current_revision = default_revision()
+    except RevisionUnavailable:
+        pytest.skip("no git checkout or build identity available for a pinned revision")
     config_path = root / "monitoring" / "run_config.json"
     config = json.loads(config_path.read_text(encoding="utf-8"))
     config["candidate_revision"] = current_revision

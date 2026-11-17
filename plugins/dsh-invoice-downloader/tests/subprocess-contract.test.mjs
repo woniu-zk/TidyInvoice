@@ -69,7 +69,6 @@ test('engine subprocess always includes the DSH grace period', async () => {
     dateTo: '2026-01-01',
     company: 'Fixture',
     savePath: 'C:/fixture-output',
-    ocrProvider: 'local',
     imapFetchTimeoutSeconds: 15,
   })
 
@@ -203,25 +202,28 @@ test('settings persist a selected output directory without persisting the creden
   const saved = await handler('saveSettings', {
     email: 'fixture@example.test',
     authCode: 'fixture-only',
+    glmApiKey: 'legacy-model-key',
     dateFrom: '2026-01-01',
     dateTo: '2026-01-01',
     company: 'Fixture',
     savePath: output,
-    ocrProvider: 'local',
   }, new AbortController().signal)
 
   assert.deepEqual(saved, {
     ok: true,
-    value: { saved: true, hasAuthCode: true, hasGlmApiKey: true },
+    value: { saved: true, hasAuthCode: true },
   })
   assert.equal(stored.length, 1)
+  assert.equal(stored[0].ref, 'DSH_INVOICE_IMAP_AUTH_CODE')
+  assert.equal(stored[0].value, 'fixture-only')
   const settingsText = readFileSync(join(root, 'profile', 'settings.json'), 'utf8')
   assert.match(settingsText, /fixture@example\.test/)
-  assert.doesNotMatch(settingsText, /fixture-only/)
+  assert.doesNotMatch(settingsText, /fixture-only|legacy-model-key/)
   const reloaded = await handler('getSettings', {}, new AbortController().signal)
   assert.equal(reloaded.ok, true)
   assert.equal(reloaded.value.savePath, realpathSync(output))
   assert.equal(reloaded.value.hasAuthCode, true)
+  assert.equal(reloaded.value.hasGlmApiKey, undefined)
   assert.equal(reloaded.value.authCode, undefined)
 })
 

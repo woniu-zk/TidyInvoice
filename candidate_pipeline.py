@@ -319,6 +319,7 @@ class CandidatePreflight:
         sidecar: dict[str, dict[str, Any]],
         sidecar_lock: Any,
         converter_factory: Any,
+        prepare_remote_images: bool = True,
     ) -> None:
         self.api = api
         self.extractor = extractor
@@ -326,6 +327,10 @@ class CandidatePreflight:
         self.sidecar = sidecar
         self.sidecar_lock = sidecar_lock
         self.converter_factory = converter_factory
+        # The local recognition worker reads the source file directly and never
+        # needs rendered page images, so production runs skip the expensive
+        # PDF -> base64 render entirely.
+        self.prepare_remote_images = bool(prepare_remote_images)
         self.seen_identities: set[str] = set()
         self.seen_history_keys: set[str] = set()
         self.seen_provider_groups: set[str] = set()
@@ -504,16 +509,18 @@ class CandidatePreflight:
             return self.terminal(
                 effective_candidate, probe.reason_code or "LOCAL_PREFLIGHT_FAILED"
             )
-        try:
-            base64_img = self.extractor.pdf_to_base64_image(pdf_path)
-        except Exception:
-            if candidate.identity.source_kind == "url":
-                return self._url_failure(
-                    effective_candidate, legacy, "URL_PREFLIGHT_FAILED"
-                )
-            raise
-        if not base64_img:
-            return self.terminal(effective_candidate, "PDF_TO_IMAGE_FAILED")
+        base64_img = None
+        if self.prepare_remote_images:
+            try:
+                base64_img = self.extractor.pdf_to_base64_image(pdf_path)
+            except Exception:
+                if candidate.identity.source_kind == "url":
+                    return self._url_failure(
+                        effective_candidate, legacy, "URL_PREFLIGHT_FAILED"
+                    )
+                raise
+            if not base64_img:
+                return self.terminal(effective_candidate, "PDF_TO_IMAGE_FAILED")
         with self.sidecar_lock:
             self.sidecar[canonical_id] = {
                 "pdf_path": pdf_path,

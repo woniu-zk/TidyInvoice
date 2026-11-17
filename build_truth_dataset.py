@@ -163,12 +163,10 @@ def _merge_provider_expected_fields(left, right):
     return merged
 
 
-try:
-    from zoneinfo import ZoneInfo
-
-    LOCAL_TZ = ZoneInfo("Asia/Shanghai")
-except Exception:
-    LOCAL_TZ = dt.timezone(dt.timedelta(hours=8))
+# Fixed UTC+8 offset. China has had no DST since 1991, so this is equivalent to
+# Asia/Shanghai for every modern message date and avoids the zoneinfo/tzdata
+# import-time failure in Windows release builds (no tzdata is installed there).
+LOCAL_TZ = dt.timezone(dt.timedelta(hours=8))
 
 
 def write_json(path: Path, payload):

@@ -228,11 +228,14 @@ def test_admission_persists_deepseek_key_without_overwriting_glm_key(
     assert api._active_ai_provider == "glm"
 
 
-def test_frontend_offers_88_mailbox_and_provider_switch():
+def test_frontend_offers_88_mailbox_and_local_engine_block():
     source = (ROOT / "templates" / "index_app.js").read_text(encoding="utf-8")
 
     assert '{ value: "88.com", label: "88.com" }' in source
-    assert "DEEPSEEK_PLATFORM_URL" in source
-    assert "ai_provider" in source
-    assert "deepseek_api_key" in source
+    # The product now recognizes invoices locally: no model provider switch and
+    # no API-key field may be offered in the settings UI.
+    assert "本地识别引擎" in source
+    assert "LOCAL_ENGINE_ITEMS" in source
+    assert "DEEPSEEK_PLATFORM_URL" not in source
+    assert "deepseek_api_key" not in source
     assert 'rawDomain === "163.com" ? "163.com" : "qq.com"' not in source

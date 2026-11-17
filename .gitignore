@@ -19,6 +19,12 @@ manual_program_runs/
 test_dataset/
 staging/
 tmp/
+tmp/audit/
+extracted_invoices/
+release-assets/
+release-bundle/
+.pytest_cache/
+.superpowers/
 .codegraph/
 .codex/
 .runtime/

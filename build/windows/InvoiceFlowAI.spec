@@ -1,15 +1,30 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import importlib.util
 import json
 import os
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_dynamic_libs, collect_submodules
+from PyInstaller.utils.hooks import (
+    collect_data_files,
+    collect_dynamic_libs,
+    collect_submodules,
+)
 
 
 ROOT = Path(SPECPATH).resolve().parents[1]
 MANIFEST_PATH = ROOT / "build" / "windows" / "resources.manifest.json"
 MANIFEST = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+
+
+def _require_module(module_name):
+    """Fail the packaging run loudly when a required bundle module is missing."""
+    if importlib.util.find_spec(module_name) is None:
+        raise SystemExit(
+            "OCR packaging dependency missing: "
+            f"{module_name}. Install requirements.release.txt before building."
+        )
+
 
 datas = []
 runtime_source_override = os.environ.get("INVOICEFLOW_RUNTIME_SOURCE", "").strip()
@@ -24,7 +39,33 @@ for item in MANIFEST["datas"]:
 
 hiddenimports = list(MANIFEST.get("hiddenImports", []))
 hiddenimports.extend(collect_submodules("pyzbar"))
-pyzbar_binaries = collect_dynamic_libs("pyzbar")
+binaries = list(collect_dynamic_libs("pyzbar"))
+
+# ---------------------------------------------------------------------------
+# Local no-API OCR engine (RapidOCR + ONNX Runtime).
+#
+# RapidOCR's PP-OCR ONNX model files and ONNX Runtime's native provider DLLs
+# are loaded lazily/dynamically and are not reliably discovered by static
+# analysis, so the module lists are declared in resources.manifest.json
+# ("ocr" section) and expanded here with PyInstaller's collection helpers.
+# The existing manifest "datas" mechanism above stays untouched.
+# ---------------------------------------------------------------------------
+ocr_config = MANIFEST.get("ocr") or {}
+
+for module_name in ocr_config.get("requiredModules", []):
+    _require_module(module_name)
+
+for module_name in ocr_config.get("submodulePackages", []):
+    _require_module(module_name)
+    hiddenimports.extend(collect_submodules(module_name))
+
+for module_name in ocr_config.get("dataModules", []):
+    _require_module(module_name)
+    datas.extend(collect_data_files(module_name))
+
+for module_name in ocr_config.get("binaryModules", []):
+    _require_module(module_name)
+    binaries.extend(collect_dynamic_libs(module_name))
 
 runtime_hooks = [str(ROOT / MANIFEST["runtimeHook"])]
 version_path = ROOT / MANIFEST["version"]["rendered"]
@@ -48,7 +89,7 @@ if icon_setting:
 a = Analysis(
     [str(ROOT / MANIFEST["entryScript"])],
     pathex=[str(ROOT)],
-    binaries=pyzbar_binaries,
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],

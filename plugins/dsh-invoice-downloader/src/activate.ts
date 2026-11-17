@@ -4,11 +4,9 @@ import * as path from 'node:path'
 import { clientRequestSchema, type HostConnectionHandle } from '@deepseek-ai/dsh-client-connection'
 import type { CredentialProvider } from '@deepseek-ai/dsh-credentials'
 import { isLoopbackHost, type WebServer } from '@deepseek-ai/dsh-host-webserver'
-import type { LlmRuntime } from '@deepseek-ai/dsh-llm'
-import type { SessionStore } from '@deepseek-ai/dsh-session'
 import type { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
 import { ArtifactRegistry } from './file-security.js'
-import { InvoiceScanner, type LlmContext } from './invoice-scanner.js'
+import { InvoiceScanner } from './invoice-scanner.js'
 import { createInvoiceRpcHandler } from './rpc-handler.js'
 import { resolveRuntimeLayout, type RuntimeConfig } from './runtime.js'
 import { ScanSessionManager } from './storage.js'
@@ -17,9 +15,6 @@ export interface PluginContext {
   subprocess: SubprocessRuntime
   connection: HostConnectionHandle
   webServer: Pick<WebServer, 'host'>
-  sessions: SessionStore
-  llm: Pick<LlmRuntime, 'prepareCall'>
-  agentDefaultModel: LlmContext['agentDefaultModel']
   credentials: CredentialProvider
 }
 
@@ -32,7 +27,7 @@ export interface PluginConfig extends RuntimeConfig {
 }
 
 export const name = 'invoice-downloader'
-export const inject = ['subprocess', 'connection', 'webServer', 'sessions', 'llm', 'agentDefaultModel', 'credentials']
+export const inject = ['subprocess', 'connection', 'webServer', 'credentials']
 
 export function apply(context: PluginContext, config: PluginConfig): void {
   const connection = context.connection
@@ -55,13 +50,8 @@ export function apply(context: PluginContext, config: PluginConfig): void {
     graceMs: config.graceMs ?? 2_000,
     imapFetchTimeoutSeconds: config.imapFetchTimeoutSeconds ?? 15,
   })
-  scanner.setLlmContext({
-    llm: context.llm,
-    agentDefaultModel: context.agentDefaultModel,
-  })
 
   const sessions = new ScanSessionManager()
-  sessions.setContext({ sessions: context.sessions })
   const handler = createInvoiceRpcHandler({
     savePath,
     profileDir,

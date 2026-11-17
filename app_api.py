@@ -2333,17 +2333,6 @@ class InvoiceAppAPI:
         if issues:
             raise RuntimeError("Build identity validation failed: " + "; ".join(issues))
 
-    def get_env_config(self):
-        stored = self._settings_store.load() or {}
-        return {
-            "success": True,
-            "email": str(stored.get("email", "") or ""),
-            "auth_code": str(stored.get("auth_code", "") or ""),
-            "api_key": str(stored.get("api_key", "") or ""),
-            "ai_provider": normalize_provider(stored.get("ai_provider")),
-            "deepseek_api_key": str(stored.get("deepseek_api_key", "") or ""),
-        }
-
     def _default_user_settings(self):
         return {
             "email": "",
@@ -2390,6 +2379,9 @@ class InvoiceAppAPI:
             merged["remember_settings"] = False
         merged["ai_provider"] = normalize_provider(merged.get("ai_provider"))
         merged["save_path"] = self._normalize_user_save_path(merged.get("save_path", ""))
+        raw_save_path = str(merged.get("save_path") or "")
+        if raw_save_path.startswith("\\\\") or ".." in Path(raw_save_path).parts:
+            return {"success": False, "message": "保存路径不可用"}
         self._settings_store.save(merged)
         return {"success": True, "message": "设置已保存", "path": self._settings_store.settings_path}
 
@@ -2400,9 +2392,10 @@ class InvoiceAppAPI:
     def get_run_context(self):
         return serialize_run_context(self._refresh_run_context())
 
-    def test_connection(self, email, auth_code, api_key, ai_provider="glm"):
+    def test_connection(self, email, auth_code, api_key="", ai_provider="glm"):
 
-        """前端测试连接时调用（真实发包到大模型验证 Key）"""
+        """前端测试连接时调用；无 API Key 时只验证邮箱并确认本地识别引擎可用。"""
+        api_key = str(api_key or "")
         provider = normalize_provider(ai_provider)
         is_deepseek = provider == DEEPSEEK_PROVIDER
         provider_label = "DeepSeek" if is_deepseek else "智谱 GLM"
@@ -2442,6 +2435,14 @@ class InvoiceAppAPI:
                 if fetcher is not None:
                     fetcher.disconnect()
         
+        if not api_key:
+            if auth_code:
+                return {
+                    "success": True,
+                    "message": "连接成功 - 邮箱验证通过，本地识别引擎已就绪（无需 API Key）",
+                }
+            return {"success": False, "message": "请填写邮箱地址和授权码"}
+
         if len(api_key) <= 5:
             return {"success": False, "message": "连接失败 - API Key 格式不正确"}
 
@@ -2716,6 +2717,7 @@ class InvoiceAppAPI:
                 request.rules_text,
                 _extractor=extractor,
                 _owned_extractor=extractor,
+                _prepare_remote_images=False,
             )
             resources["pipeline"] = pipeline
             return pipeline.extract()
@@ -2881,6 +2883,7 @@ class InvoiceAppAPI:
             _worker_extractor_factory=_worker_extractor_factory,
             _archive_operation=_archive_operation,
             _pairing_finalizer=_pairing_finalizer,
+            _prepare_remote_images=False,
         )
         try:
             outcomes = session.extract()
@@ -2906,6 +2909,7 @@ class InvoiceAppAPI:
         _archive_operation=None,
         _pairing_finalizer=None,
         _owned_extractor=None,
+        _prepare_remote_images=True,
     ):
         from app_archive_adapter import AppArchiveAdapter
         from archive_service import ArchiveService
@@ -2940,12 +2944,15 @@ class InvoiceAppAPI:
 
         worker_factory = _worker_extractor_factory
         if worker_factory is None:
-            def worker_factory(runtime):
+            def worker_factory(_runtime):
+                # No-API recognition: extract_remote_only runs the local
+                # parser + OCR engine, never a remote model request.
                 return InvoiceExtractor(
                     api_key=api_key,
                     output_dir=save_path,
-                    glm_runtime=runtime,
+                    glm_runtime=_runtime,
                     close_glm_runtime=False,
+                    local_recognition_only=True,
                 )
 
         preflight = CandidatePreflight(
@@ -2957,6 +2964,7 @@ class InvoiceAppAPI:
             converter_factory=lambda: BoundedUrlRecoveryClient(
                 staging_dir=self._active_staging_path(), timeout_ms=30000
             ),
+            prepare_remote_images=_prepare_remote_images,
         )
         remote = SharedRuntimeRemoteExtractor(
             owner_extractor=_extractor,
@@ -4016,15 +4024,9 @@ class InvoiceAppAPI:
 
                 os.makedirs(candidate.effective_save_path, exist_ok=True)
                 if remember_settings:
-                    active_key_field = (
-                        "deepseek_api_key"
-                        if self._active_ai_provider == DEEPSEEK_PROVIDER
-                        else "api_key"
-                    )
                     settings_payload = {
                         "email": secrets.email_address,
                         "auth_code": secrets.auth_code,
-                        active_key_field: secrets.api_key,
                         "ai_provider": self._active_ai_provider,
                         "save_path": candidate.effective_save_path,
                         "date_from": candidate.date_from,
@@ -4032,6 +4034,15 @@ class InvoiceAppAPI:
                         "company": active_company,
                         "remember_settings": True,
                     }
+                    if str(secrets.api_key or "").strip():
+                        # Legacy-only: local recognition never needs an API key, so
+                        # an empty value must not overwrite a previously stored one.
+                        active_key_field = (
+                            "deepseek_api_key"
+                            if self._active_ai_provider == DEEPSEEK_PROVIDER
+                            else "api_key"
+                        )
+                        settings_payload[active_key_field] = secrets.api_key
                 else:
                     settings_payload = {"remember_settings": False}
                 settings_touched = True
@@ -4199,12 +4210,12 @@ class InvoiceAppAPI:
             self._safe_emit_stage_event("start_processing", "exit", {"result": "started"})
             return {"success": True, "message": "任务已启动"}
 
-    def start_processing(self, rules_text, save_path, date_from=None, date_to=None, email_address=None, auth_code=None, api_key=None, ai_provider="glm"):
+    def start_processing(self, rules_text, save_path, date_from=None, date_to=None, email_address=None, auth_code=None, api_key="", ai_provider="glm"):
         if not self._run_lifecycle.can_begin or self._is_running or (self._worker_thread and self._worker_thread.is_alive()):
             return {"success": False, "message": "任务已在运行中"}
 
-        if not email_address or not auth_code or not api_key:
-            return {"success": False, "message": "缺少必要凭证，请填写邮箱、授权码和 API Key"}
+        if not email_address or not auth_code:
+            return {"success": False, "message": "缺少必要凭证，请填写邮箱地址和授权码"}
 
         candidate, secrets, date_error = self._build_admission_candidate(
             rules_text=rules_text,
@@ -4282,8 +4293,86 @@ class InvoiceAppAPI:
             result = window.create_file_dialog(webview.FOLDER_DIALOG)
             if result and len(result) > 0:
                 print(f"Selected: {result[0]}")
+                import os as _os
+
+                try:
+                    self._approved_bridge_directories().add(_os.path.realpath(result[0]))
+                except OSError:
+                    pass
                 return {"success": True, "path": result[0]}
         return {"success": False}
+
+    def _approved_bridge_directories(self):
+        approved = getattr(self, "_approved_directories", None)
+        if approved is None:
+            approved = set()
+            self._approved_directories = approved
+        return approved
+
+    def _bridge_allowed_roots(self):
+        """Directories the page bridge may touch (defense-in-depth for js_api)."""
+        import os
+
+        roots: list[str] = []
+        run_context = self._run_context if isinstance(self._run_context, dict) else {}
+        for value in (
+            self._effective_save_path,
+            self._requested_save_path,
+            run_context.get("output_dir"),
+            run_context.get("run_root"),
+            self.get_default_save_path(),
+            self._last_export_path,
+        ):
+            text = str(value or "").strip()
+            if not text:
+                continue
+            try:
+                if os.path.isfile(text):
+                    text = os.path.dirname(text)
+                roots.append(os.path.realpath(text))
+            except OSError:
+                continue
+        for extra in (self._active_staging_path, self._manual_check_path):
+            try:
+                roots.append(os.path.realpath(extra()))
+            except Exception:
+                continue
+        roots.extend(self._approved_bridge_directories())
+        return [root for root in roots if root]
+
+    def _bridge_path_is_allowed(self, path):
+        """Reject UNC/traversal and anything outside the app's own output trees."""
+        import os
+
+        text = str(path or "").strip()
+        if not text:
+            return False
+        if text.startswith("\\\\") or text.startswith("//"):
+            return False
+        try:
+            resolved = os.path.realpath(os.path.abspath(text))
+        except (OSError, ValueError):
+            return False
+        if not os.path.isabs(resolved):
+            return False
+        for root in self._bridge_allowed_roots():
+            try:
+                if os.path.commonpath([resolved, root]) == root:
+                    return True
+            except (ValueError, OSError):
+                continue
+        return False
+
+    def _bridge_path_rejects_unc_or_traversal(self, path):
+        """Reject network shares and '..' traversal for page-supplied write paths."""
+        import os
+
+        text = str(path or "").strip()
+        if not text:
+            return False
+        if text.startswith("\\\\") or text.startswith("//"):
+            return True
+        return ".." in os.path.normpath(text).split(os.sep)
 
     def open_folder(self, path):
         """调用系统资源管理器打开特定文件夹"""
@@ -4292,8 +4381,11 @@ class InvoiceAppAPI:
         import subprocess
 
         # 确保存储的路径分隔符是环境兼容的
-        path = os.path.normpath(path)
+        path = os.path.normpath(str(path or ""))
         print(f"Opening folder: {path}")
+
+        if not self._bridge_path_is_allowed(path):
+            return {"success": False, "message": "该目录不在允许访问的范围内"}
 
         if not os.path.exists(path):
             try:
@@ -4331,8 +4423,10 @@ class InvoiceAppAPI:
         import os
         import platform
         import subprocess
-        
-        path = os.path.normpath(path)
+
+        path = os.path.normpath(str(path or ""))
+        if not self._bridge_path_is_allowed(path):
+            return {"success": False, "message": "该文件不在允许访问的范围内"}
         if not os.path.exists(path):
             return {"success": False, "message": "文件不存在"}
             
@@ -4354,6 +4448,8 @@ class InvoiceAppAPI:
             return {"success": False, "message": "缺少 openpyxl 依赖，无法导出 Excel"}
 
         target_dir = export_path or self._effective_save_path or self._requested_save_path or self.get_default_save_path()
+        if export_path and self._bridge_path_rejects_unc_or_traversal(export_path):
+            return {"success": False, "message": "导出目录不可用"}
         os.makedirs(target_dir, exist_ok=True)
 
         def _parse_amount(value):

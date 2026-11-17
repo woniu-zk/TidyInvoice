@@ -9,9 +9,7 @@ export interface JobConfig {
   dateTo: string
   company: string
   savePath: string
-  ocrProvider: 'local' | 'glm'
   imapFetchTimeoutSeconds: number
-  glmApiKey?: string
 }
 
 export interface JobEvent {
@@ -28,41 +26,16 @@ export interface JobResult {
   exportPath?: string
 }
 
-export interface ExtractionRequest {
-  requestId: string
-  ocrText: string
-  documentTypeHint?: string
-}
-
-export interface ExtractionResponse {
-  requestId: string
-  extractedFields: Record<string, unknown>
-  rawModelOutput?: string
-}
-
-export interface ExtractionError {
-  requestId: string
-  errorCode: string
-  errorMessage: string
-  retryable: boolean
-}
-
-export type ExtractionHandler = (request: ExtractionRequest) => Promise<ExtractionResponse | ExtractionError>
-
 interface Frame {
   type: string
   jobId?: string
   event?: string
-  requestId?: string
-  ocrText?: string
-  documentTypeHint?: string
   result?: JobResult
 }
 
 export class EngineIpcClient {
   private handle: SubprocessHandle | null = null
   private buffer = ''
-  private extractionHandler: ExtractionHandler | null = null
   private eventHandler: ((event: JobEvent) => void) | null = null
   private resultResolve: ((result: JobResult) => void) | null = null
   private resultReject: ((error: Error) => void) | null = null
@@ -74,10 +47,6 @@ export class EngineIpcClient {
     private readonly adapterRoot: string,
     private readonly graceMs: number,
   ) {}
-
-  onExtraction(handler: ExtractionHandler): void {
-    this.extractionHandler = handler
-  }
 
   onEvent(handler: (event: JobEvent) => void): void {
     this.eventHandler = handler
@@ -136,7 +105,7 @@ export class EngineIpcClient {
       for (const line of lines) {
         if (!line.trim()) continue
         try {
-          await this.handleFrame(JSON.parse(line) as Frame, handle)
+          this.handleFrame(JSON.parse(line) as Frame)
         } catch {
           continue
         }
@@ -144,7 +113,7 @@ export class EngineIpcClient {
     }
   }
 
-  private async handleFrame(frame: Frame, handle: SubprocessHandle): Promise<void> {
+  private handleFrame(frame: Frame): void {
     switch (frame.type) {
       case 'job.event':
         if (typeof frame.event === 'string') this.eventHandler?.(frame as unknown as JobEvent)
@@ -156,47 +125,9 @@ export class EngineIpcClient {
       case 'job.error':
         this.rejectIfPending(new Error('invoice engine reported a failure'))
         return
-      case 'extraction.request':
-        await this.respondToExtraction(frame, handle)
-        return
       default:
         return
     }
-  }
-
-  private async respondToExtraction(frame: Frame, handle: SubprocessHandle): Promise<void> {
-    const requestId = frame.requestId
-    if (!requestId || !this.extractionHandler) return
-    try {
-      const response = await this.extractionHandler({
-        requestId,
-        ocrText: frame.ocrText ?? '',
-        documentTypeHint: frame.documentTypeHint,
-      })
-      this.sendFrame(handle, {
-        type: 'extraction.response',
-        protocolVersion: 1,
-        jobId: frame.jobId,
-        timestamp: Date.now(),
-        ...response,
-      })
-    } catch {
-      this.sendFrame(handle, {
-        type: 'extraction.error',
-        protocolVersion: 1,
-        jobId: frame.jobId,
-        timestamp: Date.now(),
-        requestId,
-        errorCode: 'HANDLER_ERROR',
-        errorMessage: 'model extraction failed',
-        retryable: false,
-      })
-    }
-  }
-
-  private sendFrame(handle: SubprocessHandle, frame: Record<string, unknown>): void {
-    if (!handle.stdin) throw new Error('invoice engine input stream is unavailable')
-    handle.stdin.write(`${JSON.stringify(frame)}\n`)
   }
 
   private resolveResult(result: JobResult): void {

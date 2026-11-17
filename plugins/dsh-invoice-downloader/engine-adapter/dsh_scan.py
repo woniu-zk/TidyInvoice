@@ -106,72 +106,59 @@ def _bound_imap_reads(
     return state
 
 
-class DshRecognitionExtractor(InvoiceExtractor):
-    """Present DSH's recognition chain through the engine's extraction and archive interface."""
+class LocalEngineExtractor(InvoiceExtractor):
+    """Deterministic local extractor used for candidate preflight and archive routing.
 
-    def __init__(self, recognition_chain: Any, output_dir: str) -> None:
-        self._recognition_chain = recognition_chain
+    The shipped plugin has no model runtime: preflight probes, record loading, and
+    filename routing are all deterministic local operations, so this adapter
+    initializes only the state those paths depend on and never builds a remote
+    client or reads an API key.
+    """
+
+    def __init__(self, output_dir: str) -> None:
+        self.api_key = ""
+        self.glm_runtime = None
         self.output_dir = os.path.abspath(output_dir)
         os.makedirs(self.output_dir, exist_ok=True)
         self.processed_records_file = os.path.join(self.output_dir, "processed_records.json")
-        self.glm_runtime = None
         self.last_extraction_trace: dict[str, Any] = {}
         self.last_route_trace: dict[str, Any] = {}
         self.last_timing_trace: dict[str, Any] = {}
 
-    def pdf_to_base64_image(self, pdf_path: str) -> list[str]:
-        """Supply a truthy placeholder because the DSH chain reads the source path directly."""
-        return [pdf_path] if os.path.isfile(pdf_path) else []
-
-    def extract_remote_only(
-        self,
-        _prepared_source: Any,
-        custom_rules: str = "",
-        pdf_path: str | None = None,
-        document_context: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        """Run local OCR followed by the DSH DeepSeek extractor for one artifact."""
-        del custom_rules
-        if not pdf_path:
-            raise RuntimeError("document path is required for DSH extraction")
-        result = self._recognition_chain.extract(pdf_path, document_context or {})
-        self.last_extraction_trace = {
-            "engine": "local_ocr_dsh_deepseek",
-            "reason_code": "",
-        }
-        self.last_timing_trace = {}
-        return result
-
     def close(self) -> None:
-        """Match the engine extractor lifecycle without owning a GLM runtime."""
+        """Match the engine extractor lifecycle without owning a model runtime."""
         return None
 
 
 def _run_processing_loop(
     app: Any,
-    recognition_chain: Any,
     attachments: list[dict[str, Any]],
     save_path: str,
     date_from: str,
     date_to: str,
 ) -> Any:
-    """Reuse the engine's candidate, archive, and reporting implementation with DSH extraction."""
-    owner = DshRecognitionExtractor(recognition_chain, save_path)
-    return app._run_processing_loop_with_extractor(
-        attachments,
-        "dsh-managed",
-        save_path,
-        date_from,
-        date_to,
-        _extractor=owner,
-        _worker_extractor_factory=lambda _runtime: DshRecognitionExtractor(
-            recognition_chain, save_path
-        ),
-    )
+    """Reuse the engine's candidate, archive, and reporting path with local recognition."""
+    from local_recognition import LocalRecognitionWorker
+
+    owner = LocalEngineExtractor(save_path)
+    try:
+        return app._run_processing_loop_with_extractor(
+            attachments,
+            "dsh-managed",
+            save_path,
+            date_from,
+            date_to,
+            _extractor=owner,
+            _worker_extractor_factory=lambda _runtime: LocalRecognitionWorker(
+                output_dir=save_path
+            ),
+        )
+    finally:
+        owner.close()
 
 
-def run_scan(*, config: dict[str, Any], recognition_chain: Any) -> dict[str, int | str]:
-    """Execute one DSH scan with the current engine coordinator."""
+def run_scan(*, config: dict[str, Any]) -> dict[str, int | str]:
+    """Execute one DSH scan with the current engine coordinator and local recognition."""
     from app_api import InvoiceAppAPI
     from run_coordinator import RunCoordinator, RunRequest
     from run_lifecycle import RunLifecycle, RunState
@@ -232,7 +219,6 @@ def run_scan(*, config: dict[str, Any], recognition_chain: Any) -> dict[str, int
     ) -> Any:
         return _run_processing_loop(
             app,
-            recognition_chain,
             attachments,
             output_dir,
             since_date,

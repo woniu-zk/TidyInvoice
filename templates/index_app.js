@@ -25,9 +25,6 @@ function lastDaysRange(days) {
 const DEFAULT_SETTINGS = {
     email: "",
     auth_code: "",
-    api_key: "",
-    ai_provider: "glm",
-    deepseek_api_key: "",
     save_path: "",
     company: "",
     remember_settings: true,
@@ -66,30 +63,29 @@ const APP_VISIBLE_COPY = {
     githubUrl: "https://github.com/EthanYoQ/Invoice-Downloader",
 };
 
-const ZHIPU_PLATFORM_URL = "https://bigmodel.cn/pricing";
-const DEEPSEEK_PLATFORM_URL = "https://platform.deepseek.com/api_keys";
 const EMAIL_DOMAIN_OPTIONS = [
     { value: "qq.com", label: "qq.com" },
     { value: "163.com", label: "163.com" },
     { value: "88.com", label: "88.com" },
 ];
 const SUPPORTED_EMAIL_DOMAINS = new Set(EMAIL_DOMAIN_OPTIONS.map((option) => option.value));
-const AI_PROVIDER_OPTIONS = [
-    { value: "glm", label: "智谱 GLM" },
-    { value: "deepseek", label: "DeepSeek" },
+const LOCAL_ENGINE_ITEMS = [
+    { key: "pdf-text", icon: "description", title: "PDF 文本解析", description: "直接读取电子发票的版式文本与明细。" },
+    { key: "ofd", icon: "picture_as_pdf", title: "OFD 解析", description: "解析国标版式文件中的票面信息。" },
+    { key: "ocr", icon: "document_scanner", title: "本地 OCR", description: "扫描件与图片在本机离线识别。" },
 ];
 
 const DISCLAIMER_SOFTWARE_ITEMS = [
     "本软件用于票据整理、归档与复核辅助处理。",
-    "本软件不附带任何真实邮箱凭据或 API Key。",
-    "请仅填写并使用你自己的邮箱授权信息与 API Key。",
+    "本软件不附带任何真实邮箱凭据。",
+    "请仅填写并使用你自己的邮箱授权信息。",
     "涉及报销、入账或合规判断的重要票据，请务必进行人工复核。",
 ];
 
 const DISCLAIMER_ITEMS = [
     "本工具用于票据整理与归档辅助，识别结果应结合业务流程进行复核。",
     "对于识别、归档、遗漏、误判及由此产生的后果，工具方不承担责任。",
-    "使用者应自行遵守所在公司关于大模型、API 使用和数据安全管理的规定。",
+    "使用者应自行遵守所在公司关于票据数据与信息安全管理的相关规定。",
     "涉及报销、入账或合规判断的重要票据，请务必进行人工复核。",
 ];
 
@@ -107,7 +103,7 @@ const UI_COPY = {
         windowSubtitle: "桌面工作区",
     },
     navigation: [
-        { key: "settings", label: "启动配置", description: "邮箱、API 与日期", icon: "tune", path: "/" },
+        { key: "settings", label: "启动配置", description: "邮箱、识别与日期", icon: "tune", path: "/" },
         { key: "processing", label: "处理中心", description: "进度与日志", icon: "data_thresholding", path: "/processing" },
         { key: "analysis", label: "结果分析", description: "总览与导出", icon: "assessment", path: "/analysis" },
     ],
@@ -133,7 +129,7 @@ const UI_COPY = {
             liveRefresh: "进度与日志保持实时刷新。",
             stopPending: "已收到安全停止指令。",
             stopDetail: "系统将在当前文件处理完成后安全停止。",
-            processingDetail: "邮件抓取、票据恢复与结构化识别按既有后端流程执行。",
+            processingDetail: "邮件抓取、票据恢复与本地识别将依次执行。",
             stopNotice: "已收到安全停止指令，当前邮件或当前文件处理完成后将结束任务。",
         },
         analysis: {
@@ -348,9 +344,6 @@ async function loadShellState() {
         email: preferNonEmpty(sessionSettings.email, storedPayload.email),
         // Sensitive values must not be revived from WebView session state.
         auth_code: preferNonEmpty(storedPayload.auth_code),
-        api_key: preferNonEmpty(storedPayload.api_key),
-        deepseek_api_key: preferNonEmpty(storedPayload.deepseek_api_key),
-        ai_provider: storedPayload.ai_provider === "deepseek" ? "deepseek" : "glm",
         save_path: preferNonEmpty(sessionSettings.save_path, storedPayload.save_path),
         company: preferNonEmpty(sessionSettings.company, storedPayload.company),
         remember_settings: sessionSettings.remember_settings === undefined
@@ -386,7 +379,6 @@ async function persistUserSettings(settings, runSettings, runContext) {
     const payload = buildPersistPayload(settings, runSettings, runContext);
     writeSessionValue(SESSION_SETTINGS_KEY, {
         email: payload.email || "",
-        ai_provider: payload.ai_provider === "deepseek" ? "deepseek" : "glm",
         save_path: payload.save_path || "",
         company: payload.company || "",
         remember_settings: payload.remember_settings !== false,
@@ -837,10 +829,8 @@ function SettingsPage({ onOpenDisclaimer }) {
     const [runSettings, setRunSettings] = useState(DEFAULT_RUN_SETTINGS);
     const [runContext, setRunContext] = useState({ controlled_run: false, explicit_run_context: false });
     const [showAuthCode, setShowAuthCode] = useState(false);
-    const [showApiKey, setShowApiKey] = useState(false);
     const [pageError, setPageError] = useState("");
     const [emailStatus, setEmailStatus] = useState({ status: "idle", message: "" });
-    const [apiStatus, setApiStatus] = useState({ status: "idle", message: "" });
     const [bootstrapState, setBootstrapState] = useState("bootstrapping");
     const [bootstrapError, setBootstrapError] = useState("");
     const [starting, setStarting] = useState(false);
@@ -889,13 +879,8 @@ function SettingsPage({ onOpenDisclaimer }) {
     const controlledRun = hasExplicitQaRunContext(runContext);
     const emailParts = splitEmailAddress(settings.email);
     const dateError = validateDateRange(runSettings.date_from, runSettings.date_to);
-    const activeProvider = settings.ai_provider === "deepseek" ? "deepseek" : "glm";
-    const activeProviderLabel = activeProvider === "deepseek" ? "DeepSeek" : "GLM";
-    const activeKeyField = activeProvider === "deepseek" ? "deepseek_api_key" : "api_key";
-    const activeApiKey = String(settings[activeKeyField] || "");
     const canStart = !validateEmail(settings.email)
         && !!settings.auth_code
-        && !!activeApiKey
         && !!String(settings.company || "").trim()
         && !!String(settings.save_path || "").trim()
         && !dateError;
@@ -921,7 +906,6 @@ function SettingsPage({ onOpenDisclaimer }) {
         setSettings((current) => ({ ...current, [key]: value }));
         setPageError("");
         if (key === "email" || key === "auth_code") setEmailStatus({ status: "idle", message: "" });
-        if (key === "email" || key === "api_key" || key === "deepseek_api_key" || key === "ai_provider") setApiStatus({ status: "idle", message: "" });
     }
 
     function setDateValue(field, value) {
@@ -939,7 +923,7 @@ function SettingsPage({ onOpenDisclaimer }) {
         }
     }
 
-    async function handleTestEmailAuth() {
+    async function handleTestConnection() {
         const emailError = validateEmail(settings.email);
         if (emailError) {
             setEmailStatus({ status: "error", message: emailError });
@@ -949,32 +933,16 @@ function SettingsPage({ onOpenDisclaimer }) {
             setEmailStatus({ status: "error", message: "请输入邮箱授权码。" });
             return;
         }
-        setEmailStatus({ status: "testing", message: "正在测试邮箱授权码..." });
-        try {
-            const result = await callApi("test_email_auth", String(settings.email).trim(), settings.auth_code);
-            setEmailStatus({ status: result && result.success ? "success" : "error", message: result && result.message ? result.message : "邮箱授权验证失败。" });
-        } catch (error) {
-            setEmailStatus({ status: "error", message: error.message || "邮箱授权验证失败。" });
-        }
-    }
-
-    async function handleTestConnection() {
-        if (!activeApiKey) {
-            setApiStatus({ status: "error", message: `请输入 ${activeProviderLabel} API Key。` });
-            return;
-        }
-        setApiStatus({ status: "testing", message: `正在测试 ${activeProviderLabel} API Key...` });
+        setEmailStatus({ status: "testing", message: "正在测试邮箱连接..." });
         try {
             const result = await callApi(
                 "test_connection",
-                String(settings.email || "").trim(),
-                String(settings.auth_code || "").trim(),
-                activeApiKey,
-                activeProvider
+                String(settings.email).trim(),
+                String(settings.auth_code).trim()
             );
-            setApiStatus({ status: result && result.success ? "success" : "error", message: result && result.message ? result.message : "API Key 测试失败。" });
+            setEmailStatus({ status: result && result.success ? "success" : "error", message: result && result.message ? result.message : "邮箱连接测试失败。" });
         } catch (error) {
-            setApiStatus({ status: "error", message: error.message || "API Key 测试失败。" });
+            setEmailStatus({ status: "error", message: error.message || "邮箱连接测试失败。" });
         }
     }
 
@@ -982,14 +950,13 @@ function SettingsPage({ onOpenDisclaimer }) {
         const emailError = validateEmail(settings.email);
         if (emailError) return setPageError(emailError);
         if (!settings.auth_code) return setPageError("请输入邮箱授权码。");
-        if (!activeApiKey) return setPageError(`请输入 ${activeProviderLabel} API Key。`);
         if (!settings.company || !settings.company.trim()) return setPageError("请填写公司名称。");
         if (!settings.save_path) return setPageError("请选择输出目录。");
         if (dateError) return setPageError(dateError);
         setStarting(true);
         try {
             await persistUserSettings(settings, runSettings, runContext);
-            const result = await callApi("start_processing", "", settings.save_path, runSettings.date_from, runSettings.date_to, String(settings.email).trim(), settings.auth_code, activeApiKey, activeProvider);
+            const result = await callApi("start_processing", "", settings.save_path, runSettings.date_from, runSettings.date_to, String(settings.email).trim(), settings.auth_code);
             if (!result || !result.success) {
                 setPageError(result && result.message ? result.message : "任务启动失败。");
                 return;
@@ -1055,7 +1022,7 @@ function SettingsPage({ onOpenDisclaimer }) {
                                             />
                                         </div>
                                     </div>
-                                    <p className="field-help">当前支持 QQ、163 与 88 邮箱，域名会决定 IMAP 通道。</p>
+                                    <p className="field-help">当前支持 QQ、163 与 88 邮箱，域名会决定邮箱的连接方式。</p>
                                 </div>
 
                                 <div className="field-block">
@@ -1068,9 +1035,9 @@ function SettingsPage({ onOpenDisclaimer }) {
                                         </button>
                                     </div>
                                     <div className="footer-cluster">
-                                        <button type="button" className="btn btn--secondary btn--sm" onClick={handleTestEmailAuth} disabled={emailStatus.status === "testing"}>
-                                            <span className="material-symbols-outlined">{emailStatus.status === "testing" ? "sync" : "verified"}</span>
-                                            <span>{emailStatus.status === "testing" ? "测试中..." : "测试邮箱授权码"}</span>
+                                        <button type="button" className="btn btn--secondary btn--sm" onClick={handleTestConnection} disabled={emailStatus.status === "testing"}>
+                                            <span className="material-symbols-outlined">{emailStatus.status === "testing" ? "sync" : "link"}</span>
+                                            <span>{emailStatus.status === "testing" ? "测试中..." : "测试邮箱连接"}</span>
                                         </button>
                                     </div>
                                     {emailStatus.status !== "idle" ? <InlineStatus tone={toneFromAsyncStatus(emailStatus.status)}>{emailStatus.message}</InlineStatus> : null}
@@ -1091,44 +1058,28 @@ function SettingsPage({ onOpenDisclaimer }) {
                                         <span>{controlledRun ? "路径已锁定" : "浏览目录"}</span>
                                     </button>
                                 </div>
-                                <p className="field-help">{controlledRun ? "当前为受控前端复跑，本轮输出目录由诊断上下文锁定。" : "系统会在此目录下继续按发票类型落盘，并生成待人工复核目录。"}</p>
+                                <p className="field-help">{controlledRun ? "当前为受控前端复跑，本轮输出目录由诊断上下文锁定。" : "系统会在此目录下按发票类型保存归档文件，并生成待人工复核目录。"}</p>
                             </div>
                         </section>
                     </div>
 
                     <div className="settings-column">
                         <section className="surface-card">
-                            <SectionHeader icon="psychology" title="智能处理引擎" indicator={<StatusPill tone="success" icon="auto_awesome">{activeProviderLabel}</StatusPill>} />
+                            <SectionHeader icon="memory" title="本地识别引擎" indicator={<StatusPill tone="success" icon="offline_bolt">离线运行</StatusPill>} />
                             <div className="card-stack card-stack--compact">
-                                <div className="field-block">
-                                    <label className="field-label">模型服务</label>
-                                    <DarkSelect
-                                        value={activeProvider}
-                                        options={AI_PROVIDER_OPTIONS}
-                                        ariaLabel="模型服务"
-                                        onChange={(provider) => updateSetting("ai_provider", provider)}
-                                    />
-                                    <p className="field-help">{activeProvider === "deepseek" ? "DeepSeek 会直接识别票据图像；PDF 内嵌文本可用时优先按文本提取。" : "GLM 使用独立 OCR 与视觉模型；扫描件会自动进入视觉识别。"}</p>
-                                </div>
-                                <div className="field-block">
-                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                                        <label className="field-label">{activeProviderLabel} API Key</label>
-                                        <a className="field-inline-action" href={activeProvider === "deepseek" ? DEEPSEEK_PLATFORM_URL : ZHIPU_PLATFORM_URL} target="_blank" rel="noreferrer"><span className="material-symbols-outlined" style={{ fontSize: 14 }}>open_in_new</span><span>{activeProvider === "deepseek" ? "获取 API Key" : "购买 API / 获取额度"}</span></a>
-                                    </div>
-                                    <div className="field-row">
-                                        <div className="field-shell" style={{ flex: 1 }}>
-                                            <span className="field-icon material-symbols-outlined">vpn_key</span>
-                                            <input type={showApiKey ? "text" : "password"} className="field-input u-mono" placeholder="sk-..." value={settings[activeKeyField]} onChange={(event) => updateSetting(activeKeyField, event.target.value)} />
-                                            <button type="button" className="field-mask-toggle" onClick={() => setShowApiKey((current) => !current)}><span className="material-symbols-outlined">{showApiKey ? "visibility" : "visibility_off"}</span></button>
+                                <div className="engine-list">
+                                    {LOCAL_ENGINE_ITEMS.map((item) => (
+                                        <div className="engine-item" key={item.key}>
+                                            <span className="engine-item__icon material-symbols-outlined">{item.icon}</span>
+                                            <div className="engine-item__copy">
+                                                <strong>{item.title}</strong>
+                                                <span>{item.description}</span>
+                                            </div>
+                                            <span className="engine-item__tag">内置</span>
                                         </div>
-                                        <button type="button" className="btn btn--secondary btn--sm" onClick={handleTestConnection} disabled={apiStatus.status === "testing"}>
-                                            <span className="material-symbols-outlined">{apiStatus.status === "testing" ? "sync" : "link"}</span>
-                                            <span>{apiStatus.status === "testing" ? "测试中..." : "测试 API Key"}</span>
-                                        </button>
-                                    </div>
-                                    {apiStatus.status === "idle" ? <p className="field-help">切换模型服务不会清除另一把 Key；额度不足时处理页会同步提示。</p> : null}
-                                    {apiStatus.status !== "idle" ? <InlineStatus tone={toneFromAsyncStatus(apiStatus.status)}>{apiStatus.message}</InlineStatus> : null}
+                                    ))}
                                 </div>
+                                <p className="field-help">无需联网、无需填写密钥，支持电子发票、OFD 版式文件与扫描件的本地解析，票据内容不会上传。</p>
                             </div>
                         </section>
 

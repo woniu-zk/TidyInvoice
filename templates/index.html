@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'" />
     <title>InvoiceFlowAI</title>
-    <link rel="stylesheet" href="./static/tailwind.min.css" />
     <style>
         @font-face {
             font-family: "Material Symbols Outlined";
@@ -41,6 +41,13 @@
         }
 
         * { box-sizing: border-box; }
+
+        html { line-height: 1.5; }
+        body { line-height: inherit; }
+        blockquote, dd, dl, figure, h1, h2, h3, h4, h5, h6, hr, p, pre { margin: 0; }
+        h1, h2, h3, h4, h5, h6 { font-size: inherit; font-weight: inherit; }
+        ol, ul { margin: 0; padding: 0; list-style: none; }
+        button, input, optgroup, select, textarea { padding: 0; line-height: inherit; color: inherit; }
 
         html, body, #root {
             height: 100%;
@@ -1173,6 +1180,46 @@
         .u-tabular { font-variant-numeric: tabular-nums; }
         .u-truncate { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 
+        .engine-list { display: flex; flex-direction: column; gap: 8px; }
+
+        .engine-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 9px 10px;
+            border-radius: 14px;
+            border: 1px solid rgba(204,219,245,0.1);
+            background: rgba(255,255,255,0.04);
+        }
+
+        .engine-item__icon {
+            width: 32px;
+            height: 32px;
+            min-width: 32px;
+            border-radius: 11px;
+            display: grid;
+            place-items: center;
+            background: rgba(76,143,255,0.14);
+            color: #dce9ff;
+            font-size: 18px;
+        }
+
+        .engine-item__copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+        .engine-item__copy strong { font-size: 12px; font-weight: 600; }
+        .engine-item__copy span { font-size: 11px; line-height: 1.4; color: var(--text-dim); }
+
+        .engine-item__tag {
+            flex-shrink: 0;
+            padding: 3px 8px;
+            border-radius: 999px;
+            border: 1px solid rgba(78,214,143,0.24);
+            background: rgba(78,214,143,0.1);
+            color: #dff7e9;
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+        }
+
         @keyframes progress-sheen {
             0% { transform: translateX(-120%); }
             100% { transform: translateX(120%); }
@@ -1209,7 +1256,6 @@
     <script src="./static/history.min.js"></script>
     <script src="./static/react-router.min.js"></script>
     <script src="./static/react-router-dom.min.js"></script>
-    <script src="./static/babel.min.js"></script>
-    <script type="text/babel" src="./index_app.js"></script>
+    <script src="./index_app.built.js"></script>
 </body>
 </html>

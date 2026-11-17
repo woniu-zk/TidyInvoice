@@ -12,6 +12,7 @@ import re
 import datetime
 import time
 import zipfile
+from dataclasses import dataclass
 from urllib.parse import parse_qsl, urlparse, unquote
 from bs4 import BeautifulSoup
 from PIL import Image
@@ -141,12 +142,10 @@ def _safe_exception_identity(exc):
     return exception_type, fingerprint
 
 
-try:
-    from zoneinfo import ZoneInfo
-
-    LOCAL_TZ = ZoneInfo("Asia/Shanghai")
-except Exception:
-    LOCAL_TZ = datetime.timezone(datetime.timedelta(hours=8))
+# Fixed UTC+8 offset. China has had no DST since 1991, so this is equivalent to
+# Asia/Shanghai for every modern message date and avoids the zoneinfo/tzdata
+# import-time failure in Windows release builds (no tzdata is installed there).
+LOCAL_TZ = datetime.timezone(datetime.timedelta(hours=8))
 
 # 四层漏斗过滤进制 - 硬编码常量
 TIER1_DOMAINS = ['@12306.cn', '@rails.com.cn', '@didichuxing.com', '@gaode.com', '@marriott.com', '@hworld.com', '@cits.com', '@meituan.com', '@carlsonwagonlit.com', '@mycwt.com', '@citsgbt.com']
@@ -186,6 +185,172 @@ INVOICEISH_ATTACHMENT_KEYWORDS = (
     "ofd",
     "xml",
 )
+
+# --- Hard anti-decompression-bomb / oversized-message limits -----------------
+# Threat model: every attachment and every raw RFC822 body is attacker
+# controlled. A sender can deliver a ~65 KB ZIP whose central directory declares
+# tens of GiB of members (nested archives included), or the IMAP server can hand
+# back an arbitrarily large message body. All limits below are enforced *before*
+# decompression (from the ZIP central directory / declared member size) and
+# *before* parsing (from the fetched byte length). Oversized input is never
+# silently dropped: it is recorded through the existing diagnostics channels and
+# the outer container is retained as evidence.
+MAX_RAW_MESSAGE_BYTES = 50 * 1024 * 1024  # raw RFC822 bytes per message
+MAX_ZIP_MEMBERS = 64  # entries per archive (all entries, before filtering)
+MAX_ZIP_MEMBER_BYTES = 16 * 1024 * 1024  # declared uncompressed bytes per member
+MAX_ZIP_TOTAL_BYTES = 32 * 1024 * 1024  # declared uncompressed bytes per archive
+MAX_ZIP_NESTING_DEPTH = 2  # nested archive levels expanded under one container
+
+_EXTRACTABLE_ZIP_EXTENSIONS = frozenset(VALID_EXTENSIONS) | {".zip", ".ofd", ".xml"}
+
+
+@dataclass
+class _ZipExpansion:
+    """Result of a bounded ZIP expansion (see :func:`_expand_zip_attachment`)."""
+
+    members: list[dict]
+    skipped: list[dict]
+    rejected: bool = False
+    reject_reason: str = ""
+    member_count: int = 0
+
+
+def _read_zip_member_bounded(zf, info, limit):
+    """Decompress one member without ever materialising more than ``limit`` bytes.
+
+    ``info.file_size`` comes from the attacker-writable ZIP central directory, so
+    the declared-size check is repeated against the actual decompressed output:
+    a member whose header lies cannot force an unbounded allocation. Returns
+    ``None`` when the member exceeds the bound instead of returning partial data.
+    """
+
+    declared = int(getattr(info, "file_size", 0) or 0)
+    if declared > limit:
+        return None
+    buffer = bytearray()
+    with zf.open(info) as member:
+        while len(buffer) <= limit:
+            chunk = member.read(min(65536, limit + 1 - len(buffer)))
+            if not chunk:
+                break
+            buffer.extend(chunk)
+    if len(buffer) > limit:
+        return None
+    return bytes(buffer)
+
+
+def _expand_zip_attachment(
+    payload,
+    *,
+    zip_depth=0,
+    filename="",
+    content_type="",
+    content_disposition="",
+    email_id="",
+    sender="",
+    subject="",
+):
+    """Expand one ZIP attachment under hard anti-bomb limits.
+
+    Every ``zf.getinfo().file_size`` is validated *before* the member is read, so
+    a hostile archive is rejected without decompressing its declared members.
+    A container with too many entries is rejected as a whole (``rejected``);
+    individual too-large / over-budget / too-deeply-nested members are listed in
+    ``skipped`` and the remaining safe members are still returned. The caller is
+    responsible for surfacing both lists through the diagnostics channels.
+
+    Raises ``zipfile.BadZipFile``/``OSError`` for unreadable archives; callers
+    keep treating those as ``zip_container_failed``.
+    """
+
+    depth = max(0, int(zip_depth or 0))
+    expansion = _ZipExpansion(members=[], skipped=[])
+    with zipfile.ZipFile(BytesIO(payload)) as zf:
+        infos = zf.infolist()
+        expansion.member_count = len(infos)
+        if len(infos) > MAX_ZIP_MEMBERS:
+            expansion.rejected = True
+            expansion.reject_reason = "zip_member_count_exceeded"
+            return expansion
+        total_bytes = 0
+        for info in infos:
+            try:
+                if info.is_dir():
+                    continue
+            except AttributeError:
+                pass
+            member_name = str(getattr(info, "filename", "") or "")
+            member_ext = os.path.splitext(member_name)[1].lower()
+            if member_ext not in _EXTRACTABLE_ZIP_EXTENSIONS:
+                continue
+            safe_name = os.path.basename(member_name) or "attachment"
+            declared = int(getattr(info, "file_size", 0) or 0)
+            if declared > MAX_ZIP_MEMBER_BYTES:
+                expansion.skipped.append(
+                    {
+                        "filename": safe_name,
+                        "declared_bytes": declared,
+                        "reason": "zip_member_too_large",
+                    }
+                )
+                continue
+            if total_bytes + declared > MAX_ZIP_TOTAL_BYTES:
+                expansion.skipped.append(
+                    {
+                        "filename": safe_name,
+                        "declared_bytes": declared,
+                        "reason": "zip_total_size_exceeded",
+                    }
+                )
+                continue
+            if member_ext == ".zip" and depth + 1 > MAX_ZIP_NESTING_DEPTH:
+                expansion.skipped.append(
+                    {
+                        "filename": safe_name,
+                        "declared_bytes": declared,
+                        "reason": "zip_nesting_depth_exceeded",
+                    }
+                )
+                continue
+            remaining = min(MAX_ZIP_MEMBER_BYTES, MAX_ZIP_TOTAL_BYTES - total_bytes)
+            member_bytes = _read_zip_member_bounded(zf, info, remaining)
+            if member_bytes is None:
+                expansion.skipped.append(
+                    {
+                        "filename": safe_name,
+                        "declared_bytes": declared,
+                        "reason": "zip_member_too_large",
+                    }
+                )
+                continue
+            total_bytes += len(member_bytes)
+            expansion.members.append(
+                {
+                    "filename": safe_name,
+                    "payload": member_bytes,
+                    "content_type": content_type or "application/zip",
+                    "content_disposition": content_disposition or "",
+                    "email_id": email_id,
+                    "sender": sender,
+                    "subject": subject,
+                    "payload_size": len(member_bytes),
+                    "zip_context": "zip_member_extracted",
+                    "parent_zip_filename": filename,
+                    "zip_depth": depth + 1,
+                }
+            )
+    return expansion
+
+
+def _zip_skip_reasons(expansion):
+    reasons = []
+    if expansion.rejected and expansion.reject_reason:
+        reasons.append(expansion.reject_reason)
+    for skipped in expansion.skipped:
+        reason = str(skipped.get("reason") or "")
+        if reason and reason not in reasons:
+            reasons.append(reason)
+    return reasons
 
 
 def _contains_keyword_casefold(text, keywords):
@@ -942,6 +1107,17 @@ def _build_attachment_candidate_decision(filename, payload, *, tier, content_typ
             image_meta=image_meta,
         )
 
+    if zip_context == "zip_container_rejected":
+        return _make_candidate_decision(
+            "B",
+            "retain_only",
+            "B_ZIP_CONTAINER_REJECTED",
+            zip_context,
+            strong_signals=strong_signals,
+            weak_signals=weak_signals + ["zip_container_rejected"],
+            image_meta=image_meta,
+        )
+
     if is_image and tier == 4:
         has_qr = _has_qr_code(payload)
         weak_with_qr = list(weak_signals)
@@ -1207,6 +1383,8 @@ class EmailFetcher:
         self.progress_callback = progress_callback
         self.mail = None
         self._abort_requested = False
+        # Hard per-message raw RFC822 cap; overridable for tests.
+        self.max_raw_message_bytes = MAX_RAW_MESSAGE_BYTES
         self.certificate_error = False
         self.timeout_error = False
         self.connection_error = None
@@ -1334,8 +1512,26 @@ class EmailFetcher:
         raw_bytes = b""
 
         try:
-            fetched = self._mailbox_scanner().fetch_messages([e_id], query=fetch_command)
-            raw_bytes = fetched.get(e_id, b"")
+            batch = next(
+                self._mailbox_scanner().iter_message_batches([e_id], query=fetch_command),
+                None,
+            )
+            oversized = dict(batch.oversized_messages) if batch is not None else {}
+            if e_id in oversized:
+                attempt["status"] = "OVERSIZED"
+                attempt["error"] = "raw_message_too_large"
+                attempt["oversized_bytes"] = int(oversized[e_id])
+                attempt["limit_bytes"] = int(self.max_raw_message_bytes)
+                return b"", attempt
+            raw_bytes = dict(batch.messages).get(e_id, b"") if batch is not None else b""
+            if len(raw_bytes) > self.max_raw_message_bytes:
+                # Defensive: a scanner configured without the cap must never feed
+                # an unbounded payload into MIME parsing.
+                attempt["status"] = "OVERSIZED"
+                attempt["error"] = "raw_message_too_large"
+                attempt["oversized_bytes"] = len(raw_bytes)
+                attempt["limit_bytes"] = int(self.max_raw_message_bytes)
+                return b"", attempt
             attempt["status"] = "OK" if raw_bytes else "NO_PAYLOAD"
             attempt["has_tuple_payload"] = bool(raw_bytes)
             attempt["raw_bytes_len"] = len(raw_bytes)
@@ -1349,6 +1545,17 @@ class EmailFetcher:
 
         return raw_bytes, attempt
 
+    def _emit_oversized_message_diagnostic(self, e_id, *, payload_bytes, mode):
+        self._emit_mailbox_scan_diagnostic(
+            {
+                "event": "imap_message_too_large_skipped",
+                "mode": str(mode or ""),
+                "uid_hash": hashlib.sha256(e_id).hexdigest()[:12],
+                "payload_bytes": int(payload_bytes or 0),
+                "limit": int(self.max_raw_message_bytes),
+            }
+        )
+
     def _emit_mailbox_scan_diagnostic(self, payload):
         self._append_jsonl_best_effort(
             self._monitoring_path("mailbox_scan_diagnostics.jsonl"),
@@ -1361,6 +1568,7 @@ class EmailFetcher:
     def _mailbox_scanner(self):
         return MailboxScanner(
             self.mail,
+            max_message_bytes=self.max_raw_message_bytes,
             diagnostic_callback=self._emit_mailbox_scan_diagnostic,
         )
 
@@ -1585,6 +1793,7 @@ class EmailFetcher:
                                             "subject": subject,
                                             "payload_size": len(payload),
                                             "zip_context": "direct_attachment",
+                                            "zip_depth": 0,
                                         })
 
                             # 判定层级
@@ -1602,25 +1811,18 @@ class EmailFetcher:
                                 
                                 if ext == '.zip':
                                     appended_members = 0
+                                    zip_depth = int(attachment_info.get("zip_depth", 0) or 0)
                                     try:
-                                        with zipfile.ZipFile(BytesIO(payload)) as zf:
-                                            for zname in zf.namelist():
-                                                zext = os.path.splitext(zname)[1].lower()
-                                                if zext in VALID_EXTENSIONS or zext in {'.zip', '.ofd', '.xml'}:
-                                                    zdata = zf.read(zname)
-                                                    process_queue.append({
-                                                        "filename": os.path.basename(zname),
-                                                        "payload": zdata,
-                                                        "content_type": attachment_info.get("content_type", "application/zip"),
-                                                        "content_disposition": attachment_info.get("content_disposition", ""),
-                                                        "email_id": attachment_info.get("email_id", email_id_str),
-                                                        "sender": attachment_info.get("sender", sender),
-                                                        "subject": attachment_info.get("subject", subject),
-                                                        "payload_size": len(zdata),
-                                                        "zip_context": "zip_member_extracted",
-                                                        "parent_zip_filename": filename,
-                                                    })
-                                                    appended_members += 1
+                                        expansion = _expand_zip_attachment(
+                                            payload,
+                                            zip_depth=zip_depth,
+                                            filename=filename,
+                                            content_type=attachment_info.get("content_type", ""),
+                                            content_disposition=attachment_info.get("content_disposition", ""),
+                                            email_id=attachment_info.get("email_id", email_id_str),
+                                            sender=attachment_info.get("sender", sender),
+                                            subject=attachment_info.get("subject", subject),
+                                        )
                                     except Exception:
                                         processed_attachments.append({
                                             "filename": filename,
@@ -1644,7 +1846,27 @@ class EmailFetcher:
                                         })
                                         continue
 
+                                    if expansion.rejected or expansion.skipped:
+                                        self._emit_extract_attachments_diagnostic({
+                                            "event": "zip_container_limited",
+                                            "email_id": attachment_info.get("email_id", email_id_str),
+                                            "container": os.path.basename(filename),
+                                            "zip_depth": zip_depth,
+                                            "member_count": int(expansion.member_count),
+                                            "rejected": bool(expansion.rejected),
+                                            "skip_reasons": _zip_skip_reasons(expansion),
+                                            "skipped_members": expansion.skipped,
+                                        })
+                                    for member in expansion.members:
+                                        process_queue.append(member)
+                                        appended_members += 1
+
                                     if appended_members == 0:
+                                        container_context = (
+                                            "zip_container_rejected"
+                                            if (expansion.rejected or expansion.skipped)
+                                            else "zip_container_filtered"
+                                        )
                                         processed_attachments.append({
                                             "filename": filename,
                                             "payload": payload,
@@ -1655,7 +1877,7 @@ class EmailFetcher:
                                                 tier=tier,
                                                 content_type=attachment_info.get("content_type", ""),
                                                 content_disposition=attachment_info.get("content_disposition", ""),
-                                                zip_context="zip_container_filtered",
+                                                zip_context=container_context,
                                             ),
                                             "email_id": attachment_info.get("email_id", email_id_str),
                                             "sender": attachment_info.get("sender", sender),
@@ -1663,7 +1885,7 @@ class EmailFetcher:
                                             "payload_size": len(payload),
                                             "content_type": attachment_info.get("content_type", ""),
                                             "content_disposition": attachment_info.get("content_disposition", ""),
-                                            "zip_context": "zip_container_filtered",
+                                            "zip_context": container_context,
                                         })
                                     else:
                                         self._emit_input_inventory_event({
@@ -1685,6 +1907,8 @@ class EmailFetcher:
                                             "inventory_status": "zip_container_expanded",
                                             "entered_main_chain": False,
                                             "zip_member_count": appended_members,
+                                            "zip_skipped_member_count": len(expansion.skipped),
+                                            "zip_skip_reasons": _zip_skip_reasons(expansion),
                                         })
                                     continue
                                 
@@ -1885,6 +2109,7 @@ class EmailFetcher:
         ):
             chunk = list(message_batch.requested_uids)
             prefetched_messages = dict(message_batch.messages)
+            prefetched_oversized = dict(message_batch.oversized_messages)
             logging.info(f"Processing chunk {batch_index}/{batch_total}")
 
             for e_id in chunk:
@@ -1913,6 +2138,7 @@ class EmailFetcher:
                     parts = []
                     last_parsed_msg = None
                     last_terminal_status = "fetch_no_usable_bytes"
+                    oversized_message_bytes = None
 
                     fetch_plan = [
                         ("RFC822", "(RFC822)"),
@@ -1928,6 +2154,20 @@ class EmailFetcher:
                         }:
                             break
 
+                        if attempt_index == 0 and e_id in prefetched_oversized:
+                            oversized_message_bytes = int(prefetched_oversized[e_id])
+                            email_diag["fetch_attempts"].append(
+                                {
+                                    "mode": "UID_BATCH_RFC822",
+                                    "status": "OVERSIZED",
+                                    "has_tuple_payload": False,
+                                    "raw_bytes_len": 0,
+                                    "error": "raw_message_too_large",
+                                    "oversized_bytes": oversized_message_bytes,
+                                }
+                            )
+                            break
+
                         if attempt_index == 0 and e_id in prefetched_messages:
                             raw_message_bytes = prefetched_messages[e_id]
                             fetch_attempt = {
@@ -1940,6 +2180,9 @@ class EmailFetcher:
                         else:
                             raw_message_bytes, fetch_attempt = self._fetch_message_bytes(e_id, fetch_command, mode_label)
                         email_diag["fetch_attempts"].append(fetch_attempt)
+                        if fetch_attempt.get("error") == "raw_message_too_large":
+                            oversized_message_bytes = int(fetch_attempt.get("oversized_bytes", 0) or 0)
+                            break
                         if fetch_attempt["raw_bytes_len"] > 0:
                             email_diag["fetch_has_usable_bytes"] = True
 
@@ -1978,6 +2221,23 @@ class EmailFetcher:
                         break
 
                     if selected_msg is None:
+                        if oversized_message_bytes is not None:
+                            # Record the skip reason (never silently drop it) and
+                            # move on: this is untrusted input, not a run failure.
+                            email_diag["terminal_status"] = "raw_message_too_large"
+                            last_attempt = email_diag["fetch_attempts"][-1] if email_diag["fetch_attempts"] else {}
+                            self._emit_oversized_message_diagnostic(
+                                e_id,
+                                payload_bytes=oversized_message_bytes,
+                                mode=str(last_attempt.get("mode", "")),
+                            )
+                            logging.warning(
+                                "Skipped oversized RFC822 message uid_hash=%s bytes=%s limit=%s",
+                                hashlib.sha256(e_id).hexdigest()[:12],
+                                oversized_message_bytes,
+                                self.max_raw_message_bytes,
+                            )
+                            continue
                         if last_parsed_msg is not None:
                             email_diag["subject"] = email_diag["subject"] or decode_str(last_parsed_msg.get("Subject"))
                             email_diag["sender"] = email_diag["sender"] or decode_str(last_parsed_msg.get("From", ""))
@@ -2056,6 +2316,7 @@ class EmailFetcher:
                                 "subject": subject,
                                 "payload_size": len(payload),
                                 "zip_context": "direct_attachment",
+                                "zip_depth": 0,
                             })
 
                     email_diag["attachment_detected"] = bool(email_diag["attachments"])
@@ -2138,6 +2399,7 @@ class EmailFetcher:
                             email_diag["staging_write_failures"] += 1
                             raise
 
+                    zip_limit_reports = []
                     while process_queue:
                         attachment_info = process_queue.pop(0)
                         filename = attachment_info["filename"]
@@ -2145,26 +2407,19 @@ class EmailFetcher:
                         ext = os.path.splitext(filename)[1].lower()
 
                         if ext == '.zip':
+                            zip_depth = int(attachment_info.get("zip_depth", 0) or 0)
                             appended_members = 0
                             try:
-                                with zipfile.ZipFile(BytesIO(payload)) as zf:
-                                    for zname in zf.namelist():
-                                        zext = os.path.splitext(zname)[1].lower()
-                                        if zext in VALID_EXTENSIONS or zext in {'.zip', '.ofd', '.xml'}:
-                                            zdata = zf.read(zname)
-                                            process_queue.append({
-                                                "filename": os.path.basename(zname),
-                                                "payload": zdata,
-                                                "content_type": attachment_info.get("content_type", "application/zip"),
-                                                "content_disposition": attachment_info.get("content_disposition", ""),
-                                                "email_id": attachment_info.get("email_id", email_id_str),
-                                                "sender": attachment_info.get("sender", sender),
-                                                "subject": attachment_info.get("subject", subject),
-                                                "payload_size": len(zdata),
-                                                "zip_context": "zip_member_extracted",
-                                                "parent_zip_filename": filename,
-                                            })
-                                            appended_members += 1
+                                expansion = _expand_zip_attachment(
+                                    payload,
+                                    zip_depth=zip_depth,
+                                    filename=filename,
+                                    content_type=attachment_info.get("content_type", ""),
+                                    content_disposition=attachment_info.get("content_disposition", ""),
+                                    email_id=attachment_info.get("email_id", email_id_str),
+                                    sender=attachment_info.get("sender", sender),
+                                    subject=attachment_info.get("subject", subject),
+                                )
                             except Exception:
                                 processed_attachments.append({
                                     "filename": filename,
@@ -2188,28 +2443,41 @@ class EmailFetcher:
                                 })
                                 continue
 
-                            if appended_members == 0:
-                                processed_attachments.append({
-                                    "filename": filename,
-                                    "payload": payload,
-                                    "ext": ext,
-                                    "decision": _build_attachment_candidate_decision(
-                                        filename,
-                                        payload,
-                                        tier=tier,
-                                        content_type=attachment_info.get("content_type", ""),
-                                        content_disposition=attachment_info.get("content_disposition", ""),
-                                        zip_context="zip_container_filtered",
-                                    ),
-                                    "email_id": attachment_info.get("email_id", email_id_str),
-                                    "sender": attachment_info.get("sender", sender),
-                                    "subject": attachment_info.get("subject", subject),
-                                    "payload_size": len(payload),
+                            # Surface every cap rejection/skip instead of silently
+                            # dropping evidence: per-member skip reasons land in the
+                            # email diagnostics, per-container limits in the
+                            # inventory + diagnostics records.
+                            for skipped_member in expansion.skipped:
+                                email_diag["attachments"].append({
+                                    "filename": skipped_member.get("filename", ""),
                                     "content_type": attachment_info.get("content_type", ""),
                                     "content_disposition": attachment_info.get("content_disposition", ""),
-                                    "zip_context": "zip_container_filtered",
+                                    "payload_bytes_len": 0,
+                                    "staged": False,
+                                    "staging_error": str(skipped_member.get("reason") or ""),
                                 })
-                            else:
+                            if expansion.rejected or expansion.skipped:
+                                zip_limit_reports.append({
+                                    "container": os.path.basename(filename),
+                                    "zip_depth": zip_depth,
+                                    "member_count": int(expansion.member_count),
+                                    "rejected": bool(expansion.rejected),
+                                    "reject_reason": expansion.reject_reason,
+                                    "skip_reasons": _zip_skip_reasons(expansion),
+                                    "skipped_members": [
+                                        {
+                                            "filename": item.get("filename", ""),
+                                            "declared_bytes": int(item.get("declared_bytes", 0) or 0),
+                                            "reason": item.get("reason", ""),
+                                        }
+                                        for item in expansion.skipped
+                                    ],
+                                })
+                            for member in expansion.members:
+                                process_queue.append(member)
+                                appended_members += 1
+
+                            if appended_members:
                                 self._emit_input_inventory_event({
                                     "email_id": attachment_info.get("email_id", email_id_str),
                                     "sender": attachment_info.get("sender", sender),
@@ -2229,6 +2497,57 @@ class EmailFetcher:
                                     "inventory_status": "zip_container_expanded",
                                     "entered_main_chain": False,
                                     "zip_member_count": appended_members,
+                                    "zip_skipped_member_count": len(expansion.skipped),
+                                    "zip_skip_reasons": _zip_skip_reasons(expansion),
+                                })
+                                continue
+
+                            if expansion.rejected or expansion.skipped:
+                                container_context = "zip_container_rejected"
+                            else:
+                                container_context = "zip_container_filtered"
+                            processed_attachments.append({
+                                "filename": filename,
+                                "payload": payload,
+                                "ext": ext,
+                                "decision": _build_attachment_candidate_decision(
+                                    filename,
+                                    payload,
+                                    tier=tier,
+                                    content_type=attachment_info.get("content_type", ""),
+                                    content_disposition=attachment_info.get("content_disposition", ""),
+                                    zip_context=container_context,
+                                ),
+                                "email_id": attachment_info.get("email_id", email_id_str),
+                                "sender": attachment_info.get("sender", sender),
+                                "subject": attachment_info.get("subject", subject),
+                                "payload_size": len(payload),
+                                "content_type": attachment_info.get("content_type", ""),
+                                "content_disposition": attachment_info.get("content_disposition", ""),
+                                "zip_context": container_context,
+                            })
+                            if container_context == "zip_container_rejected":
+                                self._emit_input_inventory_event({
+                                    "email_id": attachment_info.get("email_id", email_id_str),
+                                    "sender": attachment_info.get("sender", sender),
+                                    "subject": attachment_info.get("subject", subject),
+                                    "original_filename": filename,
+                                    "attachment_ext": ext,
+                                    "payload_size": len(payload),
+                                    "mime_content_type": attachment_info.get("content_type", ""),
+                                    "content_disposition": attachment_info.get("content_disposition", ""),
+                                    "attachment_pair_key": self._attachment_pair_key(filename),
+                                    "sibling_pdf_present": False,
+                                    "sibling_ofd_present": False,
+                                    "sibling_xml_present": False,
+                                    "provider_unzipped_pair_suspected": False,
+                                    "zip_context": "direct_attachment",
+                                    "candidate_action": "retain_outer_container",
+                                    "inventory_status": "zip_container_rejected",
+                                    "entered_main_chain": False,
+                                    "zip_member_count": 0,
+                                    "zip_skipped_member_count": len(expansion.skipped),
+                                    "zip_skip_reasons": _zip_skip_reasons(expansion),
                                 })
                             continue
 
@@ -2252,6 +2571,9 @@ class EmailFetcher:
                             "content_disposition": attachment_info.get("content_disposition", ""),
                             "zip_context": attachment_info.get("zip_context", "direct_attachment"),
                         })
+
+                    if zip_limit_reports:
+                        email_diag["zip_limits"] = zip_limit_reports
 
                     raw_attachment_exts = {}
                     for raw_attachment in attachments_found:

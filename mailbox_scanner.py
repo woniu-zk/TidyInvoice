@@ -9,10 +9,19 @@ import re
 import ssl
 from dataclasses import dataclass
 from typing import Callable, Iterable
-from zoneinfo import ZoneInfo
 
 
-SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
+# Fixed UTC+8 offset: China has had no DST since 1991, so this is byte-for-byte
+# equivalent to Asia/Shanghai for every real message date, while removing the
+# import-time `zoneinfo`/tzdata dependency that broke Windows release builds.
+SHANGHAI_TZ = dt.timezone(dt.timedelta(hours=8))
+
+# A single RFC822 message is fully buffered before MIME parsing, so its byte
+# length is attacker-controlled (any sender can deliver a huge message, or the
+# server can return a missing message body). Refuse to hold anything above this
+# hard cap; the caller records the skip reason instead of failing the whole run.
+DEFAULT_MAX_MESSAGE_BYTES = 50 * 1024 * 1024
+
 _UID_PATTERN = re.compile(rb"\bUID\s+(\d+)\b", flags=re.IGNORECASE)
 _INTERNALDATE_PATTERN = re.compile(
     rb'\bINTERNALDATE\s+"([^"]+)"', flags=re.IGNORECASE
@@ -62,6 +71,9 @@ class MessageBatch:
     requested_uids: tuple[bytes, ...]
     messages: tuple[tuple[bytes, bytes], ...]
     unresolved_uids: tuple[bytes, ...]
+    # UID -> raw byte length for messages rejected by the hard size cap. They are
+    # deliberately not reported as unresolved: the caller records a skip reason.
+    oversized_messages: tuple[tuple[bytes, int], ...] = ()
 
 
 class MailboxScanner:
@@ -75,14 +87,18 @@ class MailboxScanner:
         header_batch_size: int = 200,
         body_batch_size: int = 25,
         max_attempts: int = 2,
+        max_message_bytes: int = DEFAULT_MAX_MESSAGE_BYTES,
         diagnostic_callback: Callable[[dict], None] | None = None,
     ):
         if header_batch_size < 1 or body_batch_size < 1 or max_attempts < 1:
             raise ValueError("batch sizes and max_attempts must be positive")
+        if int(max_message_bytes) < 1:
+            raise ValueError("max_message_bytes must be positive")
         self.mail = mail
         self.header_batch_size = header_batch_size
         self.body_batch_size = body_batch_size
         self.max_attempts = max_attempts
+        self.max_message_bytes = int(max_message_bytes)
         self.diagnostic_callback = diagnostic_callback
 
     def scan(
@@ -131,7 +147,7 @@ class MailboxScanner:
         ordered_uids = self.normalize_uids(uids)
         query = self._ensure_uid_query(query or self.MESSAGE_QUERY)
         for chunk in self._chunks(ordered_uids, self.body_batch_size):
-            fetched, unresolved = self._fetch_message_subset(chunk, query)
+            fetched, oversized, unresolved = self._fetch_message_subset(chunk, query)
             ordered_messages = tuple(
                 (uid, fetched[uid]) for uid in chunk if uid in fetched
             )
@@ -139,12 +155,19 @@ class MailboxScanner:
                 "imap_message_batch_ready",
                 requested_count=len(chunk),
                 buffered_count=len(ordered_messages),
+                oversized_count=len(oversized),
                 unresolved_count=len(unresolved),
             )
-            yield MessageBatch(tuple(chunk), ordered_messages, tuple(unresolved))
+            yield MessageBatch(
+                tuple(chunk),
+                ordered_messages,
+                tuple(unresolved),
+                tuple((uid, oversized[uid]) for uid in chunk if uid in oversized),
+            )
             del fetched
             del ordered_messages
             del unresolved
+            del oversized
 
     def fetch_messages(
         self, uids: Iterable[bytes], query: str | None = None
@@ -204,21 +227,30 @@ class MailboxScanner:
 
     def _fetch_message_subset(self, uids: list[bytes], query: str):
         if not uids:
-            return {}, []
+            return {}, {}, []
         response = self._uid_fetch_with_retry(uids, query, "message")
-        parsed = self._parse_payloads(response, set(uids)) if response is not None else {}
-        missing = [uid for uid in uids if uid not in parsed]
+        if response is not None:
+            parsed, oversized = self._parse_payloads(response, set(uids))
+        else:
+            parsed, oversized = {}, {}
+        # Cap-rejected payloads are intentionally excluded from the retry path:
+        # re-fetching a too-large message cannot make it smaller and would
+        # amplify the download.
+        missing = [uid for uid in uids if uid not in parsed and uid not in oversized]
         if not missing:
-            return parsed, []
+            return parsed, oversized, []
         if len(uids) == 1:
             self._emit_failed("message", uids)
-            return parsed, list(missing)
+            return parsed, oversized, list(missing)
         unresolved = []
         for subset in self._split(missing):
-            child_parsed, child_unresolved = self._fetch_message_subset(subset, query)
+            child_parsed, child_oversized, child_unresolved = self._fetch_message_subset(
+                subset, query
+            )
             parsed.update(child_parsed)
+            oversized.update(child_oversized)
             unresolved.extend(child_unresolved)
-        return parsed, unresolved
+        return parsed, oversized, unresolved
 
     @staticmethod
     def _ensure_uid_query(query: str) -> str:
@@ -271,15 +303,26 @@ class MailboxScanner:
             parsed[uid] = MessageRef(uid, message_date, internal_date)
         return parsed
 
-    @classmethod
-    def _parse_payloads(cls, response, requested: set[bytes]) -> dict[bytes, bytes]:
-        parsed = {}
-        for metadata, payload in cls._response_tuples(response):
-            uid = cls.extract_uid(metadata)
+    def _parse_payloads(self, response, requested: set[bytes]):
+        parsed: dict[bytes, bytes] = {}
+        oversized: dict[bytes, int] = {}
+        limit = self.max_message_bytes
+        for metadata, payload in self._response_tuples(response):
+            uid = self.extract_uid(metadata)
             if uid not in requested or uid in parsed or not payload:
                 continue
+            size = len(payload)
+            if size > limit:
+                oversized[uid] = size
+                self._emit(
+                    "imap_message_payload_too_large",
+                    uid_hash=hashlib.sha256(uid).hexdigest()[:12],
+                    payload_bytes=size,
+                    limit=limit,
+                )
+                continue
             parsed[uid] = payload
-        return parsed
+        return parsed, oversized
 
     @staticmethod
     def _response_tuples(response):

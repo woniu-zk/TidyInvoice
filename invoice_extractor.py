@@ -59,6 +59,7 @@ class InvoiceExtractor:
         glm_settings=None,
         close_glm_runtime=True,
         ai_provider=None,
+        local_recognition_only=False,
     ):
         """
         初始化大模型提取器, 使用文本/视觉模型提取发票信息并结构化
@@ -77,6 +78,9 @@ class InvoiceExtractor:
         vision_profile = getattr(self.glm_runtime, "profiles", {}).get("vision_quality")
         self.model = getattr(vision_profile, "name", "glm-4.5v")
         self._close_glm_runtime = bool(close_glm_runtime)
+        # No-API product mode: the pipeline worker reads the source document with
+        # the local recognition engine instead of calling a remote model.
+        self.local_recognition_only = bool(local_recognition_only)
         self._close_lock = threading.Lock()
         self._closed = False
         self.output_dir = os.path.abspath(output_dir)
@@ -1262,7 +1266,13 @@ class InvoiceExtractor:
         if not pdf_path or not os.path.exists(pdf_path):
             return LocalExtractionProbe("invalid", reason_code="LOCAL_SOURCE_MISSING")
         abs_pdf_path = os.path.abspath(pdf_path)
-        if os.path.splitext(abs_pdf_path)[1].lower() == ".xml":
+        source_extension = os.path.splitext(abs_pdf_path)[1].lower()
+        if source_extension not in {".pdf", ".xml"}:
+            # OFD / image sources are recognized by the local OCR stage.
+            return LocalExtractionProbe(
+                "needs_remote", reason_code="LOCAL_SOURCE_REQUIRES_LOCAL_OCR"
+            )
+        if source_extension == ".xml":
             try:
                 with open(abs_pdf_path, "rb") as handle:
                     fields = parse_direct_invoice_xml_fields(handle.read())
@@ -1372,6 +1382,20 @@ class InvoiceExtractor:
     def extract_remote_only(
         self, base64_images, custom_rules="", pdf_path=None, document_context=None
     ):
+        if getattr(self, "local_recognition_only", False):
+            # No-API recognition: direct parsing + local OCR, no network request.
+            from local_recognition import recognize_document
+
+            result = recognize_document(pdf_path)
+            self.last_extraction_trace = {
+                "engine": result.engine,
+                "reason_code": result.reason_code,
+                "confidence": result.confidence,
+                "warnings": list(result.warnings),
+                "text_length": result.text_length,
+            }
+            self.last_timing_trace = {"local_recognition_ms": result.elapsed_ms}
+            return result.payload
         return self.extract_info_via_llm(
             base64_images,
             custom_rules=custom_rules,

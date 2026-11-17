@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { apply } from '../lib/index.js'
+import { apply, inject } from '../lib/index.js'
 
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'invoice-activation-'))
@@ -17,13 +17,14 @@ function fixture(t) {
       fetch: { register: route => routes.set(route.path, route) },
     },
     subprocess: {},
-    sessions: {},
-    llm: {},
-    agentDefaultModel: {},
     credentials: {},
   }
   return { config, routes, context }
 }
+
+test('the plugin injects no model or session services', () => {
+  assert.deepEqual([...inject].sort(), ['connection', 'credentials', 'subprocess', 'webServer'])
+})
 
 test('the invoice route handles its own RPC envelope and rejects malformed calls', async t => {
   const { config, routes, context } = fixture(t)

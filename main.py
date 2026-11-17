@@ -3,11 +3,12 @@ import ctypes
 import json
 import os
 import sys
+import tempfile
 import time
 from pathlib import Path
 
 from frontend_run_context import set_explicit_run_context_path
-from user_settings import get_runtime_diagnostics_dir
+from user_settings import get_runtime_data_dir, get_runtime_diagnostics_dir
 
 
 WINDOW_BASELINE_WIDTH = 1360
@@ -19,6 +20,10 @@ WINDOW_TITLE = "InvoiceFlowAI"
 WEBVIEW2_RUNTIME_RELATIVE_DIR = Path("runtime") / "webview2-fixed"
 STARTUP_DIAGNOSTIC_CONTEXT = {}
 PACKAGED_UNBLOCK_SUFFIXES = {".dll", ".pyd", ".exe", ".json"}
+SINGLE_INSTANCE_MUTEX_NAME = "Local\\InvoiceFlowAI.SingleInstance"
+SINGLE_INSTANCE_LOCK_FILE_NAME = "instance.lock"
+ERROR_ALREADY_EXISTS = 183
+_SINGLE_INSTANCE_HANDLE = None
 
 
 def _coalesce_run_context_path(argv):
@@ -113,6 +118,84 @@ def _show_startup_error(message, title="InvoiceFlowAI Startup Error"):
         ctypes.windll.user32.MessageBoxW(None, str(message), title, 0x10)
     except Exception:
         pass
+
+
+def _single_instance_lock_path():
+    try:
+        return Path(get_runtime_data_dir()) / SINGLE_INSTANCE_LOCK_FILE_NAME
+    except Exception:
+        return Path(tempfile.gettempdir()) / f"InvoiceFlowAI-{SINGLE_INSTANCE_LOCK_FILE_NAME}"
+
+
+def _acquire_single_instance_guard():
+    """Return True when this process is the only running InvoiceFlowAI instance.
+
+    Windows uses a named kernel mutex; other platforms use an exclusive lock file
+    under the per-user runtime data directory. Any unexpected platform failure
+    fails open so that a missing guard can never block a legitimate first start.
+    """
+    global _SINGLE_INSTANCE_HANDLE
+    if _SINGLE_INSTANCE_HANDLE is not None:
+        return True
+
+    if os.name == "nt":
+        try:
+            kernel32 = ctypes.windll.kernel32
+            kernel32.CreateMutexW.restype = ctypes.c_void_p
+            kernel32.GetLastError.restype = ctypes.c_ulong
+            handle = kernel32.CreateMutexW(None, False, SINGLE_INSTANCE_MUTEX_NAME)
+            already_running = kernel32.GetLastError() == ERROR_ALREADY_EXISTS
+        except Exception:
+            return True
+        if not handle:
+            return True
+        if already_running:
+            try:
+                kernel32.CloseHandle(ctypes.c_void_p(handle))
+            except Exception:
+                pass
+            return False
+        _SINGLE_INSTANCE_HANDLE = handle
+        return True
+
+    try:
+        import fcntl
+    except ImportError:
+        return True
+
+    lock_path = _single_instance_lock_path()
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_handle = open(lock_path, "a+", encoding="utf-8")
+    except OSError:
+        return True
+
+    try:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        lock_handle.close()
+        return False
+
+    try:
+        lock_handle.seek(0)
+        lock_handle.truncate()
+        lock_handle.write(str(os.getpid()))
+        lock_handle.flush()
+    except OSError:
+        pass
+    _SINGLE_INSTANCE_HANDLE = lock_handle
+    return True
+
+
+def _show_already_running_message():
+    message = "InvoiceFlowAI 已在运行，请使用已打开的窗口。"
+    if os.name == "nt":
+        try:
+            ctypes.windll.user32.MessageBoxW(None, message, WINDOW_TITLE, 0x40)
+            return
+        except Exception:
+            pass
+    print(message, file=sys.stderr)
 
 
 def _startup_diagnostic_path():
@@ -321,7 +404,7 @@ def _resolve_window_geometry(webview_module):
 
 def _ensure_expected_frontend_assets(current_dir):
     html_path = current_dir / "templates" / "index.html"
-    js_path = current_dir / "templates" / "index_app.js"
+    js_path = current_dir / "templates" / "index_app.built.js"
 
     if not html_path.is_file():
         raise FileNotFoundError(f"Frontend HTML not found: {html_path}")
@@ -379,6 +462,10 @@ def main(argv=None):
             return 1
 
     run_context_path = str(args.run_context_path or "").strip()
+    if not _acquire_single_instance_guard():
+        _show_already_running_message()
+        return 2
+
     if run_context_path:
         resolved_run_context_path = Path(run_context_path).expanduser().resolve()
         if not resolved_run_context_path.is_file():

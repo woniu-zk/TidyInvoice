@@ -8,7 +8,10 @@ param(
     [switch]$RunPortableZip,
     [switch]$RunInstaller,
     [switch]$SignArtifacts,
-    [switch]$SkipPythonVersionCheck
+    [switch]$SkipPythonVersionCheck,
+    [switch]$SkipWebView2Prune,
+    [switch]$WebView2PruneDryRun,
+    [switch]$SkipFrontendPrecompile
 )
 
 Set-StrictMode -Version Latest
@@ -300,6 +303,13 @@ modules = [
     ("pyzbar", "pyzbar"),
     ("requests", "requests"),
     ("beautifulsoup4", "bs4"),
+    ("rapidocr_onnxruntime", "rapidocr_onnxruntime"),
+    ("onnxruntime", "onnxruntime"),
+    ("opencv", "cv2"),
+    ("numpy", "numpy"),
+    ("PyYAML", "yaml"),
+    ("shapely", "shapely"),
+    ("pyclipper", "pyclipper"),
 ]
 
 rows = []
@@ -333,6 +343,55 @@ print(json.dumps({"rows": rows, "missing": missing}, ensure_ascii=False))
     }
 
     return $result
+}
+
+function Invoke-WebView2Prune {
+    $pruneScriptPath = Resolve-RepoPath "build/windows/prune_webview2_runtime.ps1"
+    $policyPath = Resolve-RepoPath "build/windows/webview2-prune-policy.json"
+    $runtimeSourcesPath = Resolve-RepoPath "build/windows/runtime-sources.json"
+
+    Assert-LeafPathExists -PathValue $pruneScriptPath -Label "WebView2 prune script"
+    Assert-LeafPathExists -PathValue $policyPath -Label "WebView2 prune policy"
+    Assert-LeafPathExists -PathValue $runtimeSourcesPath -Label "Runtime sources manifest"
+
+    $runtimeSources = Get-Content -Raw -Encoding UTF8 $runtimeSourcesPath | ConvertFrom-Json
+    $runtimeDir = Resolve-RepoPath ([string]$runtimeSources.webview2.runtime_dir)
+
+    # Hashtable splatting keeps the parameters named; array splatting would pass
+    # "-DryRun" as a positional value instead of binding the switch.
+    $pruneArguments = @{
+        RuntimeDir = $runtimeDir
+        PolicyPath = $policyPath
+    }
+    if ($WebView2PruneDryRun) {
+        $pruneArguments["DryRun"] = $true
+        Write-Warning "WebView2 pruning is running in dry-run mode; the packaged runtime will NOT be pruned."
+    }
+
+    Write-Host "Pruning fixed WebView2 runtime before packaging..."
+    & $pruneScriptPath @pruneArguments
+}
+
+function Invoke-FrontendPrecompile {
+    $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
+    if (-not $nodeCommand -or [string]::IsNullOrWhiteSpace([string]$nodeCommand.Source)) {
+        throw "Node.js is required to precompile the frontend bundle (node tools/compile-frontend.mjs) but 'node' was not found on PATH. Install Node.js 20+ before building the release."
+    }
+
+    $compileScriptPath = Resolve-RepoPath "tools/compile-frontend.mjs"
+    Assert-LeafPathExists -PathValue $compileScriptPath -Label "Frontend compile script (tools/compile-frontend.mjs)"
+    Assert-LeafPathExists -PathValue (Resolve-RepoPath "templates/index_app.js") -Label "Frontend JSX source (templates/index_app.js)"
+
+    $nodeVersion = (& $nodeCommand.Source --version | Select-Object -First 1)
+    Write-Host "Node.js: $($nodeCommand.Source) ($($nodeVersion.Trim()))"
+    Write-Host "Precompiling frontend bundle before packaging..."
+
+    & $nodeCommand.Source $compileScriptPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "Frontend precompile failed with exit code $LASTEXITCODE. Run node tools/compile-frontend.mjs manually to inspect the error."
+    }
+
+    Assert-LeafPathExists -PathValue (Resolve-RepoPath "templates/index_app.built.js") -Label "Compiled frontend bundle (templates/index_app.built.js)"
 }
 
 function Resolve-CallableTool {
@@ -773,6 +832,14 @@ Write-Host "Installer script: $installerScriptPath"
 if ($chromiumExcludeEntries.Count -gt 0) {
     Write-Host "Chromium packaging exclusions: $($chromiumExcludeEntries -join ', ')"
 }
+$webView2PruneMode = if ($SkipWebView2Prune) { "skipped" } elseif ($WebView2PruneDryRun) { "dry-run" } else { "enabled" }
+Write-Host "WebView2 runtime prune step: $webView2PruneMode"
+if ($SkipFrontendPrecompile) {
+    Write-Host "Frontend precompile step: skipped"
+}
+else {
+    Write-Host "Frontend precompile step: node tools/compile-frontend.mjs"
+}
 if (-not [string]::IsNullOrWhiteSpace($manifest.icon.exeIconPath)) {
     Write-Host "EXE icon: $iconPath"
 }
@@ -800,6 +867,20 @@ if ($RunPyInstaller) {
     Remove-PathIfExists -PathValue $portableZipPath
     Remove-PathIfExists -PathValue $installerOutputDir
     Remove-PathIfExists -PathValue $sha256OutputPath
+
+    if ($SkipWebView2Prune) {
+        Write-Warning "Skipping WebView2 runtime pruning (-SkipWebView2Prune)."
+    }
+    else {
+        Invoke-WebView2Prune
+    }
+
+    if ($SkipFrontendPrecompile) {
+        Write-Warning "Skipping frontend precompile (-SkipFrontendPrecompile); templates/index_app.built.js must already match templates/index_app.js."
+    }
+    else {
+        Invoke-FrontendPrecompile
+    }
 
     $env:INVOICEFLOW_RUNTIME_SOURCE = $chromiumStageDir
     try {

@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 import re
 from typing import Any, Mapping
-from zoneinfo import ZoneInfo
 
 from document_types import DocumentType, normalize_document_type
 
 
-_SHANGHAI = ZoneInfo("Asia/Shanghai")
+# China is UTC+8 with no DST since 1991. A fixed offset keeps the release build
+# free of the `zoneinfo` database dependency (Windows wheels do not ship tzdata,
+# and `ZoneInfo("Asia/Shanghai")` at import time crashed the packaged app).
+_SHANGHAI = timezone(timedelta(hours=8))
 _UNKNOWN_TEXT = {
     "",
     "unknown",

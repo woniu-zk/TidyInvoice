@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 1,
+  "description": "Conservative keep/prune policy for the fixed-version WebView2 runtime that ships inside the Windows PyInstaller onedir build. The pruner only removes entries explicitly listed under 'prune' plus locale .pak files that are not listed under 'keep.localeFiles'. Every unrecognized top-level entry is kept, so a future runtime version that adds files does not silently lose them. Startup-critical entries under 'keep' are re-validated after pruning; a missing entry aborts the build instead of shipping a broken runtime.",
+  "runtimeRelativeDir": "build/runtime/webview2-fixed",
+  "policyNotes": [
+    "msedge.dll is ~300 MB and is never prunable; it is the bulk of the fixed runtime.",
+    "Only en-US, zh-CN and zh-TW locale resources are kept (UI language coverage for the shipped product).",
+    "EBWebView/x64/EmbeddedBrowserWebView.dll is required by the pywebview WinForms WebView2 control; the x86 flavor is unused on the 64-bit release.",
+    "WidevineCdm (DRM), PdfPreview/mspdf.dll (embedded PDF viewer), mscopilot.exe, oneauth.dll, telclient.dll, notification_helper.exe, elevated_tracing_service.exe and learning_tools.dll are Edge product features that the embedded app does not use.",
+    "Do not add requiredFiles entries for files that are only absent because the runtime has already been pruned; the required list must stay identical before and after pruning (idempotency contract)."
+  ],
+  "keep": {
+    "requiredFiles": [
+      "msedgewebview2.exe",
+      "msedge.dll",
+      "msedge_elf.dll",
+      "resources.pak",
+      "icudtl.dat",
+      "v8_context_snapshot.bin",
+      "libEGL.dll",
+      "libGLESv2.dll",
+      "d3dcompiler_47.dll",
+      "dxcompiler.dll",
+      "dxil.dll",
+      "vk_swiftshader.dll",
+      "vk_swiftshader_icd.json",
+      "vulkan-1.dll",
+      "msedge_100_percent.pak",
+      "msedge_200_percent.pak",
+      "msvcp140.dll",
+      "msvcp140_codecvt_ids.dll",
+      "vcruntime140.dll",
+      "vcruntime140_1.dll",
+      "concrt140.dll",
+      "vccorlib140.dll"
+    ],
+    "requiredNestedFiles": [
+      "EBWebView/x64/EmbeddedBrowserWebView.dll",
+      "Locales/en-US.pak"
+    ],
+    "optionalFiles": [
+      "EmbeddedBrowserWebView.dll"
+    ],
+    "requiredDirectories": [
+      "Locales",
+      "Dictionaries",
+      "EBWebView"
+    ],
+    "documentedTopLevelEntries": [
+      "Dictionaries",
+      "EBWebView",
+      "MEIPreload",
+      "Extensions",
+      "Trust Protection Lists",
+      "Installer",
+      "edge_feedback"
+    ],
+    "localeFiles": [
+      "en-US.pak",
+      "zh-CN.pak",
+      "zh-TW.pak"
+    ]
+  },
+  "prune": {
+    "topLevelEntries": [
+      "WidevineCdm",
+      "PdfPreview",
+      "mspdf.dll",
+      "mscopilot.exe",
+      "learning_tools.dll",
+      "oneauth.dll",
+      "telclient.dll",
+      "notification_helper.exe",
+      "elevated_tracing_service.exe",
+      "copilot_overlay_images_100_percent.pak",
+      "copilot_overlay_images_200_percent.pak",
+      "copilot_overlay_unscaled_images.pak"
+    ],
+    "nestedPaths": [
+      "EBWebView/x86"
+    ]
+  },
+  "expected": {
+    "minBytesFreed": 170000000,
+    "maxBytesFreed": 220000000
+  }
+}

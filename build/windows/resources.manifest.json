@@ -34,6 +34,26 @@
     "compilerPath": ""
   },
   "runtimeHook": "build/windows/runtime_hook_playwright.py",
+  "ocr": {
+    "requiredModules": [
+      "rapidocr_onnxruntime",
+      "onnxruntime",
+      "cv2",
+      "numpy",
+      "yaml"
+    ],
+    "submodulePackages": [
+      "rapidocr_onnxruntime",
+      "onnxruntime"
+    ],
+    "dataModules": [
+      "rapidocr_onnxruntime"
+    ],
+    "binaryModules": [
+      "onnxruntime",
+      "rapidocr_onnxruntime"
+    ]
+  },
   "windowsManifest": "build/windows/app.manifest",
   "sha256": {
     "outputFile": "SHA256SUMS.txt"
@@ -55,6 +75,8 @@
     "user_settings.py",
     "build/windows/app.manifest",
     "build/windows/installer/InvoiceFlowAI.iss",
+    "build/windows/prune_webview2_runtime.ps1",
+    "build/windows/webview2-prune-policy.json",
     "build/runtime/webview2-fixed/msedgewebview2.exe",
     "templates/index.html",
     "templates/index_app.js",
@@ -92,7 +114,14 @@
     "PIL",
     "playwright",
     "playwright.sync_api",
-    "pyzbar"
+    "pyzbar",
+    "rapidocr_onnxruntime",
+    "onnxruntime",
+    "cv2",
+    "numpy",
+    "yaml",
+    "shapely",
+    "pyclipper"
   ],
   "excludedPaths": [
     ".claude/",

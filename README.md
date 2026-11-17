@@ -13,17 +13,17 @@
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python&logoColor=white)
 ![License](https://img.shields.io/badge/License-Apache--2.0-blue)
-![AI](https://img.shields.io/badge/AI-GLM--4.5V%20%7C%20GLM--OCR-purple)
+![Recognition](https://img.shields.io/badge/Recognition-Local%20Parse%20%2B%20OCR-purple)
 ![Platform](https://img.shields.io/badge/Platform-Windows%2011%20%7C%20macOS-lightblue)
 ![Status](https://img.shields.io/badge/Status-Stable-brightgreen)
 
 **把邮箱中的 PDF、OFD、XML 电子发票和部分发票下载链接，整理成分类文件与 Excel 报销汇总。**
 
-面向每月需要手工收集多张电子发票的个人、自由职业者和小团队。连接自己的 QQ、163 或 88 邮箱后，可批量收集发票、OCR 识别、分类归档并生成汇总；低置信度结果保留给用户人工检查。
+面向每月需要手工收集多张电子发票的个人、自由职业者和小团队。连接自己的 QQ、163 或 88 邮箱后，可批量收集发票、本地解析与 OCR 识别、分类归档并生成汇总；无法可靠识别的内容保留给用户人工复核。
 
 下载：[最新 Windows（安装版 / 免安装版）与 macOS（Apple Silicon）安装包](https://github.com/EthanYoQ/Invoice-Downloader/releases/latest)
 
-*邮件和发票文件在本地处理。启用 GLM 或 DeepSeek 识别时，发票图片或提取文本会发送到你配置的模型服务商用于字段提取。*
+*邮件和发票文件全程在本地处理：电子发票直接解析，扫描件与图片由内置的本地 OCR 识别；识别不需要联网、不需要 API Key，发票内容不会上传。*
 
 </div>
 
@@ -33,14 +33,14 @@
 
 ## DeepSeek Harness 插件
 
-`@ethanyoq/dsh-invoice-downloader` 将本地 IMAP 发票下载、OCR、归档和 Excel 汇总带到 DeepSeek Harness 的右侧边栏。适用于希望把重复整理工作交给本地自动化、同时保留人工复核的报销场景。
+`@ethanyoq/dsh-invoice-downloader` 将本地 IMAP 发票下载、本地解析与 OCR、归档和 Excel 汇总带到 DeepSeek Harness 的右侧边栏。适用于希望把重复整理工作交给本地自动化、同时保留人工复核的报销场景。
 
 ```powershell
 dsh plugin --profile web add @ethanyoq/dsh-invoice-downloader
 dsh web --profile web
 ```
 
-打开右侧的“发票下载”入口，选择保存位置，安装一次本地引擎后填写 QQ、163 或 88 邮箱的 IMAP 授权码。首次安装需要联网下载 Python 依赖和 Chromium；`rapidocr-onnxruntime` 的 pip wheel 自带默认 PP-OCRv3 模型，无需额外手动下载模型。发票文件在本地 OCR；OCR 文本发送给当前选择的 DeepSeek 模型提取字段。插件支持 Windows x64 和 macOS Apple Silicon，授权码由 DSH 凭据服务保存，不写入插件设置或扫描日志。
+打开右侧的“发票下载”入口，选择保存位置，安装一次本地引擎后填写 QQ、163 或 88 邮箱的 IMAP 授权码。首次安装需要联网下载 Python 依赖和 Chromium；`rapidocr-onnxruntime` 的 pip wheel 自带默认 PP-OCRv3 模型，无需额外手动下载模型。发票文件与识别文本均在本机处理，插件不需要模型或 API Key。插件支持 Windows x64 和 macOS Apple Silicon，授权码由 DSH 凭据服务保存，不写入插件设置或扫描日志。
 
 ---
 
@@ -49,7 +49,7 @@ dsh web --profile web
 | &nbsp; | 特性 | 说明 |
 |--------|------|------|
 | 🔒 | **一键运行，开箱即用** | 解压即可运行，无需安装 Python 或任何依赖 |
-| 🤖 | **双引擎 AI 识别** | Track A（OCR精确流）+ Track B（视觉降级流），自动切换，无需手动操作 |
+| 🔎 | **本地识别引擎** | PDF 文本层、OFD 与数电票 XML 直接解析，扫描件与图片走内置本地 OCR，无需联网与 API Key |
 | 🔍 | **四层智能漏斗** | 白名单域名 → 主题关键字 → 正文检测 → 二维码扫描，精准过滤非发票邮件 |
 | 📄 | **链接发票自动恢复** | Playwright 自动打开百望云、税务平台链接，下载正式 PDF 存档 |
 | 🧾 | **发票与凭证自动撮合** | 住宿发票/水单、打车发票/行程单自动配对并相邻命名归档 |
@@ -68,36 +68,35 @@ flowchart LR
     C -->|"通过"| D["📎 附件提取\nZIP 递归解包"]
     C -->|"丢弃"| X["🗑️ 非发票邮件"]
     D --> E{"附件类型?"}
-    E -->|"PDF/OFD/XML"| F["🤖 AI 提取引擎"]
+    E -->|"PDF/OFD/XML"| F["🔎 本地识别\nPDF 文本 / OFD / 数电票 XML\n本地 OCR → 规则抽取"]
     E -->|"URL 链接"| G["🌐 PDF 恢复\nPlaywright"]
     G --> F
-    F --> H{"提取\n成功?"}
+    F --> H{"识别\n成功?"}
     H -->|"✅"| I["📂 智能分类\n规则重命名"]
-    H -->|"❌"| J["📁 Manual_Check"]
+    H -->|"❌"| J["📁 待人工复核"]
     I --> K["🗂️ 本地归档"]
     K --> L["📊 Excel 报表"]
 ```
 
 ---
 
-## 🤖 双引擎 AI 提取架构
+## 🔎 本地识别链路
 
-系统采用 **Track A + Track B + Local Fallback** 三层防线，任何一层成功即采用结果，确保极高的识别成功率。
+识别全程在本机完成，按「确定性解析优先 → 本地 OCR 兜底 → 规则抽取与校验」的顺序处理，不需要联网、不需要 API Key，也不调用任何模型服务。
 
-![双引擎AI识别架构](docs/track-ab.svg)
-
-> **为什么这样设计？**
-> - **Track A**（OCR + LLM）：精度最高，先提取文字结构再理解
-> - **Track B**（glm-4.5V 视觉）：直接"看图"，适合复杂排版或图片类发票
-> - **Local Fallback**：本地正则规则，断网可用，零 API 消耗
+> **识别顺序**
+> - **文本层 PDF**：用 PyMuPDF 直接读取版式文本，不经过 OCR
+> - **OFD / 数电票 / 增值税 XML**：按容器结构与字段别名直接解析
+> - **扫描件与图片**：交给内置的本地 OCR（RapidOCR + ONNX Runtime，模型随依赖提供）
+> - **规则抽取**：按锚点与正则规则映射票面字段，例如金额按「价税合计（大写）/（小写）」锚点定位
 >
-> 默认使用智谱 GLM。选择 DeepSeek 时跳过专用 OCR：PDF 有可用的内嵌文本时按文本提取，扫描件直接进入视觉识别。
+> **离线一致性校验**：核对合计金额 + 税额与价税合计的勾稽关系、日期是否可解析、票号是否为合法数字串；无法确认时不猜测，转入「待人工复核」由用户核对。
 
 ---
 
 ## 🔍 四层智能筛选漏斗
 
-系统不会对每封邮件都调用 AI，而是先经过四层漏斗精准判断，大幅降低误识别率和 API 费用。
+系统不会对每封邮件都进入识别流程，而是先经过四层漏斗精准判断，减少无效识别与误判。
 
 ![四层智能筛选漏斗](docs/funnel.svg)
 
@@ -107,7 +106,7 @@ flowchart LR
 |------|----------|----------|
 | 🗑️ **A 层**（丢弃） | Tracking pixel、Logo、装饰图（≤32px） | 直接跳过 |
 | 📦 **B 层**（暂存） | 附件 >5MB、ZIP 解包失败 | 保留但不处理 |
-| ✅ **C 层**（归档） | 正常 PDF/OFD/XML | 进入 AI 提取流程 |
+| ✅ **C 层**（归档） | 正常 PDF/OFD/XML | 进入本地识别流程 |
 
 ---
 
@@ -122,14 +121,14 @@ flowchart TD
     Detect -->|"国税·诺诺·航信"| DI["📥 HTTP 直接下载\n识别发票族群\n本地字段校验"]
     Detect -->|"未知网页"| Generic["🌐 网页转 PDF\n检测登录/验证码\nA4 格式渲染"]
     BW & DI & Generic --> Final(["📄 本地 PDF"])
-    Final --> AI(["🤖 AI 提取流程"])
+    Final --> Rec(["🔎 本地识别\n解析 / OCR / 规则抽取"])
 ```
 
 ---
 
 ## ⚙️ 配置指南
 
-> 首次使用只需配置一次，之后每次扫描直接点击运行。
+> 首次使用只需配置一次（邮箱地址与授权码），之后每次扫描直接点击运行；识别引擎已内置，无需模型或 API Key。
 
 ### 第一步 · 开启 163 邮箱 IMAP
 
@@ -221,54 +220,19 @@ flowchart TD
 
 ---
 
-### 第四步 · 获取模型 API Key
-
-<details>
-<summary>📖 点击展开 GLM / DeepSeek API 配置步骤</summary>
-
-桌面端默认使用 **GLM-4.5V**（多模态视觉）和 **GLM-OCR** 识别发票内容，也可以在「智能处理引擎」中切换到 DeepSeek。
-
-**智谱 GLM**
-
-1. 访问 [open.bigmodel.cn](https://open.bigmodel.cn/)，注册账号
-2. 进入控制台 → **API Keys** → **创建 API Key**
-3. 复制并保存 Key（格式：`xxxxxxxx.xxxxxxxxxxxxxxxx`）
-
-**费用参考**
-
-| 情况 | 说明 |
-|------|------|
-| 🎁 新用户福利 | 赠送 500 万 GLM-4 tokens（30 天有效） |
-| 💰 推荐充值 | **5 元以内**，按量计费 |
-| 📊 使用估算 | 每张发票约消耗 1,000–3,000 tokens；每月 200 张，5 元可用约 12 个月 |
-
-**DeepSeek**
-
-1. 访问 [platform.deepseek.com](https://platform.deepseek.com/api_keys)，注册并登录
-2. 进入 **API Keys** 页面，创建并复制 Key
-3. 回到软件「智能处理引擎」卡片，将模型服务切换为 **DeepSeek**，填入这把 Key
-
-> 两套 Key 分开保存，切换模型服务不会清除另一把 Key。
-
-📚 [智谱 AI 开放平台](https://open.bigmodel.cn/) · [DeepSeek 开放平台](https://platform.deepseek.com/)
-
-</details>
-
----
-
 ## 🚀 快速开始
 
 ### Windows（安装版 / 免安装版）
 
 1. 安装版：运行 `InvoiceFlowAI-*-windows-x64-setup.exe`；免安装版：解压 `InvoiceFlowAI-*-windows-x64-portable.zip` 到普通文件夹（避免云盘同步目录），并保持 `_internal` 文件夹与 `InvoiceFlowAI.exe` 同级。
 2. 双击 `InvoiceFlowAI.exe`；首次启动会自动弹出设置界面。
-3. 填入邮箱地址与授权码（QQ、163 或 88）、GLM 或 DeepSeek API Key，保存后点击「开始扫描」。发票会自动归档到桌面「发票整理」文件夹。
+3. 填入邮箱地址与授权码（QQ、163 或 88），保存后点击「开始扫描」。识别在本机离线运行，扫描件与图片由内置 OCR 处理，无需联网或 API Key；发票会自动归档到桌面「发票整理」文件夹。
 
 ### macOS（Apple Silicon）
 
 1. 打开 `InvoiceFlowAI-*-macos-arm64.dmg`，将 `InvoiceFlowAI` 拖入“应用程序”文件夹。
 2. 首次启动会自动弹出设置界面。此版本未签名、未公证；若 macOS 阻止打开，请在“系统设置 → 隐私与安全性”中确认仍要打开。
-3. 填入邮箱地址与授权码（QQ、163 或 88）、GLM 或 DeepSeek API Key，保存后点击「开始扫描」。
+3. 填入邮箱地址与授权码（QQ、163 或 88），保存后点击「开始扫描」。识别在本机离线运行，扫描件与图片由内置 OCR 处理，无需联网或 API Key。
 
 ---
 
@@ -323,23 +287,16 @@ flowchart TD
 </details>
 
 <details>
-<summary>Q：GLM API 报错余额不足？</summary>
+<summary>Q：识别需要联网或填写 API Key 吗？</summary>
 
-登录 [open.bigmodel.cn](https://open.bigmodel.cn/) → 费用中心 → 充值。推荐充值 **5 元**，按量计费。
-
-</details>
-
-<details>
-<summary>Q：DeepSeek API 报错余额不足？</summary>
-
-登录 [platform.deepseek.com](https://platform.deepseek.com/) → 充值页面完成充值。如果当前模型服务为 DeepSeek，处理页会显示对应提示。
+不需要。电子发票由本机直接解析，扫描件与图片由内置的本地 OCR 识别，模型随软件提供；识别过程不联网、不调用模型服务，也不需要填写 API Key。
 
 </details>
 
 <details>
-<summary>Q：部分发票进入 Manual_Check 文件夹？</summary>
+<summary>Q：部分发票进入「待人工复核」文件夹？</summary>
 
-正常现象。当 AI 识别置信度不足时，系统自动放入 `Manual_Check` 队列，需人工确认。通常由图片模糊、非标准票据或加密 PDF 导致。
+正常现象。当本地解析与规则校验无法可靠确认时，系统自动放入「待人工复核」目录，需人工确认。通常由图片模糊、非标准票据或加密 PDF 导致。
 
 </details>
 
@@ -349,7 +306,7 @@ flowchart TD
 
 - 所有邮件、发票文件均在**本地处理**，不上传任何服务器
 - 邮箱凭据在 Windows 通过 **DPAPI** 加密存储，在 macOS 通过 **Keychain** 存储
-- 调用所选模型服务时，仅发送完成识别所需的**发票图片**（Base64）或提取文本，不发送邮件原文内容
+- 识别全程在本机完成：电子发票直接解析，扫描件与图片由内置 OCR 处理；不调用模型服务，也不发送发票内容
 
 ---
 
@@ -363,7 +320,7 @@ flowchart TD
 
 **准确性与合规性** · 作者不保证发票数据或生成结果的准确性、完整性、合法性、税务合规性、财务合规性或会计合规性。用户必须自行核验所有发票、报销、税务、会计和合规结果后再使用。
 
-**数据** · 调用 GLM 或 DeepSeek API 时，发票图片或提取文本会发送至所选模型服务商进行识别，受对应服务商的隐私政策约束；邮件原文不会发送。
+**数据** · 识别与归档在本机完成，不调用外部模型服务，发票文件与识别文本不会上传到第三方；邮件原文也不会被发送。
 
 **责任限制** · 作者不对使用本软件造成的损失、遗漏、错误、报销失败、税务风险、合规问题或数据丢失承担责任。
 
@@ -371,8 +328,6 @@ flowchart TD
 
 | 服务 | 用途 | 服务方 |
 |------|------|--------|
-| 智谱 GLM API | 发票 OCR 与视觉识别 | 北京智谱华章科技有限公司 |
-| DeepSeek API | 发票文本与视觉识别 | 杭州深度求索人工智能基础技术研究有限公司 |
 | QQ 邮箱 IMAP | 邮件读取 | 腾讯科技（深圳）有限公司 |
 | 163 邮箱 IMAP | 邮件读取 | 网易（杭州）网络有限公司 |
 | 88 完美邮箱 IMAP | 邮件读取 | 完美世界 |
@@ -389,6 +344,6 @@ flowchart TD
 
 Made with ❤️ by **EthanYoQ / Yong Qi**
 
-[报告问题](https://github.com/EthanYoQ/Invoice-Downloader/issues) · [智谱AI开放平台](https://open.bigmodel.cn/) · [163邮箱帮助](https://help.mail.163.com/) · [QQ邮箱帮助](https://service.mail.qq.com/detail/0/339)
+[报告问题](https://github.com/EthanYoQ/Invoice-Downloader/issues) · [163邮箱帮助](https://help.mail.163.com/) · [QQ邮箱帮助](https://service.mail.qq.com/detail/0/339)
 
 </div>

@@ -13,17 +13,17 @@
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python&logoColor=white)
 ![License](https://img.shields.io/badge/License-Apache--2.0-blue)
-![AI](https://img.shields.io/badge/AI-GLM--4.5V%20%7C%20GLM--OCR-purple)
+![Recognition](https://img.shields.io/badge/Recognition-Local%20Parse%20%2B%20OCR-purple)
 ![Platform](https://img.shields.io/badge/Platform-Windows%2011%20%7C%20macOS-lightblue)
 ![Status](https://img.shields.io/badge/Status-Stable-brightgreen)
 
 **Turn PDF, OFD, and XML e-invoices from your mailbox, plus supported invoice download links, into organized files and an Excel reimbursement summary.**
 
-Designed for individuals, freelancers, and small teams that manually collect multiple e-invoices each month. Connect your own QQ Mail, 163 Mail, or 88 Mail account to collect invoices in batches, run OCR, archive them by category, and create a summary while retaining low-confidence results for human review.
+Designed for individuals, freelancers, and small teams that manually collect multiple e-invoices each month. Connect your own QQ Mail, 163 Mail, or 88 Mail account to collect invoices in batches, parse and OCR them locally, archive them by category, and create a summary while retaining unclear results for human review.
 
 Download: [latest Windows installer / portable package and macOS (Apple Silicon) installer](https://github.com/EthanYoQ/Invoice-Downloader/releases/latest)
 
-*Email and invoice files are processed locally. If you enable GLM or DeepSeek recognition, invoice images or extracted text are sent to your configured model provider for field extraction.*
+*Email and invoice files are processed locally from start to finish: e-invoices are parsed directly, while scans and images go through the bundled local OCR. Recognition needs no network and no API key, and invoice content is never uploaded.*
 
 </div>
 
@@ -33,14 +33,14 @@ Download: [latest Windows installer / portable package and macOS (Apple Silicon)
 
 ## DeepSeek Harness Plugin
 
-`@ethanyoq/dsh-invoice-downloader` brings local IMAP invoice download, OCR, archiving, and Excel summaries to a right-side DeepSeek Harness panel. It is intended for reimbursement workflows that automate repetitive organizing while keeping a human review step.
+`@ethanyoq/dsh-invoice-downloader` brings local IMAP invoice download, local parsing and OCR, archiving, and Excel summaries to a right-side DeepSeek Harness panel. It is intended for reimbursement workflows that automate repetitive organizing while keeping a human review step.
 
 ```sh
 dsh plugin --profile web add @ethanyoq/dsh-invoice-downloader
 dsh web --profile web
 ```
 
-Open **Invoice Downloader** from the right-side entry, choose an output directory, install the local engine once, and enter a QQ Mail, 163 Mail, or 88 Mail IMAP authorization code. First-time setup needs network access to download Python dependencies and Chromium; the `rapidocr-onnxruntime` pip wheel includes the default PP-OCRv3 models, so no separate manual model download is required. Invoice files are OCRed locally; OCR text is sent to the currently selected DeepSeek model for field extraction. The plugin supports Windows x64 and macOS Apple Silicon. The DSH credential service stores authorization codes, never plugin settings or scan logs.
+Open **Invoice Downloader** from the right-side entry, choose an output directory, install the local engine once, and enter a QQ Mail, 163 Mail, or 88 Mail IMAP authorization code. First-time setup needs network access to download Python dependencies and Chromium; the `rapidocr-onnxruntime` pip wheel includes the default PP-OCRv3 models, so no separate manual model download is required. Invoice files and recognized text are processed entirely on this machine; the plugin needs no model or API key. The plugin supports Windows x64 and macOS Apple Silicon. The DSH credential service stores authorization codes, never plugin settings or scan logs.
 
 ---
 
@@ -49,7 +49,7 @@ Open **Invoice Downloader** from the right-side entry, choose an output director
 | &nbsp; | Feature | Description |
 |--------|---------|-------------|
 | 🔒 | **One-click launch, ready to use** | Extract and run — no need to install Python or any dependencies |
-| 🤖 | **Dual-engine AI recognition** | Track A (OCR precision flow) + Track B (vision fallback flow), automatic switching with no manual operation needed |
+| 🔎 | **Local recognition engine** | PDF text layers, OFD, and digital-invoice XML are parsed directly; scans and images go through bundled local OCR — no network or API key needed |
 | 🔍 | **Four-layer smart funnel** | Whitelist domains → Subject keywords → Body detection → QR code scanning, precisely filtering non-invoice emails |
 | 📄 | **Link-based invoice auto-recovery** | Playwright automatically opens Baiwang Cloud and tax platform links, downloading official PDF archives |
 | 🧾 | **Automatic invoice/document pairing** | Hotel invoice/folio and ride invoice/itinerary pairs are archived with adjacent names |
@@ -68,36 +68,35 @@ flowchart LR
     C -->|"Pass"| D["📎 Attachment Extraction\nZIP Recursive Unpack"]
     C -->|"Discard"| X["🗑️ Non-invoice Emails"]
     D --> E{"Attachment Type?"}
-    E -->|"PDF/OFD/XML"| F["🤖 AI Extraction Engine"]
+    E -->|"PDF/OFD/XML"| F["🔎 Local Recognition\nPDF text / OFD / Invoice XML\nLocal OCR → Rule Extraction"]
     E -->|"URL Link"| G["🌐 PDF Recovery\nPlaywright"]
     G --> F
-    F --> H{"Extraction\nSuccessful?"}
+    F --> H{"Recognition\nSuccessful?"}
     H -->|"✅"| I["📂 Smart Classification\nRule-based Renaming"]
-    H -->|"❌"| J["📁 Manual_Check"]
+    H -->|"❌"| J["📁 Manual Review"]
     I --> K["🗂️ Local Archiving"]
     K --> L["📊 Excel Report"]
 ```
 
 ---
 
-## 🤖 Dual-Engine AI Extraction Architecture
+## 🔎 Local Recognition Chain
 
-The system employs **Track A + Track B + Local Fallback** as a three-layer defense. If any layer succeeds, its result is adopted, ensuring an extremely high recognition success rate.
+Recognition runs entirely on this machine in the order "deterministic parsing first → local OCR fallback → rule extraction and checks". No network access, API key, or model service is involved.
 
-![Dual-Engine AI Recognition Architecture](docs/track-ab.svg)
-
-> **Why this design?**
-> - **Track A** (OCR + LLM): Highest precision — extracts text structure first, then understands it
-> - **Track B** (glm-4.5V Vision): Directly "looks at the image" — ideal for complex layouts or image-based invoices
-> - **Local Fallback**: Local regex rules — works offline with zero API consumption
+> **Processing order**
+> - **Text-layer PDF**: layout text is read directly with PyMuPDF, without OCR
+> - **OFD / digital-invoice / VAT XML**: parsed directly by container structure and field aliases
+> - **Scans and images**: handled by the bundled local OCR (RapidOCR + ONNX Runtime; models ship with the dependency)
+> - **Rule extraction**: fields are mapped by anchor and regex rules, for example amounts are located via the "tax-inclusive total (in words) / (in figures)" anchors
 >
-> Zhipu GLM is the default. When DeepSeek is selected, dedicated OCR is skipped: PDFs with useful embedded text go through text extraction, while scans go directly to vision recognition.
+> **Offline consistency checks**: verify that the amount plus tax reconciles with the tax-inclusive total, that dates are parseable, and that invoice numbers are valid digit strings; anything that cannot be confirmed is not guessed but routed to Manual Review for the user to check.
 
 ---
 
 ## 🔍 Four-Layer Smart Filtering Funnel
 
-The system does not call AI for every email. Instead, it first passes through a four-layer funnel for precise filtering, significantly reducing false recognition rates and API costs.
+The system does not run recognition on every email. Instead, it first passes through a four-layer funnel for precise filtering, reducing wasted recognition and false positives.
 
 ![Four-Layer Smart Filtering Funnel](docs/funnel.svg)
 
@@ -107,7 +106,7 @@ After passing the filter, attachments also go through a **three-tier decision pr
 |------|-------------------|----------|
 | 🗑️ **Tier A** (Discard) | Tracking pixels, logos, decorative images (≤32px) | Skipped directly |
 | 📦 **Tier B** (Hold) | Attachments >5MB, ZIP unpack failure | Retained but not processed |
-| ✅ **Tier C** (Archive) | Normal PDF/OFD/XML | Enters AI extraction pipeline |
+| ✅ **Tier C** (Archive) | Normal PDF/OFD/XML | Enters local recognition pipeline |
 
 ---
 
@@ -122,14 +121,14 @@ flowchart TD
     Detect -->|"Tax Bureau · Nuonuo · Aisino"| DI["📥 Direct HTTP Download\nIdentify Invoice Family\nLocal Field Validation"]
     Detect -->|"Unknown Webpage"| Generic["🌐 Web to PDF\nDetect Login/Captcha\nA4 Format Rendering"]
     BW & DI & Generic --> Final(["📄 Local PDF"])
-    Final --> AI(["🤖 AI Extraction Pipeline"])
+    Final --> Rec(["🔎 Local Recognition\nParsing / OCR / Rule Extraction"])
 ```
 
 ---
 
 ## ⚙️ Configuration Guide
 
-> Only needs to be configured once on first use; after that, just click run for each scan.
+> Only needs to be configured once on first use (email address and authorization code); after that, just click run for each scan. The recognition engine is built in — no model or API key required.
 
 ### Step 1 · Enable 163 Mailbox IMAP
 
@@ -221,54 +220,19 @@ flowchart TD
 
 ---
 
-### Step 4 · Obtain a Model API Key
-
-<details>
-<summary>📖 Click to expand GLM / DeepSeek API configuration steps</summary>
-
-The desktop app uses **GLM-4.5V** (multimodal vision) and **GLM-OCR** by default, and can switch to DeepSeek in the **AI Engine** card.
-
-**Zhipu GLM**
-
-1. Visit [open.bigmodel.cn](https://open.bigmodel.cn/) and register an account
-2. Go to Console → **API Keys** → **Create API Key**
-3. Copy and save the Key (format: `xxxxxxxx.xxxxxxxxxxxxxxxx`)
-
-**Cost Reference**
-
-| Scenario | Description |
-|----------|-------------|
-| 🎁 New User Bonus | 5 million GLM-4 tokens gifted (valid for 30 days) |
-| 💰 Recommended Top-up | **Under 5 yuan**, pay-as-you-go |
-| 📊 Usage Estimate | Each invoice consumes approximately 1,000–3,000 tokens; for 200 invoices/month, 5 yuan lasts about 12 months |
-
-**DeepSeek**
-
-1. Visit [platform.deepseek.com](https://platform.deepseek.com/api_keys), register, and sign in
-2. Open the **API Keys** page, create a Key, and copy it
-3. In the app's **AI Engine** card, switch the model service to **DeepSeek** and enter this Key
-
-> Both Keys are stored separately, so switching providers never clears the other one.
-
-📚 [Zhipu AI Open Platform](https://open.bigmodel.cn/) · [DeepSeek Open Platform](https://platform.deepseek.com/)
-
-</details>
-
----
-
 ## 🚀 Quick Start
 
 ### Windows (installer / portable)
 
 1. Installer: run `InvoiceFlowAI-*-windows-x64-setup.exe`. Portable: extract `InvoiceFlowAI-*-windows-x64-portable.zip` to a regular folder (avoid cloud-sync directories) and keep `_internal` beside `InvoiceFlowAI.exe`.
 2. Double-click `InvoiceFlowAI.exe`; the settings interface appears on first launch.
-3. Enter your email address and authorization code (QQ, 163, or 88) and a GLM or DeepSeek API Key, then click "Start Scanning". Invoices are archived to the "Invoice Organizer" folder on your desktop.
+3. Enter your email address and authorization code (QQ, 163, or 88), then click "Start Scanning". Recognition runs offline on this machine — scans and images are handled by the bundled OCR, with no network or API key needed. Invoices are archived to the "Invoice Organizer" folder on your desktop.
 
 ### macOS (Apple Silicon)
 
 1. Open `InvoiceFlowAI-*-macos-arm64.dmg` and drag `InvoiceFlowAI` to Applications.
 2. The settings interface appears on first launch. This build is unsigned and not notarized; if macOS blocks it, confirm opening it in **System Settings → Privacy & Security**.
-3. Enter your email address and authorization code (QQ, 163, or 88) and a GLM or DeepSeek API Key, then click "Start Scanning".
+3. Enter your email address and authorization code (QQ, 163, or 88), then click "Start Scanning". Recognition runs offline on this machine — scans and images are handled by the bundled OCR, with no network or API key needed.
 
 ---
 
@@ -323,23 +287,16 @@ Invoice Organizer/
 </details>
 
 <details>
-<summary>Q: GLM API reports insufficient balance?</summary>
+<summary>Q: Does recognition need network access or an API key?</summary>
 
-Log in to [open.bigmodel.cn](https://open.bigmodel.cn/) → Billing Center → Top Up. Recommended top-up of **5 yuan**, pay-as-you-go.
-
-</details>
-
-<details>
-<summary>Q: DeepSeek API reports insufficient balance?</summary>
-
-Open [platform.deepseek.com](https://platform.deepseek.com/) and complete a top-up. If DeepSeek is the active model service, the processing page shows the corresponding notice.
+No. E-invoices are parsed directly on this machine, and scans or images go through the bundled local OCR whose models ship with the software. Recognition never goes online, never calls a model service, and requires no API key.
 
 </details>
 
 <details>
-<summary>Q: Some invoices end up in the Manual_Check folder?</summary>
+<summary>Q: Some invoices end up in the Manual Review folder?</summary>
 
-This is normal. When AI recognition confidence is insufficient, the system automatically places invoices in the `Manual_Check` queue for manual confirmation. This is usually caused by blurry images, non-standard documents, or encrypted PDFs.
+This is normal. When local parsing and rule checks cannot confirm a result reliably, the system places the invoice in the Manual Review folder for human confirmation. This is usually caused by blurry images, non-standard documents, or encrypted PDFs.
 
 </details>
 
@@ -349,7 +306,7 @@ This is normal. When AI recognition confidence is insufficient, the system autom
 
 - All emails and invoice files are processed **locally** and are never uploaded to any server
 - Mailbox credentials are encrypted with **DPAPI** on Windows and stored in **Keychain** on macOS
-- When a model service is called, only the **invoice images** (Base64) or extracted text needed for recognition are sent; original email content is never sent
+- Recognition runs entirely on this machine: e-invoices are parsed directly, scans and images go through the bundled OCR; no model service is called and no invoice content is sent
 
 ---
 
@@ -363,7 +320,7 @@ By using this software, you acknowledge and accept the following terms.
 
 **Accuracy & Compliance** · The author does not warrant the accuracy, completeness, legality, tax compliance, financial compliance, or accounting compliance of any invoice data or generated results. Users must independently verify all invoices, reimbursements, tax filings, accounting records, and compliance outcomes before relying on them.
 
-**Data** · When calling GLM or DeepSeek APIs, invoice images or extracted text are sent to the selected model provider for recognition, subject to that provider's privacy policy. Original email content is never sent.
+**Data** · Recognition and archiving happen on this machine. No external model service is called, and invoice files or recognized text are never uploaded to a third party; original email content is never sent either.
 
 **Liability** · The author is not liable for any losses, omissions, errors, failed reimbursements, tax risks, compliance issues, or data loss arising from use of this software.
 
@@ -371,8 +328,6 @@ By using this software, you acknowledge and accept the following terms.
 
 | Service | Purpose | Provider |
 |---------|---------|----------|
-| Zhipu GLM API | Invoice OCR and visual recognition | Beijing Zhipu Huazhang Technology Co., Ltd. |
-| DeepSeek API | Invoice text and visual recognition | Hangzhou DeepSeek Artificial Intelligence Basic Technology Research Co., Ltd. |
 | QQ Mailbox IMAP | Email reading | Tencent Technology (Shenzhen) Co., Ltd. |
 | 163 Mailbox IMAP | Email reading | NetEase (Hangzhou) Network Co., Ltd. |
 | 88 Mailbox IMAP | Email reading | Perfect World |
@@ -389,6 +344,6 @@ Licensed under the [Apache License 2.0](LICENSE). Commercial use, modification, 
 
 Made with ❤️ by **EthanYoQ / Yong Qi**
 
-[Report Issues](https://github.com/EthanYoQ/Invoice-Downloader/issues) · [Zhipu AI Open Platform](https://open.bigmodel.cn/) · [163 Mailbox Help](https://help.mail.163.com/) · [QQ Mailbox Help](https://service.mail.qq.com/detail/0/339)
+[Report Issues](https://github.com/EthanYoQ/Invoice-Downloader/issues) · [163 Mailbox Help](https://help.mail.163.com/) · [QQ Mailbox Help](https://service.mail.qq.com/detail/0/339)
 
 </div>

@@ -74,16 +74,6 @@ window.__ModuleLoader__.load({
         color: 'var(--dsw-alias-label-primary)',
         outline: 'none',
       },
-      select: {
-        boxSizing: 'border-box',
-        width: '100%',
-        minHeight: '36px',
-        padding: '8px 10px',
-        border: '1px solid var(--dsw-alias-border-l2)',
-        borderRadius: '8px',
-        background: 'var(--dsw-alias-bg-layer-2)',
-        color: 'var(--dsw-alias-label-primary)',
-      },
       row: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px', minWidth: 0 },
       grow: { flex: '1 1 190px', minWidth: 0 },
       dates: { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '10px', minWidth: 0 },
@@ -168,17 +158,14 @@ window.__ModuleLoader__.load({
       const [settings, setSettings] = React.useState({
         email: '',
         authCode: '',
-        glmApiKey: '',
         dateFrom: '',
         dateTo: '',
         company: '',
         savePath: '',
-        ocrProvider: 'local',
       })
       const [runtime, setRuntime] = React.useState({ installed: false, enginePresent: false, platform: '' })
       const [loaded, setLoaded] = React.useState(false)
       const [hasAuthCode, setHasAuthCode] = React.useState(false)
-      const [hasGlmApiKey, setHasGlmApiKey] = React.useState(false)
       const [runtimeStatus, setRuntimeStatus] = React.useState({ kind: 'idle', message: '' })
       const [emailStatus, setEmailStatus] = React.useState({ kind: 'idle', message: '' })
       const [pathStatus, setPathStatus] = React.useState({ kind: 'idle', message: '' })
@@ -202,12 +189,11 @@ window.__ModuleLoader__.load({
         ]).then(([saved, runtimeResult, privacyResult]) => {
           if (!alive) return
           if (saved.ok) {
-            setSettings(previous => ({ ...previous, ...saved.value, authCode: '', glmApiKey: '' }))
+            setSettings(previous => ({ ...previous, ...saved.value, authCode: '' }))
             setHasAuthCode(Boolean(saved.value.hasAuthCode))
-            setHasGlmApiKey(Boolean(saved.value.hasGlmApiKey))
           }
           if (runtimeResult.ok) setRuntime(runtimeResult.value)
-          if (privacyResult.ok) setPrivacy(privacyResult.value.defaultChain || '')
+          if (privacyResult.ok) setPrivacy(privacyResult.value.recognition || '')
           setLoaded(true)
         }).catch(() => {
           if (alive) setLoaded(true)
@@ -269,9 +255,7 @@ window.__ModuleLoader__.load({
           const result = await call('saveSettings', settings)
           if (result.ok) {
             setHasAuthCode(Boolean(result.value.hasAuthCode) || hasAuthCode)
-            setHasGlmApiKey(Boolean(result.value.hasGlmApiKey) || hasGlmApiKey)
             if (settings.authCode) update('authCode', '')
-            if (settings.glmApiKey) update('glmApiKey', '')
           }
           setSaveStatus(result.ok
             ? { kind: 'success', message: '设置已保存。' }
@@ -440,28 +424,7 @@ window.__ModuleLoader__.load({
             ),
             e('div', { style: styles.section },
               e('div', { style: styles.sectionTitle }, '识别方式'),
-              e('select', {
-                style: styles.select,
-                disabled,
-                value: settings.ocrProvider,
-                  onChange: event => update('ocrProvider', event.target.value),
-              },
-                e('option', { value: 'local' }, '本地 RapidOCR + 当前模型'),
-                e('option', { value: 'glm' }, 'GLM 视觉识别（可选）'),
-              ),
-              settings.ocrProvider === 'glm'
-                ? e('div', { style: styles.field },
-                  e('label', { style: styles.label }, 'GLM API Key'),
-                  e('input', {
-                    style: styles.input,
-                    type: 'password',
-                    placeholder: hasGlmApiKey ? '已保存；重新输入可替换' : '可选',
-                    disabled,
-                    value: settings.glmApiKey,
-                  onInput: event => update('glmApiKey', event.target.value),
-                  }),
-                )
-                : null,
+              e('div', { style: styles.help }, '本地解析 + OCR 识别，无需模型或 API Key。'),
             ),
             privacy ? e('div', { style: styles.notice }, privacy) : null,
             e('div', { style: styles.row },

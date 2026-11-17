@@ -30,6 +30,16 @@ test('sidebar is explicitly anchored on the right', () => {
   assert.match(source, /'选择保存位置'/)
 })
 
+test('sidebar presents local recognition and never asks for a model key', () => {
+  assert.doesNotMatch(source, /glmApiKey|GLM API Key|hasGlmApiKey|ocrProvider/)
+  assert.doesNotMatch(source, /DeepSeek 模型|当前模型|模型识别/)
+  assert.match(source, /'本地解析 \+ OCR 识别，无需模型或 API Key。'/)
+  const settingsState = source.match(/const \[settings, setSettings\] = React\.useState\(\{[\s\S]*?\n      \}\)/)
+  assert.ok(settingsState)
+  assert.doesNotMatch(settingsState[0], /authCode: ''[\s\S]*apiKey/)
+  assert.match(source, /privacyResult\.value\.recognition/)
+})
+
 test('the registered panel selects directories through the browser workspace or Desktop bridge', async () => {
   for (const desktop of [undefined, { pick: async () => 'desktop-directory' }]) {
     const plugin = loadPluginExports(desktop)

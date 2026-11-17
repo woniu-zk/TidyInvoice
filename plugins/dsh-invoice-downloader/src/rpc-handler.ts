@@ -2,7 +2,7 @@ import * as path from 'node:path'
 import type { ConnectionRpcResult } from '@deepseek-ai/dsh-client-connection'
 import type { CredentialProvider } from '@deepseek-ai/dsh-credentials'
 import type { SubprocessHandle, SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
-import { GLM_API_KEY_REF, IMAP_AUTH_CODE_REF, isCredentialConfigured, resolveCredential } from './credentials.js'
+import { IMAP_AUTH_CODE_REF, isCredentialConfigured, resolveCredential } from './credentials.js'
 import { ArtifactRegistry } from './file-security.js'
 import { InvoiceScanner, type ScanRequest } from './invoice-scanner.js'
 import { getRuntimeStatus, type RuntimeLayout } from './runtime.js'
@@ -194,7 +194,6 @@ async function getSettings(context: InvoiceRpcContext): Promise<RpcResult> {
     ...settings,
     savePath: settings.savePath || context.savePath,
     hasAuthCode: await isCredentialConfigured(context.credentials, IMAP_AUTH_CODE_REF),
-    hasGlmApiKey: await isCredentialConfigured(context.credentials, GLM_API_KEY_REF),
   })
 }
 
@@ -209,14 +208,11 @@ async function saveSettings(context: InvoiceRpcContext, payload: unknown): Promi
     settings.savePath = validated.canonicalPath
   }
   const authCode = stringValue(request.authCode)
-  const glmApiKey = stringValue(request.glmApiKey)
   if (authCode) await context.credentials.set(IMAP_AUTH_CODE_REF, authCode)
-  if (glmApiKey) await context.credentials.set(GLM_API_KEY_REF, glmApiKey)
   writeSettings(context.profileDir, settings)
   return ok({
     saved: true,
     hasAuthCode: await isCredentialConfigured(context.credentials, IMAP_AUTH_CODE_REF),
-    hasGlmApiKey: await isCredentialConfigured(context.credentials, GLM_API_KEY_REF),
   })
 }
 
@@ -237,11 +233,10 @@ async function startScan(context: InvoiceRpcContext, payload: unknown): Promise<
   const output = context.artifacts.validateSavePath(settings.savePath)
   if (!output.ok) return badRequest(output.errorMessage)
   const authCode = stringValue(request.authCode) || await resolveCredential(context.credentials, IMAP_AUTH_CODE_REF)
-  const glmApiKey = stringValue(request.glmApiKey) || await resolveCredential(context.credentials, GLM_API_KEY_REF)
   if (!authCode) return badRequest('请填写并保存 IMAP 授权码。')
 
   const jobId = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  const session = context.sessions.createSession(jobId)
+  context.sessions.createSession(jobId)
   context.scanner.setProgressHandler(progress => context.sessions.recordProgress(jobId, progress.event))
   const scanRequest: ScanRequest = {
     jobId,
@@ -251,11 +246,9 @@ async function startScan(context: InvoiceRpcContext, payload: unknown): Promise<
     dateTo: settings.dateTo,
     company: settings.company,
     savePath: output.canonicalPath,
-    ocrProvider: settings.ocrProvider,
-    ...(settings.ocrProvider === 'glm' && glmApiKey ? { glmApiKey } : {}),
   }
 
-  void context.scanner.startScan(scanRequest, event => context.sessions.logModelVisible(session.sessionId, event))
+  void context.scanner.startScan(scanRequest)
     .then(result => {
       if (result.status === 'cancelled') {
         context.sessions.cancel(jobId)
@@ -384,15 +377,12 @@ function parseSettings(value: Record<string, unknown>, fallback: InvoiceSettings
   const next = (key: keyof InvoiceSettings): string => Object.hasOwn(value, key)
     ? stringValue(value[key])
     : fallback[key]
-  const ocrProvider = next('ocrProvider') || 'local'
-  if (ocrProvider !== 'local' && ocrProvider !== 'glm') return null
   return {
     email: next('email'),
     dateFrom: next('dateFrom'),
     dateTo: next('dateTo'),
     company: next('company'),
     savePath: next('savePath'),
-    ocrProvider,
   }
 }
 

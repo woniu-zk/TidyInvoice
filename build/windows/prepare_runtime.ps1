@@ -2,6 +2,8 @@ param(
     [string]$PythonExe = ".\\.venv\\Scripts\\python.exe",
     [switch]$SkipPlaywright,
     [switch]$SkipWebView2,
+    [switch]$SkipWebView2Prune,
+    [switch]$PruneDryRun,
     [switch]$Force
 )
 
@@ -143,12 +145,42 @@ function Install-WebView2Runtime {
 $resolvedPythonExe = if ([System.IO.Path]::IsPathRooted($PythonExe)) { $PythonExe } else { Resolve-RepoPath $PythonExe }
 Assert-LeafPathExists -PathValue $resolvedPythonExe -Label "Python interpreter"
 
+function Invoke-WebView2Prune {
+    $pruneScriptPath = Join-Path $ScriptDir "prune_webview2_runtime.ps1"
+    Assert-LeafPathExists -PathValue $pruneScriptPath -Label "WebView2 prune script"
+
+    $policyRelative = [string]$RuntimeManifest.webview2.prune_policy
+    if ([string]::IsNullOrWhiteSpace($policyRelative)) {
+        $policyRelative = "build/windows/webview2-prune-policy.json"
+    }
+    $policyPath = Resolve-RepoPath $policyRelative
+    Assert-LeafPathExists -PathValue $policyPath -Label "WebView2 prune policy"
+
+    $runtimeDir = Resolve-RepoPath $RuntimeManifest.webview2.runtime_dir
+    # Hashtable splatting keeps the parameters named; array splatting would pass
+    # "-DryRun" as a positional value instead of binding the switch.
+    $pruneArguments = @{
+        RuntimeDir = $runtimeDir
+        PolicyPath = $policyPath
+    }
+    if ($PruneDryRun) {
+        $pruneArguments["DryRun"] = $true
+        Write-Warning "WebView2 pruning is running in dry-run mode; no runtime files will be deleted."
+    }
+
+    & $pruneScriptPath @pruneArguments
+}
+
 if (-not $SkipPlaywright) {
     Install-PlaywrightRuntime -PythonExecutable $resolvedPythonExe
 }
 
 if (-not $SkipWebView2) {
     Install-WebView2Runtime
+}
+
+if (-not $SkipWebView2 -and -not $SkipWebView2Prune) {
+    Invoke-WebView2Prune
 }
 
 Write-Host "Runtime hydration completed."

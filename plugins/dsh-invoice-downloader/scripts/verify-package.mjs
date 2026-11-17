@@ -17,8 +17,10 @@ const required = [
   'runtime/requirements-headless.txt',
   'runtime/engine/MANIFEST.json',
   'runtime/engine/src/invoice_engine/app_api.py',
+  'runtime/engine/src/invoice_engine/local_recognition.py',
   'engine-adapter/dsh_runner.py',
   'engine-adapter/dsh_scan.py',
+  'engine-adapter/ipc/protocol.py',
   'runtime/engine/src/invoice_engine/ipc/protocol.py',
   'LICENSE',
   'NOTICE',
@@ -56,6 +58,30 @@ const bundledPythonFiles = collectPythonFiles(join(packageRoot, 'runtime', 'engi
   .filter(file => file !== '__init__.py')
   .sort()
 assert.deepEqual(bundledPythonFiles, manifest.sourceFiles)
+
+assert.ok(
+  bundledPythonFiles.includes('local_recognition.py'),
+  'the bundled engine must ship the local recognition module',
+)
+for (const legacyModelSource of [
+  'deepseek_extractor.py',
+  'glm_fallback.py',
+  'local_ocr.py',
+  'recognition_chain.py',
+]) {
+  assert.ok(
+    !bundledPythonFiles.includes(legacyModelSource),
+    `legacy model recognition source must not be published: ${legacyModelSource}`,
+  )
+}
+
+const legacyRecognitionSymbols = /recognition_chain|RecognitionChain|deepseek_extractor|DeepSeekExtractor|glm_fallback|create_glm_fallback|local_ocr_module/i
+const scanAdapter = readFileSync(join(packageRoot, 'engine-adapter', 'dsh_scan.py'), 'utf8')
+const runnerAdapter = readFileSync(join(packageRoot, 'engine-adapter', 'dsh_runner.py'), 'utf8')
+assert.doesNotMatch(scanAdapter, legacyRecognitionSymbols)
+assert.doesNotMatch(runnerAdapter, legacyRecognitionSymbols)
+assert.match(scanAdapter, /LocalRecognitionWorker/)
+assert.match(runnerAdapter, /run_scan\(config=config\)/)
 
 const privateVerificationFiles = [
   'artifact_verifier.py',

@@ -7,7 +7,6 @@ export interface InvoiceSettings {
   dateTo: string
   company: string
   savePath: string
-  ocrProvider: 'local' | 'glm'
 }
 
 const DEFAULT_SETTINGS: InvoiceSettings = {
@@ -16,7 +15,6 @@ const DEFAULT_SETTINGS: InvoiceSettings = {
   dateTo: '',
   company: '',
   savePath: '',
-  ocrProvider: 'local',
 }
 
 function settingsPath(profileDir: string): string {
@@ -32,7 +30,6 @@ export function readSettings(profileDir: string): InvoiceSettings {
       dateTo: typeof value.dateTo === 'string' ? value.dateTo : '',
       company: typeof value.company === 'string' ? value.company : '',
       savePath: typeof value.savePath === 'string' ? value.savePath : '',
-      ocrProvider: value.ocrProvider === 'glm' ? 'glm' : 'local',
     }
   } catch {
     return { ...DEFAULT_SETTINGS }

@@ -8,7 +8,6 @@ function credentialRef(value: string): CredentialRef {
 }
 
 export const IMAP_AUTH_CODE_REF = credentialRef('DSH_INVOICE_IMAP_AUTH_CODE')
-export const GLM_API_KEY_REF = credentialRef('DSH_INVOICE_GLM_API_KEY')
 
 export async function resolveCredential(
   service: CredentialProvider,

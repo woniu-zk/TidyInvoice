@@ -8,7 +8,6 @@ const projectRoot = resolve(packageRoot, '..', '..')
 const runtimeRoot = resolve(packageRoot, 'runtime')
 const engineRoot = resolve(runtimeRoot, 'engine')
 const sourceRoot = projectRoot
-const extensionRoot = resolve(packageRoot, 'engine-adapter', 'engine-src')
 const engineSourceFiles = [
   'app_api.py',
   'app_archive_adapter.py',
@@ -30,6 +29,7 @@ const engineSourceFiles = [
   'glm_runtime.py',
   'invoice_domain.py',
   'invoice_extractor.py',
+  'local_recognition.py',
   'mailbox_scanner.py',
   'main.py',
   'pairing_engine.py',
@@ -47,12 +47,9 @@ const engineSourceFiles = [
   'url_trace_sanitizer.py',
   'user_settings.py',
 ]
-const extensionSourceFiles = [
-  'deepseek_extractor.py',
-  'glm_fallback.py',
-  'local_ocr.py',
-  'recognition_chain.py',
-]
+// The plugin has no adapter-owned Python sources any more: local recognition is
+// vendored from the product engine (`local_recognition.py`), so the bundled
+// engine is exactly the product source list plus the IPC protocol module.
 
 function requireInside(parent, child) {
   const rel = relative(parent, child)
@@ -73,8 +70,8 @@ requireInside(runtimeRoot, engineRoot)
 if (!existsSync(join(sourceRoot, 'app_api.py'))) {
   throw new Error(`Invoice Downloader source is unavailable at ${sourceRoot}`)
 }
-if (!existsSync(extensionRoot)) {
-  throw new Error(`DSH adapter sources are unavailable at ${extensionRoot}`)
+if (!existsSync(join(sourceRoot, 'local_recognition.py'))) {
+  throw new Error(`local recognition engine is unavailable at ${sourceRoot}`)
 }
 
 rmSync(engineRoot, { recursive: true, force: true })
@@ -82,10 +79,6 @@ mkdirSync(join(engineRoot, 'src', 'invoice_engine'), { recursive: true })
 
 for (const file of engineSourceFiles) {
   copyFile(join(sourceRoot, file), join(engineRoot, 'src', 'invoice_engine', file))
-}
-
-for (const file of extensionSourceFiles) {
-  copyFile(join(extensionRoot, file), join(engineRoot, 'src', 'invoice_engine', file))
 }
 
 copyFile(
@@ -102,6 +95,6 @@ writeFileSync(
     sourceSha,
     generatedBy: '@ethanyoq/dsh-invoice-downloader',
     generatedAt: new Date().toISOString(),
-    sourceFiles: [...engineSourceFiles, ...extensionSourceFiles, 'ipc/protocol.py'].sort(),
+    sourceFiles: [...engineSourceFiles, 'ipc/protocol.py'].sort(),
   }, null, 2)}\n`,
 )

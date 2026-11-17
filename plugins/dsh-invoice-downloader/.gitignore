@@ -1,5 +1,7 @@
 lib/
 node_modules/
+__pycache__/
+*.pyc
 *.tgz
 .runtime/
 runtime/.venv/

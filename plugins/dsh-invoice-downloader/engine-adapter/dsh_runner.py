@@ -7,13 +7,13 @@ import sys
 import uuid
 from typing import Any
 
-from invoice_engine.ipc.protocol import ExtractionClient, IpcChannel
+from invoice_engine.ipc.protocol import IpcChannel
 
 from dsh_scan import run_scan
 
 
 def run_engine(config_json: str) -> None:
-    """Build the DSH recognition chain and run one adapter-owned scan."""
+    """Run one adapter-owned, local-only invoice scan."""
     channel = IpcChannel()
     job_id = "unknown"
     try:
@@ -38,27 +38,13 @@ def run_engine(config_json: str) -> None:
         if not save_path:
             raise ValueError("savePath is required")
 
-        from recognition_chain import RecognitionChain
-        from deepseek_extractor import DeepSeekExtractor
-        import local_ocr
-        from glm_fallback import create_glm_fallback
-
-        extraction_client = ExtractionClient(channel, job_id)
-        extractor = DeepSeekExtractor(extraction_client=extraction_client)
-        glm_api_key = str(config.get("glmApiKey") or "")
-        chain = RecognitionChain(
-            extractor=extractor,
-            local_ocr_module=local_ocr,
-            glm_runtime=create_glm_fallback(api_key=glm_api_key) if glm_api_key else None,
-        )
         channel.send_job_event(job_id, "scan_started", {
             "dateFrom": date_from,
             "dateTo": date_to,
             "company": str(config.get("company") or ""),
-            "ocrProvider": str(config.get("ocrProvider") or "local"),
         })
         channel.send_job_event(job_id, "scan_progress", {"message": "Starting mailbox scan..."})
-        result = run_scan(config=config, recognition_chain=chain)
+        result = run_scan(config=config)
         channel.send_job_event(job_id, "scan_progress", {
             "message": f"Scan completed: {result['invoicesProcessed']} invoices processed",
             "invoicesProcessed": result["invoicesProcessed"],
