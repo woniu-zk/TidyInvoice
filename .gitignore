@@ -1,0 +1,44 @@
+# Local environment
+.env
+.env.*
+.venv/
+
+# Python caches
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Runtime and test residue
+diagnostics/
+monitoring/
+output/
+manual_frontend_runs/
+manual_program_runs/
+test_dataset/
+staging/
+tmp/
+.codegraph/
+.codex/
+.runtime/
+.playwright-mcp/
+docs/superpowers/
+dist/
+build/work/
+build/runtime/
+build/windows/version-info.generated.txt
+build/windows/build-identity.generated.json
+*.log
+HANDOFF_*.md
+frontend-current-*.png
+design/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+
+# Local worktree metadata
+.claude/worktrees/
+.worktrees/
+.gstack/
