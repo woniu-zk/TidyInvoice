@@ -225,7 +225,7 @@ class UserSettingsStore:
                 continue
 
             try:
-                with open(candidate_path, "r", encoding="utf-8") as handle:
+                with open(candidate_path, "r", encoding="utf-8-sig") as handle:
                     payload = json.load(handle)
             except Exception:
                 continue

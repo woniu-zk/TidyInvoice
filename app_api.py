@@ -2209,10 +2209,39 @@ class InvoiceAppAPI:
         if not path or not os.path.exists(path):
             return copy.deepcopy(default)
         try:
-            with open(path, "r", encoding="utf-8") as handle:
+            # utf-8-sig tolerates a BOM; Windows editors/PowerShell can add one and
+            # a single BOM must not make the whole ledger look corrupt.
+            with open(path, "r", encoding="utf-8-sig") as handle:
                 return json.load(handle)
         except Exception:
             return copy.deepcopy(default)
+
+    def _quarantine_unreadable_state(self, output_state_dir, reason):
+        """Back up unreadable scoped state instead of failing the run."""
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        for filename in (
+            "committed_state.json",
+            ".antigravity_history.json",
+            "processed_records.json",
+        ):
+            path = os.path.join(output_state_dir, filename)
+            if not os.path.exists(path):
+                continue
+            try:
+                os.replace(path, f"{path}.corrupt-{timestamp}")
+            except OSError:
+                try:
+                    os.remove(path)
+                except OSError:
+                    continue
+        try:
+            self._append_log(
+                "维护",
+                f"检测到台账文件异常（{reason}），已备份并重建台账。",
+                "text-amber-500",
+            )
+        except Exception:
+            pass
 
     def _write_json_file(self, path, payload):
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -2265,7 +2294,10 @@ class InvoiceAppAPI:
         if os.path.exists(committed_path):
             snapshot = self._read_json_file(committed_path, None)
             if not isinstance(snapshot, dict) or not isinstance(snapshot.get("history"), list):
-                raise ValueError("Committed output state is unreadable")
+                self._quarantine_unreadable_state(
+                    output_state_dir, "committed_state_unreadable"
+                )
+                return set()
             return {str(key) for key in snapshot["history"] if isinstance(key, str) and key}
         run_state = self._load_output_run_state(output_state_dir)
         if str(run_state.get("status") or "").strip().lower() != "completed":
@@ -2283,7 +2315,7 @@ class InvoiceAppAPI:
         legacy_path = os.path.join(save_path, "processed_records.json")
         legacy = extractor.load_processed_records() if extractor else {}
         if os.path.isfile(legacy_path):
-            with open(legacy_path, "r", encoding="utf-8") as handle:
+            with open(legacy_path, "r", encoding="utf-8-sig") as handle:
                 legacy = json.load(handle)
         if not isinstance(legacy, dict):
             raise ValueError("Legacy business records must be an object")
@@ -2296,11 +2328,16 @@ class InvoiceAppAPI:
         if os.path.exists(committed_path):
             snapshot = self._read_json_file(committed_path, None)
             scoped = snapshot.get("business_records") if isinstance(snapshot, dict) else None
+            if not isinstance(scoped, dict):
+                self._quarantine_unreadable_state(
+                    output_state_dir, "committed_state_unreadable"
+                )
+                scoped = {}
         else:
             scoped_path = os.path.join(output_state_dir, "processed_records.json")
             scoped = {}
             if self._load_output_run_state(output_state_dir).get("status") == "completed" and os.path.isfile(scoped_path):
-                with open(scoped_path, "r", encoding="utf-8") as handle:
+                with open(scoped_path, "r", encoding="utf-8-sig") as handle:
                     scoped = json.load(handle)
         if not isinstance(scoped, dict):
             raise ValueError("Scoped business records must be an object")
