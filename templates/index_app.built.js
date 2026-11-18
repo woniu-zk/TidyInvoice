@@ -40,7 +40,8 @@ const DEFAULT_SETTINGS = {
   remember_settings: true,
   task_mode: "mail",
   local_input_dir: "",
-  local_dry_run: true
+  // Empty means "same folder as local_input_dir" (in-place organizing).
+  local_output_dir: ""
 };
 const DEFAULT_RUN_SETTINGS = {
   ...lastDaysRange(30),
@@ -76,7 +77,6 @@ const APP_VISIBLE_COPY = {
   footerStamp: "P-H-Dx",
   githubLabel: "产品官网",
   githubUrl: "https://github.com/EthanYoQ/Invoice-Downloader",
-  localPreviewLabel: "仅预览，不移动文件",
   taskModes: {
     mail: {
       label: "邮箱提取并整理",
@@ -90,7 +90,7 @@ const APP_VISIBLE_COPY = {
     },
     local: {
       label: "本地文件夹整理",
-      description: "读取本机文件夹中的发票文件，离线识别后归档，不需要邮箱和网络。",
+      description: "读取本机文件夹中的发票文件，直接在该文件夹内离线识别并自动分类归档，不需要邮箱和网络。",
       badge: "本机离线整理"
     }
   },
@@ -100,15 +100,15 @@ const APP_VISIBLE_COPY = {
       title: "仅提取完成",
       text: "附件已保存到 inbox 文件夹，并写入 manifest.jsonl；未进行识别和归档。"
     },
-    localPreview: {
-      eyebrow: "整理预览",
-      title: "本地预览完成",
-      text: "本次仅预览整理结果，未移动或重命名任何文件。确认无误后可关闭预览再执行整理。"
-    },
     localApply: {
       eyebrow: "整理结果",
       title: "本地整理完成",
-      text: "已按分类与命名规则归档本地发票。"
+      text: "已按分类与命名规则归档本地发票；原件已移入 raw 文件夹保留，重复文件已移入 duplicates 文件夹。"
+    },
+    localApplyCustom: {
+      eyebrow: "整理结果",
+      title: "本地整理完成",
+      text: "已按分类与命名规则归档本地发票；原始文件保留在发票文件夹，未移动。"
     }
   }
 };
@@ -316,14 +316,6 @@ function normalizeTaskMode(value) {
   const mode = String(value || "").trim();
   return TASK_MODE_VALUES.has(mode) ? mode : "mail";
 }
-function resolveLocalDryRun(...values) {
-  for (const value of values) {
-    if (typeof value === "boolean") {
-      return value;
-    }
-  }
-  return true;
-}
 function fileNameFromPath(path, fallback = "未命名文件") {
   const value = String(path || "");
   if (!value) {
@@ -398,7 +390,7 @@ function buildPersistPayload(settings, runSettings, runContext) {
   }
   payload.task_mode = normalizeTaskMode(payload.task_mode);
   payload.local_input_dir = String(payload.local_input_dir || "").trim();
-  payload.local_dry_run = payload.local_dry_run !== false;
+  payload.local_output_dir = String(payload.local_output_dir || "").trim();
   return payload;
 }
 async function loadShellState() {
@@ -416,7 +408,7 @@ async function loadShellState() {
     remember_settings: sessionSettings.remember_settings === undefined ? storedPayload.remember_settings !== false : sessionSettings.remember_settings !== false,
     task_mode: normalizeTaskMode(preferNonEmpty(sessionSettings.task_mode, storedPayload.task_mode, "mail")),
     local_input_dir: preferNonEmpty(sessionSettings.local_input_dir, storedPayload.local_input_dir),
-    local_dry_run: resolveLocalDryRun(sessionSettings.local_dry_run, storedPayload.local_dry_run)
+    local_output_dir: preferNonEmpty(sessionSettings.local_output_dir, storedPayload.local_output_dir)
   };
   const runSettings = {
     date_from: preferNonEmpty(sessionRunSettings.date_from, storedPayload.date_from, DEFAULT_RUN_SETTINGS.date_from),
@@ -452,7 +444,7 @@ async function persistUserSettings(settings, runSettings, runContext) {
     remember_settings: payload.remember_settings !== false,
     task_mode: normalizeTaskMode(payload.task_mode),
     local_input_dir: payload.local_input_dir || "",
-    local_dry_run: payload.local_dry_run !== false
+    local_output_dir: payload.local_output_dir || ""
   });
   writeSessionValue(SESSION_RUN_SETTINGS_KEY, {
     date_from: payload.date_from || "",
@@ -1050,13 +1042,14 @@ function SettingsPage({
   const isMailMode = taskMode === "mail";
   const isFetchMode = taskMode === "fetch";
   const isLocalMode = taskMode === "local";
-  const localDryRun = settings.local_dry_run !== false;
+  const localInputDir = String(settings.local_input_dir || "").trim();
+  const localOutputDir = String(settings.local_output_dir || "").trim();
   const activeTaskMode = TASK_MODE_OPTIONS.find(option => option.value === taskMode) || TASK_MODE_OPTIONS[0];
   const emailParts = splitEmailAddress(settings.email);
   const dateError = validateDateRange(runSettings.date_from, runSettings.date_to);
-  const startButtonLabel = isLocalMode ? localDryRun ? "开始预览" : "开始整理" : isFetchMode ? "开始提取" : "开始处理";
-  const startButtonIcon = isLocalMode && localDryRun ? "visibility" : "play_arrow";
-  const canStart = isLocalMode ? !!String(settings.local_input_dir || "").trim() && !!String(settings.save_path || "").trim() : !validateEmail(settings.email) && !!settings.auth_code && (isFetchMode || !!String(settings.company || "").trim()) && !!String(settings.save_path || "").trim() && !dateError;
+  const startButtonLabel = isLocalMode ? "开始整理" : isFetchMode ? "开始提取" : "开始处理";
+  const startButtonIcon = "play_arrow";
+  const canStart = isLocalMode ? !!localInputDir : !validateEmail(settings.email) && !!settings.auth_code && (isFetchMode || !!String(settings.company || "").trim()) && !!String(settings.save_path || "").trim() && !dateError;
   useEffect(() => {
     if (bootstrapState !== "bootstrapped" || starting || autostartTriggeredRef.current || !shouldAutostartControlledRun(runContext)) return undefined;
     if (isControlledAutostartConsumed(runContext)) {
@@ -1109,6 +1102,19 @@ function SettingsPage({
       setPageError(error.message || "选择文件夹失败。");
     }
   }
+  async function handleChooseLocalOutputDirectory() {
+    if (controlledRun) return;
+    try {
+      const result = await callApi("choose_directory");
+      if (result && result.success && result.path) updateSetting("local_output_dir", result.path);
+    } catch (error) {
+      setPageError(error.message || "选择目录失败。");
+    }
+  }
+  function handleResetLocalOutputDirectory() {
+    if (controlledRun) return;
+    updateSetting("local_output_dir", "");
+  }
   async function handleTestConnection() {
     const emailError = validateEmail(settings.email);
     if (emailError) {
@@ -1146,11 +1152,11 @@ function SettingsPage({
     if (isLocalMode) {
       const inputDir = String(settings.local_input_dir || "").trim();
       if (!inputDir) return setPageError("请选择要整理的本地文件夹。");
-      if (!settings.save_path) return setPageError("请选择输出目录。");
+      const outputDir = String(settings.local_output_dir || "").trim() || inputDir;
       setStarting(true);
       try {
         await persistUserSettings(settings, runSettings, runContext);
-        const result = await callApi("start_local_organize", inputDir, settings.save_path, settings.local_dry_run !== false);
+        const result = await callApi("start_local_organize", inputDir, outputDir);
         if (!result || !result.success) {
           setPageError(result && result.message ? result.message : "任务启动失败。");
           return;
@@ -1296,15 +1302,9 @@ function SettingsPage({
     onClick: handleChooseInputDirectory
   }, /*#__PURE__*/React.createElement("span", {
     className: "material-symbols-outlined"
-  }, "folder_open"), /*#__PURE__*/React.createElement("span", null, "\u9009\u62E9\u6587\u4EF6\u5939"))), /*#__PURE__*/React.createElement("label", {
-    className: "toggle-row"
-  }, /*#__PURE__*/React.createElement("input", {
-    type: "checkbox",
-    checked: localDryRun,
-    onChange: event => updateSetting("local_dry_run", event.target.checked)
-  }), /*#__PURE__*/React.createElement("span", null, APP_VISIBLE_COPY.localPreviewLabel)), /*#__PURE__*/React.createElement("p", {
+  }, "folder_open"), /*#__PURE__*/React.createElement("span", null, "\u9009\u62E9\u6587\u4EF6\u5939"))), /*#__PURE__*/React.createElement("p", {
     className: "field-help"
-  }, localDryRun ? "仅预览整理结果，不会移动或重命名任何文件。" : "确认后将按分类与命名规则归档文件。"))) : /*#__PURE__*/React.createElement("section", {
+  }, "\u70B9\u51FB\u300C\u5F00\u59CB\u6574\u7406\u300D\u540E\uFF0C\u53D1\u7968\u4F1A\u5728\u8BE5\u6587\u4EF6\u5939\u5185\u81EA\u52A8\u5206\u7C7B\u5F52\u6863\uFF1B\u539F\u4EF6\u79FB\u5165 raw \u6587\u4EF6\u5939\u4FDD\u7559\u3002"))) : /*#__PURE__*/React.createElement("section", {
     className: "surface-card"
   }, /*#__PURE__*/React.createElement(SectionHeader, {
     icon: "mail",
@@ -1389,32 +1389,38 @@ function SettingsPage({
     indicator: controlledRun ? /*#__PURE__*/React.createElement(StatusPill, {
       tone: "info",
       icon: "lock"
-    }, "\u5DF2\u9501\u5B9A") : isLocalMode ? "保存整理结果" : isFetchMode ? "保存提取附件" : "保存原件与结果"
+    }, "\u5DF2\u9501\u5B9A") : isLocalMode ? "默认同发票文件夹" : isFetchMode ? "保存提取附件" : "保存原件与结果"
   }), /*#__PURE__*/React.createElement("div", {
     className: "card-stack card-stack--compact"
   }, /*#__PURE__*/React.createElement("div", {
-    className: joinClasses("field-shell", "field-shell--readonly", !settings.save_path && "field-shell--error")
+    className: joinClasses("field-shell", "field-shell--readonly", isLocalMode ? !localInputDir && "field-shell--error" : !settings.save_path && "field-shell--error")
   }, /*#__PURE__*/React.createElement("span", {
     className: "field-icon material-symbols-outlined"
   }, "folder"), /*#__PURE__*/React.createElement("input", {
     type: "text",
     readOnly: true,
     className: "field-input u-mono",
-    value: settings.save_path,
-    placeholder: "\u8BF7\u9009\u62E9\u672C\u5730\u8F93\u51FA\u76EE\u5F55",
-    title: settings.save_path
+    value: isLocalMode ? localOutputDir || localInputDir : settings.save_path,
+    placeholder: isLocalMode ? "默认与发票文件夹相同" : "请选择本地输出目录",
+    title: isLocalMode ? localOutputDir || localInputDir : settings.save_path
   })), /*#__PURE__*/React.createElement("div", {
     className: "footer-cluster"
   }, /*#__PURE__*/React.createElement("button", {
     type: "button",
     className: "btn btn--secondary btn--sm",
-    onClick: handleChooseDirectory,
+    onClick: isLocalMode ? handleChooseLocalOutputDirectory : handleChooseDirectory,
     disabled: controlledRun
   }, /*#__PURE__*/React.createElement("span", {
     className: "material-symbols-outlined"
-  }, "folder_open"), /*#__PURE__*/React.createElement("span", null, controlledRun ? "路径已锁定" : "浏览目录"))), /*#__PURE__*/React.createElement("p", {
+  }, "folder_open"), /*#__PURE__*/React.createElement("span", null, controlledRun ? "路径已锁定" : "浏览目录")), isLocalMode && !controlledRun && localOutputDir ? /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn--ghost btn--sm",
+    onClick: handleResetLocalOutputDirectory
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "material-symbols-outlined"
+  }, "undo"), /*#__PURE__*/React.createElement("span", null, "\u6062\u590D\u9ED8\u8BA4\uFF08\u53D1\u7968\u6587\u4EF6\u5939\uFF09")) : null), /*#__PURE__*/React.createElement("p", {
     className: "field-help"
-  }, controlledRun ? "当前为受控前端复跑，本轮输出目录由诊断上下文锁定。" : isLocalMode ? "整理结果会按分类与命名规则归档到该目录。" : isFetchMode ? "邮箱附件会保存到该目录下的 inbox 文件夹，并生成清单文件。" : "系统会在此目录下按发票类型保存归档文件，并生成待人工复核目录。")))), /*#__PURE__*/React.createElement("div", {
+  }, controlledRun ? "当前为受控前端复跑，本轮输出目录由诊断上下文锁定。" : isLocalMode ? "默认与发票文件夹相同：分类文件、raw 原件与结果明细都会写入该文件夹；改为其他目录时仅复制归档副本，原件保留在发票文件夹。" : isFetchMode ? "邮箱附件会保存到该目录下的 inbox 文件夹，并生成清单文件。" : "系统会在此目录下按发票类型保存归档文件，并生成待人工复核目录。")))), /*#__PURE__*/React.createElement("div", {
     className: "settings-column"
   }, /*#__PURE__*/React.createElement("section", {
     className: "surface-card"
@@ -1891,8 +1897,7 @@ function AnalysisPage({
   const [loadingError, setLoadingError] = useState("");
   const [exporting, setExporting] = useState(false);
   const [resultTaskMode, setResultTaskMode] = useState("mail");
-  const [resultDryRun, setResultDryRun] = useState(false);
-  const [resultInputDir, setResultInputDir] = useState("");
+  const [organizeSummary, setOrganizeSummary] = useState({});
   const [fetchSummary, setFetchSummary] = useState({});
   useEffect(() => {
     let active = true;
@@ -1910,8 +1915,7 @@ function AnalysisPage({
         setQuotaMessage(results.quota_message || "");
         setLastExportPath(results.last_export_path || "");
         setResultTaskMode(normalizeTaskMode(results.task_mode));
-        setResultDryRun(!!results.dry_run);
-        setResultInputDir(results.input_dir || "");
+        setOrganizeSummary(results.organize_summary || {});
         setFetchSummary(results.fetch_summary || {});
         const baseOutput = results.output_path || parentFolder(results.manual_check_path || "") || (settingsRes && settingsRes.settings ? settingsRes.settings.save_path || "" : "");
         setOutputPath(baseOutput);
@@ -1939,27 +1943,27 @@ function AnalysisPage({
   const groupedVisible = groupedErrors.filter(group => Number(group.count || group.items.length || 0) > 0);
   const isFetchResult = resultTaskMode === "fetch";
   const isLocalResult = resultTaskMode === "local";
-  const localPreview = isLocalResult && resultDryRun;
-  const resultHeadline = isFetchResult ? "本次提取完成" : localPreview ? "本次预览完成" : isLocalResult ? "本次整理完成" : UI_COPY.pages.analysis.resultTitle;
+  const localInPlace = isLocalResult && !!organizeSummary.in_place;
+  const resultHeadline = isFetchResult ? "本次提取完成" : isLocalResult ? "本次整理完成" : UI_COPY.pages.analysis.resultTitle;
   const fetchAttachments = Number(fetchSummary.attachments || 0);
   const fetchTodoCount = Number(fetchSummary.todos || 0);
   const fetchInboxDir = fetchSummary.inbox_dir || "";
   const fetchManifestPath = fetchSummary.manifest_path || "";
-  const bannerCopy = isFetchResult ? APP_VISIBLE_COPY.resultBanners.fetch : localPreview ? APP_VISIBLE_COPY.resultBanners.localPreview : isLocalResult ? APP_VISIBLE_COPY.resultBanners.localApply : null;
+  const bannerCopy = isFetchResult ? APP_VISIBLE_COPY.resultBanners.fetch : isLocalResult ? localInPlace ? APP_VISIBLE_COPY.resultBanners.localApply : APP_VISIBLE_COPY.resultBanners.localApplyCustom : null;
   const completionBanner = bannerCopy ? {
     eyebrow: bannerCopy.eyebrow,
     title: bannerCopy.title,
     text: bannerCopy.text,
-    icon: isFetchResult ? "inbox" : localPreview ? "preview" : "task_alt",
-    pathText: isFetchResult ? fetchManifestPath || fetchInboxDir || outputPath : localPreview ? resultInputDir : outputPath,
-    openPath: isFetchResult ? fetchInboxDir || outputPath : localPreview ? resultInputDir || outputPath : outputPath,
-    buttonLabel: isFetchResult ? "打开 inbox 文件夹" : localPreview ? "打开发票文件夹" : "打开输出目录"
+    icon: isFetchResult ? "inbox" : "task_alt",
+    pathText: isFetchResult ? fetchManifestPath || fetchInboxDir || outputPath : outputPath,
+    openPath: isFetchResult ? fetchInboxDir || outputPath : outputPath,
+    buttonLabel: isFetchResult ? "打开 inbox 文件夹" : "打开输出目录"
   } : null;
   const outputBanner = {
     icon: "folder",
-    eyebrow: "输出目录",
-    title: outputPath ? isFetchResult ? "提取结果已写入输出目录" : localPreview ? "预览结果尚未写入输出目录" : "归档结果与暂存记录已写入输出目录" : "当前还没有可打开的输出目录",
-    text: outputPath ? isFetchResult ? "inbox 文件夹与 manifest.jsonl 位于该目录下，可从这里继续查看。" : localPreview ? "确认后再执行整理，归档结果会写入该目录。" : "成功归档文件、暂存记录和导出结果都可以从这里继续查看。" : "待本轮生成结果后，可从这里直接打开输出目录。",
+    eyebrow: isLocalResult && localInPlace ? "发票文件夹" : "输出目录",
+    title: outputPath ? isFetchResult ? "提取结果已写入输出目录" : localInPlace ? "归档结果已写入发票文件夹" : isLocalResult ? "归档结果已写入输出目录" : "归档结果与暂存记录已写入输出目录" : "当前还没有可打开的输出目录",
+    text: outputPath ? isFetchResult ? "inbox 文件夹与 manifest.jsonl 位于该目录下，可从这里继续查看。" : localInPlace ? "分类文件、raw 原件、重复件与导出明细都可以从这里继续查看。" : isLocalResult ? "归档副本与导出明细已写入该目录；原始文件保留在发票文件夹。" : "成功归档文件、暂存记录和导出结果都可以从这里继续查看。" : "待本轮生成结果后，可从这里直接打开输出目录。",
     pathText: outputPath || "",
     buttonLabel: "打开输出目录",
     openPath: outputPath || parentFolder(manualCheckPath)
@@ -2012,7 +2016,7 @@ function AnalysisPage({
     icon: "task_alt",
     label: "处理成功",
     value: successCount,
-    helper: successCount > 0 ? localPreview ? "这些记录计划归档到输出目录。" : "归档文件已写入输出目录。" : "当前还没有成功记录。",
+    helper: successCount > 0 ? isLocalResult ? localInPlace ? "归档文件已写入发票文件夹。" : "归档副本已写入输出目录。" : "归档文件已写入输出目录。" : "当前还没有成功记录。",
     tone: "success"
   }, {
     key: "retention",
@@ -2083,13 +2087,7 @@ function AnalysisPage({
     className: "progress-meta"
   }, "\u672C\u8F6E\u5171\u63D0\u53D6 ", /*#__PURE__*/React.createElement("strong", {
     className: "u-tabular"
-  }, fetchAttachments), " \u4E2A\u9644\u4EF6\uFF0C\u6E05\u5355\u5DF2\u5199\u5165 inbox \u6587\u4EF6\u5939\u3002") : localPreview ? /*#__PURE__*/React.createElement("p", {
-    className: "progress-meta"
-  }, "\u672C\u6B21\u4E3A\u9884\u89C8\uFF1A\u5171 ", /*#__PURE__*/React.createElement("strong", {
-    className: "u-tabular"
-  }, totalResultCount), " \u6761\u7ED3\u679C\u8BB0\u5F55\uFF0C\u5176\u4E2D ", /*#__PURE__*/React.createElement("strong", {
-    className: "u-tabular"
-  }, successCount), " \u6761\u53EF\u6309\u89C4\u5219\u5F52\u6863\u3002") : /*#__PURE__*/React.createElement("p", {
+  }, fetchAttachments), " \u4E2A\u9644\u4EF6\uFF0C\u6E05\u5355\u5DF2\u5199\u5165 inbox \u6587\u4EF6\u5939\u3002") : /*#__PURE__*/React.createElement("p", {
     className: "progress-meta"
   }, "\u5171\u6574\u7406 ", /*#__PURE__*/React.createElement("strong", {
     className: "u-tabular"

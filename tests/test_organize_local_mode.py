@@ -79,93 +79,200 @@ def _wait_for_terminal(api, timeout: float = 180.0) -> dict:
     raise AssertionError(f"run did not finish: {api.get_progress()}")
 
 
-def _start_local(api, input_dir: Path, output_dir: Path, dry_run: bool) -> dict:
-    result = api.start_local_organize(str(input_dir), str(output_dir), dry_run)
+def _start_local(api, input_dir: Path, output_dir: Path | None = None, dry_run: bool = False) -> dict:
+    args = [str(input_dir)] if output_dir is None else [str(input_dir), str(output_dir)]
+    result = api.start_local_organize(*args, dry_run=dry_run)
     assert result.get("success") is True, result
     snapshot = _wait_for_terminal(api)
     assert snapshot["run_state"] == "completed", snapshot
     return snapshot
 
 
+def _root_invoice_files(root: Path) -> list[Path]:
+    return [
+        path
+        for path in root.iterdir()
+        if path.is_file() and path.suffix.lower() in {".pdf", ".xml", ".ofd"}
+    ]
+
+
 def test_start_local_organize_validates_requests(tmp_path: Path):
     from app_api import InvoiceAppAPI
 
     api = InvoiceAppAPI()
-    empty = api.start_local_organize("", str(tmp_path / "out"), True)
+    empty = api.start_local_organize("", str(tmp_path / "out"))
     assert empty["success"] is False and "文件夹" in empty["message"]
 
-    missing = api.start_local_organize(str(tmp_path / "missing"), str(tmp_path / "out"), True)
+    missing = api.start_local_organize(str(tmp_path / "missing"), str(tmp_path / "out"))
     assert missing["success"] is False and "不存在" in missing["message"]
 
+    anchor = Path(tmp_path.anchor) if tmp_path.anchor else None
+    if anchor is not None and str(anchor):
+        drive_root = api.start_local_organize(str(anchor), str(tmp_path / "out"))
+        assert drive_root["success"] is False
+        assert "磁盘根目录" in drive_root["message"]
+
+    # Same folder is the default in-place mode and must be accepted.
     folder = tmp_path / "invoices"
-    folder.mkdir()
-    same = api.start_local_organize(str(folder), str(folder), True)
-    assert same["success"] is False and "相同" in same["message"]
+    _build_inbox(folder)
+    same = _start_local(api, folder, dry_run=True)
+    assert same["run_state"] == "completed"
 
 
-def test_local_organize_apply_archives_and_persists_ledger(tmp_path: Path):
+def test_local_organize_in_place_apply_relocates_and_is_idempotent(tmp_path: Path):
     from app_api import InvoiceAppAPI
 
     inbox = tmp_path / "inbox"
     _build_inbox(inbox)
-    output = tmp_path / "output"
+    original_names = {path.name for path in _root_invoice_files(inbox)}
+    assert original_names == {"发票A.pdf", "发票B.xml", "发票C.xml"}
 
     api = InvoiceAppAPI()
-    snapshot = _start_local(api, inbox, output, dry_run=False)
+    snapshot = _start_local(api, inbox)
     assert snapshot["status_text"] in {"整理完成", "处理完成"}
 
     results = api.get_results()
     assert results["task_mode"] == "local"
     assert results["dry_run"] is False
     assert results["input_dir"] == str(inbox)
+    assert results["output_path"] == str(inbox)
     summary = results["organize_summary"]
+    assert summary["output_dir"] == str(inbox)
+    assert summary["in_place"] is True
     assert summary["scanned_files"] == 3
     assert summary["archived_count"] >= 2
+    assert summary["raw_moved_count"] >= 2
+    assert summary["duplicates_moved_count"] >= 1
 
     archived = [
         path
-        for path in output.rglob("*")
+        for path in inbox.rglob("*")
         if path.is_file() and path.suffix.lower() in {".pdf", ".xml"}
     ]
     assert archived, "local organize did not archive any file"
-    assert all(path.parent != output for path in archived), "files must be classified into folders"
     assert any(path.parent.name == "打车" for path in archived)
-    assert any(result.get("preview") is not True for result in results["successInvoices"])
-    # The applied run persists a report and the dedupe ledger.
-    assert any(path.suffix == ".xlsx" for path in output.rglob("*"))
+    assert any("raw" in path.parts for path in archived), archived
+    raw_files = [path for path in inbox.rglob("*") if path.is_file() and "raw" in path.parts]
+    assert raw_files, "originals were not moved into raw/"
+    assert {path.name for path in raw_files} == {"发票A.pdf", "发票B.xml"}
+    duplicate_files = [
+        path for path in inbox.rglob("*") if path.is_file() and "duplicates" in path.parts
+    ]
+    assert duplicate_files, "duplicate original was not moved into duplicates/"
+    assert {path.name for path in duplicate_files} == {"发票C.xml"}
+    assert _root_invoice_files(inbox) == [], "processed originals must leave the folder root"
+    assert any(path.suffix == ".xlsx" for path in inbox.rglob("*"))
 
-    # A second run over the same inbox is idempotent: no duplicate archive files.
-    second = _start_local(api, inbox, output, dry_run=False)
+    # A second run over the same folder is idempotent: no new archives/moves.
+    files_after_first = {path for path in inbox.rglob("*") if path.is_file()}
+    second = _start_local(api, inbox)
     assert second["run_state"] == "completed"
     second_results = api.get_results()
-    assert second_results["organize_summary"]["archived_count"] == 0
-    assert second_results["organize_summary"]["duplicate_count"] >= 2
+    second_summary = second_results["organize_summary"]
+    assert second_summary["scanned_files"] == 0
+    assert second_summary["archived_count"] == 0
+    assert second_summary["raw_moved_count"] == 0
+    assert second_summary["duplicates_moved_count"] == 0
+    files_after_second = {path for path in inbox.rglob("*") if path.is_file()}
+    # The second run may write a fresh Excel report, but must not add archives.
+    new_files = files_after_second - files_after_first
+    assert all(path.suffix == ".xlsx" for path in new_files), new_files
 
 
-def test_local_organize_dry_run_previews_without_writing_files(tmp_path: Path):
+def test_local_organize_in_place_dry_run_writes_nothing(tmp_path: Path):
+    from app_api import InvoiceAppAPI
+
+    inbox = tmp_path / "inbox"
+    _build_inbox(inbox)
+    before = sorted(path.relative_to(inbox).as_posix() for path in inbox.rglob("*") if path.is_file())
+
+    api = InvoiceAppAPI()
+    _start_local(api, inbox, dry_run=True)
+
+    results = api.get_results()
+    assert results["dry_run"] is True
+    rows = [row for row in results["successInvoices"] if row.get("preview")]
+    assert rows, "dry-run must expose preview rows"
+    assert all(row.get("path") for row in rows)
+    after = sorted(path.relative_to(inbox).as_posix() for path in inbox.rglob("*") if path.is_file())
+    assert after == before, "dry-run must not move or create files"
+    assert not (inbox / "raw").exists()
+    assert not (inbox / "duplicates").exists()
+
+
+def test_local_organize_custom_output_copies_without_relocating(tmp_path: Path):
     from app_api import InvoiceAppAPI
 
     inbox = tmp_path / "inbox"
     _build_inbox(inbox)
     output = tmp_path / "output"
+    originals_before = sorted(path.name for path in _root_invoice_files(inbox))
 
     api = InvoiceAppAPI()
-    snapshot = _start_local(api, inbox, output, dry_run=True)
-    assert snapshot["status_text"] in {"预览完成", "整理完成", "处理完成"}
+    _start_local(api, inbox, output_dir=output)
 
     results = api.get_results()
-    assert results["task_mode"] == "local"
-    assert results["dry_run"] is True
-    rows = [row for row in results["successInvoices"] if row.get("preview")]
-    assert rows, "dry-run must expose preview rows"
-    assert all(row.get("path") for row in rows)
-    leftover_files = [
+    summary = results["organize_summary"]
+    assert results["output_path"] == str(output)
+    assert summary["output_dir"] == str(output)
+    assert summary["in_place"] is False
+    assert summary["archived_count"] >= 2
+    assert summary["raw_moved_count"] == 0
+    assert not (inbox / "raw").exists()
+    assert sorted(path.name for path in _root_invoice_files(inbox)) == originals_before
+    archived = [
         path
         for path in output.rglob("*")
-        if path.is_file()
-        and path.suffix.lower() in {".pdf", ".xml", ".xlsx"}
+        if path.is_file() and path.suffix.lower() in {".pdf", ".xml"}
     ]
-    assert leftover_files == [], f"dry-run wrote files: {leftover_files}"
+    assert archived and any(path.parent.name == "打车" for path in archived)
+
+
+def test_local_organize_does_not_overwrite_mail_save_path(tmp_path: Path):
+    from app_api import InvoiceAppAPI
+
+    inbox = tmp_path / "inbox"
+    _build_inbox(inbox)
+    mail_save_path = tmp_path / "mail-library"
+    api = InvoiceAppAPI()
+    saved = api.save_user_settings(
+        {"save_path": str(mail_save_path), "email": "user@qq.com", "auth_code": "auth"}
+    )
+    assert saved["success"] is True
+
+    _start_local(api, inbox)
+
+    settings = api.load_user_settings()["settings"]
+    assert settings["save_path"] == str(mail_save_path)
+    assert settings["task_mode"] == "local"
+    assert settings["local_input_dir"] == str(inbox)
+    assert settings["local_output_dir"] == ""
+
+
+def test_local_organize_relocation_failure_keeps_original(tmp_path: Path, monkeypatch):
+    from app_api import InvoiceAppAPI
+    from local_organize import LocalOrganizer, OrganizeRequest
+
+    inbox = tmp_path / "inbox"
+    _build_inbox(inbox)
+
+    api = InvoiceAppAPI()
+    organizer = LocalOrganizer(
+        api,
+        OrganizeRequest(input_dir=str(inbox), output_dir=str(inbox), dry_run=False),
+    )
+
+    def _boom(*_args, **_kwargs):
+        raise OSError("simulated move failure")
+
+    monkeypatch.setattr(organizer, "_move_unique", _boom)
+    result = organizer.run()
+
+    assert result.archived_count >= 2
+    assert result.raw_moved_count == 0
+    assert result.originals_kept_count >= 1
+    assert any("raw" in warning for warning in result.warnings)
+    assert _root_invoice_files(inbox), "originals must stay in place when relocation fails"
 
 
 def test_preview_archive_target_is_pure_and_deterministic(tmp_path: Path):
@@ -380,26 +487,48 @@ def test_fetch_modules_never_import_the_parser(module_name: str):
     )
 
 
-def test_organize_cli_json_dry_run_is_scriptable(tmp_path: Path, capsys):
+def test_organize_cli_defaults_to_same_folder_dry_run(tmp_path: Path, capsys):
     import organize_cli
 
     inbox = tmp_path / "inbox"
     _build_inbox(inbox)
-    output = tmp_path / "output"
+    before = sorted(path.relative_to(inbox).as_posix() for path in inbox.rglob("*") if path.is_file())
 
-    exit_code = organize_cli.main(
-        ["organize", str(inbox), "--output", str(output), "--json"]
-    )
+    exit_code = organize_cli.main(["organize", str(inbox), "--json"])
     captured = capsys.readouterr()
     assert exit_code == 0, captured.err
 
     payload = json.loads(captured.out)
     assert payload["ok"] is True
     assert payload["dry_run"] is True
+    assert payload["output_dir"] == str(inbox.resolve())
     assert payload["scanned_files"] == 3
     assert payload["archived_count"] >= 2
+    after = sorted(path.relative_to(inbox).as_posix() for path in inbox.rglob("*") if path.is_file())
+    assert after == before, "CLI preview must not write or move files"
+
+
+def test_organize_cli_apply_organizes_in_place(tmp_path: Path, capsys):
+    import organize_cli
+
+    inbox = tmp_path / "inbox"
+    _build_inbox(inbox)
+
+    exit_code = organize_cli.main(["organize", str(inbox), "--apply", "--json"])
+    captured = capsys.readouterr()
+    assert exit_code == 0, captured.err
+
+    payload = json.loads(captured.out)
+    assert payload["ok"] is True
+    assert payload["dry_run"] is False
+    assert payload["output_dir"] == str(inbox.resolve())
+    assert payload["archived_count"] >= 2
+    assert payload["raw_moved_count"] >= 2
+    assert payload["duplicates_moved_count"] >= 1
+    assert (inbox / "raw").is_dir()
+    assert (inbox / "duplicates").is_dir()
     assert not [
         path
-        for path in output.rglob("*")
-        if path.is_file() and path.suffix.lower() in {".pdf", ".xml", ".xlsx"}
+        for path in inbox.iterdir()
+        if path.is_file() and path.suffix.lower() in {".pdf", ".xml", ".ofd"}
     ]

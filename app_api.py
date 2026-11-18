@@ -2538,7 +2538,8 @@ class InvoiceAppAPI:
             # Feature split (v0.3): mail / fetch-only / local-folder organizing.
             "task_mode": "mail",
             "local_input_dir": "",
-            "local_dry_run": True,
+            # Empty means "same folder as local_input_dir" (in-place organizing).
+            "local_output_dir": "",
         }
 
     @staticmethod
@@ -2557,7 +2558,7 @@ class InvoiceAppAPI:
         merged["save_path"] = self._normalize_user_save_path(merged.get("save_path", ""))
         merged["task_mode"] = self._normalize_task_mode(merged.get("task_mode"))
         merged["local_input_dir"] = str(merged.get("local_input_dir") or "")
-        merged["local_dry_run"] = bool(merged.get("local_dry_run", True))
+        merged["local_output_dir"] = str(merged.get("local_output_dir") or "")
 
         return {
             "success": True,
@@ -2580,7 +2581,7 @@ class InvoiceAppAPI:
         merged["save_path"] = self._normalize_user_save_path(merged.get("save_path", ""))
         merged["task_mode"] = self._normalize_task_mode(merged.get("task_mode"))
         merged["local_input_dir"] = str(merged.get("local_input_dir") or "")
-        merged["local_dry_run"] = bool(merged.get("local_dry_run", True))
+        merged["local_output_dir"] = str(merged.get("local_output_dir") or "")
         raw_save_path = str(merged.get("save_path") or "")
         if raw_save_path.startswith("\\\\") or ".." in Path(raw_save_path).parts:
             return {"success": False, "message": "保存路径不可用"}
@@ -3107,16 +3108,41 @@ class InvoiceAppAPI:
             organizer = resources.get("organizer")
             if organizer is None:
                 raise ProcessingLoopFailure("ORGANIZE_SESSION_MISSING")
-            return organizer.archive(outcomes)
+            report = organizer.archive(outcomes)
+            relocation = dict(getattr(organizer, "last_relocation", {}) or {})
+            raw_moved = int(relocation.get("raw_moved_count", 0) or 0)
+            duplicates_moved = int(
+                relocation.get("duplicates_moved_count", 0) or 0
+            )
+            if raw_moved:
+                self._append_log(
+                    "信息",
+                    f"原件已移入 raw 文件夹保留：{raw_moved} 个。",
+                    "text-emerald-400",
+                )
+            if duplicates_moved:
+                self._append_log(
+                    "信息",
+                    f"重复文件已移入 duplicates 文件夹：{duplicates_moved} 个。",
+                    "text-amber-500",
+                )
+            for warning in list(relocation.get("warnings", []) or [])[:5]:
+                self._append_log("提示", str(warning), "text-amber-500")
+            return report
 
         def report_callback(_context, run_result):
             scan_result = resources.get("scan")
             report = getattr(run_result, "archive_report", None)
+            relocation = dict(
+                getattr(resources.get("organizer"), "last_relocation", {}) or {}
+            )
             if scan_result is not None:
                 self._last_organize_result = {
                     "input_dir": str(request.input_dir or ""),
                     "output_dir": str(request.save_path or ""),
                     "dry_run": bool(getattr(request, "dry_run", False)),
+                    "in_place": os.path.abspath(str(request.input_dir or ""))
+                    == os.path.abspath(str(request.save_path or "")),
                     "scanned_files": int(getattr(scan_result, "file_count", 0) or 0),
                     "duplicate_files": int(
                         getattr(scan_result, "skipped_duplicates", 0) or 0
@@ -3136,6 +3162,15 @@ class InvoiceAppAPI:
                     ),
                     "unresolved_count": int(
                         getattr(report, "unresolved_count", 0) or 0
+                    ),
+                    "raw_moved_count": int(
+                        relocation.get("raw_moved_count", 0) or 0
+                    ),
+                    "duplicates_moved_count": int(
+                        relocation.get("duplicates_moved_count", 0) or 0
+                    ),
+                    "originals_kept_count": int(
+                        relocation.get("originals_kept_count", 0) or 0
                     ),
                 }
             if not bool(getattr(request, "dry_run", False)):
@@ -4641,8 +4676,8 @@ class InvoiceAppAPI:
             secrets=secrets,
         )
 
-    def start_local_organize(self, input_dir, save_path, dry_run=False):
-        """Feature ②: organize an arbitrary local folder without a mailbox."""
+    def start_local_organize(self, input_dir, save_path="", dry_run=False):
+        """Feature ②: organize a local folder automatically (in place by default)."""
         if (
             not self._run_lifecycle.can_begin
             or self._is_running
@@ -4650,23 +4685,21 @@ class InvoiceAppAPI:
         ):
             return {"success": False, "message": "任务已在运行中"}
 
+        from local_organize import is_filesystem_root
+
         input_text = str(input_dir or "").strip()
-        save_text = str(save_path or "").strip()
         if not input_text:
             return {"success": False, "message": "请选择要整理的本地文件夹"}
         if not os.path.isdir(input_text):
             return {"success": False, "message": "要整理的本地文件夹不存在"}
-        if not save_text:
-            return {"success": False, "message": "请选择输出目录"}
+        if is_filesystem_root(input_text):
+            return {
+                "success": False,
+                "message": "不能直接整理磁盘根目录，请选择具体的发票文件夹",
+            }
+        save_text = str(save_path or "").strip() or input_text
         if os.path.exists(save_text) and not os.path.isdir(save_text):
             return {"success": False, "message": "输出路径不是文件夹"}
-        try:
-            input_real = os.path.realpath(input_text)
-            save_real = os.path.realpath(save_text)
-        except OSError:
-            return {"success": False, "message": "文件夹路径不可用"}
-        if input_real == save_real:
-            return {"success": False, "message": "输出目录不能与发票文件夹相同"}
         if str(save_text).startswith(("\\\\", "//")):
             return {"success": False, "message": "不支持网络共享路径"}
 
@@ -4709,7 +4742,7 @@ class InvoiceAppAPI:
             try:
                 context = dict(self._run_context or {})
                 context.setdefault("enabled", False)
-                effective_save_path = str(save_path or "")
+                effective_save_path = str(save_path or "").strip() or input_dir
                 if context.get("enabled") and context.get("output_dir"):
                     effective_save_path = str(context.get("output_dir"))
                 effective_save_path = os.path.abspath(effective_save_path)
@@ -4747,12 +4780,14 @@ class InvoiceAppAPI:
                 }
                 os.makedirs(effective_save_path, exist_ok=True)
                 settings_touched = True
+                # Never overwrite the mail mode save_path: local organizing keeps
+                # its own output setting ("" means "same folder as the invoices").
+                local_output_dir = "" if os.path.abspath(input_dir) == effective_save_path else effective_save_path
                 save_result = self.save_user_settings(
                     {
                         "task_mode": "local",
                         "local_input_dir": input_dir,
-                        "local_dry_run": bool(dry_run),
-                        "save_path": effective_save_path,
+                        "local_output_dir": local_output_dir,
                         "company": active_company,
                     }
                 )

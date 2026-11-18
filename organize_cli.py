@@ -30,8 +30,8 @@ def _resolve_secret(value: str) -> str:
 
 
 def _default_output_dir(input_dir: str) -> str:
-    parent = os.path.dirname(os.path.abspath(input_dir)) or os.getcwd()
-    return os.path.join(parent, "发票整理结果")
+    """Organize inside the invoice folder itself unless another output is given."""
+    return os.path.abspath(input_dir)
 
 
 def _configure_logging(verbose: bool) -> None:
@@ -67,6 +67,11 @@ def _print_organize_human(result) -> None:
             result.unresolved_count,
         )
     )
+    if result.raw_moved_count or result.duplicates_moved_count:
+        print(
+            "归位: 原件 → raw/ %d 个 · 重复件 → duplicates/ %d 个"
+            % (result.raw_moved_count, result.duplicates_moved_count)
+        )
     if result.preview_rows:
         print("-" * 70)
         print(f"{'原文件':<28}{'→ 分类/新文件名':<40}")
@@ -94,11 +99,17 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command")
 
-    organize = sub.add_parser("organize", help="整理本地文件夹（默认只预览）")
+    organize = sub.add_parser(
+        "organize", help="整理本地文件夹（默认仅预览；默认输出到原文件夹）"
+    )
     organize.add_argument("input", help="要整理的发票文件夹")
-    organize.add_argument("--output", default="", help="归档输出目录")
     organize.add_argument(
-        "--apply", action="store_true", help="真正移动/重命名文件（默认仅预览）"
+        "--output", default="", help="归档输出目录（默认与原文件夹相同，即原地整理）"
+    )
+    organize.add_argument(
+        "--apply",
+        action="store_true",
+        help="真正执行整理（默认仅预览；同目录整理时原件移入 raw/、重复件移入 duplicates/）",
     )
     organize.add_argument("--rules", default="", help="可选的自定义分类规则文本文件")
     organize.add_argument(

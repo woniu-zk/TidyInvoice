@@ -55,7 +55,7 @@ Open **Invoice Downloader** from the right-side entry, choose an output director
 | 🧾 | **Automatic invoice/document pairing** | Hotel invoice/folio and ride invoice/itinerary pairs are archived with adjacent names |
 | 🪟 | **Quiet background processing** | URL workers, Node, and Chromium run without repeatedly opening console windows |
 | 🗂️ | **Natural language classification rules** | Supports custom rules like "Didi rides over 100 yuan go into the high-amount category" |
-| 📂 | **Local folder organizing** | Works without any mailbox: phone exports, WeChat/Alipay download folders, and photographed receipts can be recognized, classified, renamed, and archived offline |
+| 📂 | **Local folder organizing** | Works without any mailbox: one-click offline organizing of phone exports, WeChat/Alipay download folders, and photographed receipts; archives in place and keeps originals under `raw/` |
 | 📥 | **Fetch to inbox only** | Saves attachments plus a source manifest into `inbox/` without parsing or renaming, ready for your own tools or a later organizing step |
 | 📊 | **One-click Excel report** | Automatically generates `summary_report.xlsx`, covering invoice lists and amount summaries |
 
@@ -134,19 +134,28 @@ flowchart TD
 |------|----------|--------------|
 | **Fetch and organize** | Everyday use | Connects to the mailbox, extracts attachments, recognizes, classifies, renames, and archives them |
 | **Fetch to inbox only** | You already have your own organizing tools | Saves attachments into `inbox/` and writes a `manifest.jsonl` source manifest; no parsing, renaming, or ledger |
-| **Local folder organizing** | Invoices are already on this computer | Choose any folder (phone export, WeChat/Alipay downloads, photographed receipts); recognizes, classifies, renames, and archives offline |
+| **Local folder organizing** | Invoices are already on this computer | Choose any folder (phone export, WeChat/Alipay downloads, photographed receipts); click "Start Organizing" to recognize, classify, rename, and archive in place, offline |
 
-- Local folder organizing needs **no mailbox configuration and no network**.
+- Local folder organizing needs **no mailbox configuration and no network**; it is a one-click action with no preview step.
 - Fetch-only and local organizing hand off through `inbox/` + `manifest.jsonl`; the organizer keeps the mail source information (mailbox, subject, sender, received time) in the archive record.
-- Local folder organizing offers a **preview by default**: it only shows the "original file → category/new name" plan until you confirm, and never moves a file during preview.
+- Local folder organizing works in the **selected invoice folder itself** by default; the output folder defaults to the same path (and can still be changed):
+  - classified copies go to category folders such as `打车/` and `住宿发票/`;
+  - **originals are moved to `raw/YYYY/MM/` for safekeeping** and are never deleted;
+  - duplicate files go to `duplicates/`;
+  - the Excel report is written into the organizing folder, and unreadable files stay where they are.
+- Re-running on the same folder is **idempotent**: already organized files are not archived or recognized again.
 
 ### Command line (optional)
 
 A standalone CLI lives at the repository root for scripting and tool chaining:
 
 ```powershell
-# Organize a local folder (preview by default; --apply performs the archive)
-python organize_cli.py organize "D:\invoices\inbox" --output "D:\invoice-library"
+# Organize a local folder: preview by default, --apply performs the run
+# (output defaults to the input folder, i.e. in-place organizing)
+python organize_cli.py organize "D:\invoices\inbox"
+python organize_cli.py organize "D:\invoices\inbox" --apply
+
+# Or copy archived results into a separate library; originals stay in the input folder
 python organize_cli.py organize "D:\invoices\inbox" --output "D:\invoice-library" --apply
 
 # Fetch mailbox attachments into inbox only (no parsing; env:VAR reads the auth code)

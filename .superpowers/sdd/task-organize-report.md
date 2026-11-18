@@ -100,10 +100,22 @@ report  : tmp/gui-e2e/report.json -> {"ok": true, ...}
 
 修复后真实 WebView2 CDP 实测：任务类型 section `h=1 -> 136`；`任务类型` 卡片与三种模式按钮可见；重新执行真实 GUI e2e（预览→结果→取消预览→整理）全部通过，无 console error。
 
+## 行为变更（第二轮需求）：一键「开始整理」+ 默认同目录整理
+
+用户要求：本地模式不要预览步骤，按钮直接「开始整理」并自动执行；默认在所选发票文件夹内整理。已确认的产品行为：原件移入同目录 `raw/` 保留，重复件移入 `duplicates/`；输出目录默认等于发票文件夹但保留可改。
+
+- 前端：删除「仅预览，不移动文件」开关、预览按钮与预览结果页分支；本地模式按钮恒为「开始整理」；新增 `local_output_dir` 设置（空 = 默认同发票文件夹），本地输出卡默认显示发票文件夹并提供「恢复默认」；结果页统一「本地整理完成」。
+- 后端：`start_local_organize(input_dir, save_path="", dry_run=False)` 允许并默认同目录；同目录 apply 时把已处理原件移入 `raw/YYYY/MM/`、重复件移入 `duplicates/`，移动失败保留原位并 warning；同目录扫描仅跳过根目录下的归档/工具目录（防二次运行自吞），不误伤深层同名目录；本地任务不再覆盖邮箱模式的 `save_path`。
+- CLI：未指定 `--output` 时默认输出 = 输入目录（仍默认只预览，`--apply` 执行）。
+- 测试：同目录 apply/幂等/dry-run 零写入/自定义输出不移动原件/save_path 不被覆盖/移动失败容错/CLI 默认输出；前端契约测试改为断言无预览 UI、有「开始整理」与 `local_output_dir`。
+
+真实 WebView2 端到端（隔离 APPDATA，CDP 驱动真实 UI）：设置页无预览开关、输出默认等于发票文件夹；一次点击「开始整理」后 `archived_count=2 / raw_moved_count=2 / duplicates_moved_count=1`，目录出现 `打车/`、`其他/`、`raw/2026/11/`、`duplicates/` 与结果明细，根目录不再残留原件；同目录再次点击扫描 0 个文件、新增归档 0，邮箱 `save_path` 未被覆盖，无 console error。全量 pytest 972 passed（仅既有 env_bound 机器指纹用例失败），ruff 全绿，前端 bundle `--check` 一致。
+
 ## Concerns / Limitations
 
 - 真实邮箱 IMAP 的 fetch-only 链路只做了依赖注入级单测（假 fetcher）+ 真实 EmailFetcher 既有测试，没有用真实账号跑（与仓库既有测试策略一致；mail 全链路行为未改动）。
-- 本地整理的「历史去重」依赖输出目录绑定的已提交台账；预览模式只读台账、不做台账自愈（自愈会写文件）。
+- 本地整理的「历史去重」依赖输出目录绑定的已提交台账；预览模式（仅 CLI）只读台账、不做台账自愈（自愈会写文件）。
+- 同目录整理时，根目录下与归档目录同名的文件夹（如 `打车/`）会被视为工具输出并跳过扫描；用户放进这些目录的新票不会再次整理（README 已说明）。
 - 桌面端受控 QA run-context 未新增 `locked_input_dir` 字段；本地模式在受控复跑时输出目录仍按既有逻辑锁定，输入目录来自用户选择。
 - `manifest.jsonl` 的邮箱来源信息写入依赖真实 EmailFetcher 附件行（已补充字段）；手工放入的 manifest 同样被接受（格式容忍坏行，坏行跳过并提示）。
 - 既有 `test_batch_validation` 机器指纹用例在本机失败（env_bound；改动前的基线同样失败），与本功能无关。

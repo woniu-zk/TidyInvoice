@@ -215,6 +215,21 @@ def test_scan_local_directory_excludes_output_root(tmp_path: Path):
     assert Path(scan.documents[0].path) == inbox.joinpath("a.pdf").resolve()
 
 
+def test_scan_local_directory_excludes_root_child_dirs_only(tmp_path: Path):
+    root = tmp_path / "inbox"
+    _write(root / "a.pdf", b"%PDF-1.4 alpha")
+    _write(root / "raw" / "2026" / "01" / "original.pdf", b"%PDF-1.4 original")
+    # A same-named folder deeper in the tree is user content, not our output.
+    _write(root / "phone" / "raw" / "nested.pdf", b"%PDF-1.4 nested")
+
+    scan = organize_source.scan_local_directory(
+        root, exclude_root_child_dir_names={"raw", "duplicates", "打车"}
+    )
+
+    paths = sorted(Path(document.path).name for document in scan.documents)
+    assert paths == ["a.pdf", "nested.pdf"]
+
+
 def test_scan_local_directory_rejects_missing_root(tmp_path: Path):
     with pytest.raises(FileNotFoundError):
         organize_source.scan_local_directory(tmp_path / "missing")

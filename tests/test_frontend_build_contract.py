@@ -195,36 +195,57 @@ def test_node_build_check_matches_committed_bundle():
     assert syntax_check.returncode == 0, syntax_check.stderr
 
 
+_JS_UNICODE_ESCAPE = re.compile(r"\\u([0-9a-fA-F]{4})")
+
+
+def _decode_js_unicode_escapes(text: str) -> str:
+    """Babel escapes non-ASCII JSX text as ``\\uXXXX``; decode for copy checks."""
+    return _JS_UNICODE_ESCAPE.sub(lambda match: chr(int(match.group(1), 16)), text)
+
+
 def test_task_mode_ui_follows_organize_frontend_contract():
-    """三种任务模式（mail / fetch / local）必须按 tmp/organize-frontend-contract.md 实现。"""
+    """三种任务模式（mail / fetch / local）必须按本地整理契约实现。"""
     source = _read(SOURCE_PATH)
-    built = _read(BUILT_PATH)
+    built = _decode_js_unicode_escapes(_read(BUILT_PATH))
+
 
     mode_copy = (
         "邮箱提取并整理",
         "仅提取到 inbox",
         "本地文件夹整理",
-        "仅预览，不移动文件",
+        "开始整理",
         "仅提取完成",
-        "本地预览完成",
         "本地整理完成",
         "附件已保存到 inbox 文件夹，并写入 manifest.jsonl；未进行识别和归档。",
-        "本次仅预览整理结果，未移动或重命名任何文件。确认无误后可关闭预览再执行整理。",
-        "已按分类与命名规则归档本地发票。",
+        "已按分类与命名规则归档本地发票；原件已移入 raw 文件夹保留，重复文件已移入 duplicates 文件夹。",
+        "已按分类与命名规则归档本地发票；原始文件保留在发票文件夹，未移动。",
+        "默认同发票文件夹",
+        "恢复默认（发票文件夹）",
     )
-    persistence_fields = ("task_mode", "local_input_dir", "local_dry_run")
+    persistence_fields = ("task_mode", "local_input_dir", "local_output_dir")
     for marker in mode_copy + persistence_fields:
         assert marker in source, f"task mode UI is missing {marker!r}"
         assert marker in built, f"compiled bundle is missing {marker!r}"
+
+    # 本地模式不再提供预览入口。
+    for removed in (
+        "开始预览",
+        "仅预览，不移动文件",
+        "本地预览完成",
+        "local_dry_run",
+        "localPreviewLabel",
+    ):
+        assert removed not in source, f"legacy preview UI still present: {removed!r}"
+        assert removed not in built, f"compiled bundle still contains preview UI: {removed!r}"
 
     # fetch 模式：savePath, dateFrom, dateTo, email, authCode
     assert (
         'callApi("start_fetch_only", settings.save_path, runSettings.date_from, runSettings.date_to, '
         "String(settings.email).trim(), settings.auth_code)"
     ) in source
-    # local 模式：inputDir, savePath, dryRun
+    # local 模式：inputDir, effectiveOutput（默认等于发票文件夹），无 dry-run 参数
     assert (
-        'callApi("start_local_organize", inputDir, settings.save_path, settings.local_dry_run !== false)'
+        'callApi("start_local_organize", inputDir, outputDir)'
     ) in source
     # mail 模式：沿用原调用，rules_text 传空
     assert (

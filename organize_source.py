@@ -36,6 +36,7 @@ SKIP_DIR_NAMES = frozenset(
         "diagnostics",
         "_audit_retention",
         "duplicates",
+        ".local-staging",
         "待人工复核",
         "人工复核",
         "release-assets",
@@ -130,6 +131,7 @@ def scan_local_directory(
     root: str | os.PathLike[str],
     *,
     exclude_paths: Iterable[str | os.PathLike[str]] = (),
+    exclude_root_child_dir_names: Iterable[str] = (),
     manifest_path: str | os.PathLike[str] | None = None,
     recursive: bool = True,
 ) -> LocalScanResult:
@@ -138,6 +140,9 @@ def scan_local_directory(
     - deterministic order (sorted directories and file names)
     - SHA256 dedupe inside one batch (same bytes are only processed once)
     - optional provenance enrichment from a fetch ``manifest.jsonl``
+    - ``exclude_root_child_dir_names`` prunes only the root's direct child
+      folders (used by in-place organizing to skip its own output buckets
+      without hiding user folders that merely share a name deeper in the tree)
     """
     base = Path(root)
     if not base.exists():
@@ -150,6 +155,11 @@ def scan_local_directory(
         root=base, manifest_path=manifest_path
     )
     excluded = _excluded_roots(exclude_paths)
+    root_child_skip = {
+        str(name).strip()
+        for name in (exclude_root_child_dir_names or ())
+        if str(name or "").strip()
+    }
 
     documents: list[LocalDocument] = []
     seen_sha: set[str] = set()
@@ -159,10 +169,13 @@ def scan_local_directory(
 
     for dirpath, dirnames, filenames in os.walk(base, topdown=True):
         current = Path(dirpath)
+        at_root = current.resolve() == base
         keep_dirs = []
         for name in sorted(dirnames):
             candidate = current / name
             if name in SKIP_DIR_NAMES:
+                continue
+            if at_root and name in root_child_skip:
                 continue
             if _is_under_excluded(candidate, excluded):
                 continue
