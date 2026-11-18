@@ -55,6 +55,8 @@ Open **Invoice Downloader** from the right-side entry, choose an output director
 | 🧾 | **Automatic invoice/document pairing** | Hotel invoice/folio and ride invoice/itinerary pairs are archived with adjacent names |
 | 🪟 | **Quiet background processing** | URL workers, Node, and Chromium run without repeatedly opening console windows |
 | 🗂️ | **Natural language classification rules** | Supports custom rules like "Didi rides over 100 yuan go into the high-amount category" |
+| 📂 | **Local folder organizing** | Works without any mailbox: phone exports, WeChat/Alipay download folders, and photographed receipts can be recognized, classified, renamed, and archived offline |
+| 📥 | **Fetch to inbox only** | Saves attachments plus a source manifest into `inbox/` without parsing or renaming, ready for your own tools or a later organizing step |
 | 📊 | **One-click Excel report** | Automatically generates `summary_report.xlsx`, covering invoice lists and amount summaries |
 
 ---
@@ -123,6 +125,35 @@ flowchart TD
     BW & DI & Generic --> Final(["📄 Local PDF"])
     Final --> Rec(["🔎 Local Recognition\nParsing / OCR / Rule Extraction"])
 ```
+
+---
+
+## 📂 Three Ways to Use It: Fetch and Organize Are Independent
+
+| Mode | Best for | What it does |
+|------|----------|--------------|
+| **Fetch and organize** | Everyday use | Connects to the mailbox, extracts attachments, recognizes, classifies, renames, and archives them |
+| **Fetch to inbox only** | You already have your own organizing tools | Saves attachments into `inbox/` and writes a `manifest.jsonl` source manifest; no parsing, renaming, or ledger |
+| **Local folder organizing** | Invoices are already on this computer | Choose any folder (phone export, WeChat/Alipay downloads, photographed receipts); recognizes, classifies, renames, and archives offline |
+
+- Local folder organizing needs **no mailbox configuration and no network**.
+- Fetch-only and local organizing hand off through `inbox/` + `manifest.jsonl`; the organizer keeps the mail source information (mailbox, subject, sender, received time) in the archive record.
+- Local folder organizing offers a **preview by default**: it only shows the "original file → category/new name" plan until you confirm, and never moves a file during preview.
+
+### Command line (optional)
+
+A standalone CLI lives at the repository root for scripting and tool chaining:
+
+```powershell
+# Organize a local folder (preview by default; --apply performs the archive)
+python organize_cli.py organize "D:\invoices\inbox" --output "D:\invoice-library"
+python organize_cli.py organize "D:\invoices\inbox" --output "D:\invoice-library" --apply
+
+# Fetch mailbox attachments into inbox only (no parsing; env:VAR reads the auth code)
+python organize_cli.py fetch --email you@qq.com --auth-code env:QQ_AUTH_CODE --output "D:\invoice-library"
+```
+
+Each `manifest.jsonl` line records one attachment's source (`sha256`, relative path, mailbox, UID, subject, sender, received time, and so on). The format is public, hand-editable, and readable by other scripts.
 
 ---
 
@@ -240,6 +271,7 @@ flowchart TD
 
 ```
 Invoice Organizer/
+├── inbox/             ← Fetch-only handoff folder (contains manifest.jsonl)
 ├── Train Tickets/
 │   └── 20260315-Beijing-Shanghai-Train-Ticket.pdf
 ├── Flight Tickets/

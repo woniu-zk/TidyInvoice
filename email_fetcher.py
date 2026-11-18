@@ -519,6 +519,28 @@ def decode_str(s):
     return result
 
 
+def message_received_at(msg):
+    """Return the Date header as an ISO timestamp for the manifest handoff."""
+    try:
+        raw = msg.get("Date")
+    except Exception:
+        return ""
+    if not raw:
+        return ""
+    try:
+        parsed = email.utils.parsedate_to_datetime(raw)
+    except (TypeError, ValueError, IndexError):
+        return ""
+    if parsed is None:
+        return ""
+    try:
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone(LOCAL_TZ)
+        return parsed.isoformat(timespec="seconds")
+    except (ValueError, OverflowError):
+        return ""
+
+
 def infer_link_type(url, anchor_text=""):
     """粗略判断链接对应的票据格式，未知时返回 unknown。"""
     lower_url = url.lower()
@@ -2370,6 +2392,9 @@ class EmailFetcher:
                                 "sibling_xml_present": False,
                                 "provider_unzipped_pair_suspected": False,
                                 "zip_context": "email_body_receipt",
+                                "mailbox": mailbox,
+                                "message_id": str(msg.get("Message-ID") or "").strip(),
+                                "received_at": message_received_at(msg),
                             })
                             self._emit_input_inventory_event({
                                 "email_id": email_id_str,
@@ -2679,6 +2704,9 @@ class EmailFetcher:
                             "sibling_xml_present": ".xml" in sibling_exts or ".xml" in raw_exts,
                             "provider_unzipped_pair_suspected": provider_unzipped_pair_suspected,
                             "zip_context": attachment_info.get("zip_context", "direct_attachment"),
+                            "mailbox": mailbox,
+                            "message_id": str(msg.get("Message-ID") or "").strip(),
+                            "received_at": message_received_at(msg),
                         })
                         self._emit_input_inventory_event({
                             **inventory_payload,
@@ -2806,6 +2834,9 @@ class EmailFetcher:
                             "url_path": decision.get("url_path", ""),
                             "provider_family": decision.get("provider_family", ""),
                             "provider_expected_fields": decision.get("provider_expected_fields", {}),
+                            "mailbox": mailbox,
+                            "message_id": str(msg.get("Message-ID") or "").strip(),
+                            "received_at": message_received_at(msg),
                         }
                         provider_group_state = provider_groups.get(provider_group_key, {})
                         if provider_group_key:

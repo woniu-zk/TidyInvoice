@@ -33,6 +33,13 @@ class RunRequest:
     trusted_revision: str = ""
     validation_required: bool = False
     manifest_included_count: int = 0
+    # Feature split: "mail" runs the fetch and the organizer in one pass, "local"
+    # organizes an arbitrary folder without touching the mailbox. ``fetch_only``
+    # stops after writing inbox/ + manifest.jsonl and ``dry_run`` only previews.
+    source_mode: str = "mail"
+    fetch_only: bool = False
+    input_dir: str = ""
+    dry_run: bool = False
 
 
 @dataclass(frozen=True)
@@ -142,13 +149,30 @@ class RunCoordinator:
             RunState.ARCHIVING: 90,
             RunState.REPORTING: 95,
         }[state]
-        status_text = {
-            RunState.SCANNING: "正在扫描邮件...",
-            RunState.RECOVERING: "正在提取候选文档...",
-            RunState.EXTRACTING: "正在识别发票...",
-            RunState.ARCHIVING: "正在归档发票...",
-            RunState.REPORTING: "正在生成运行报告...",
-        }[state]
+        if getattr(self, "_source_mode", "mail") == "local":
+            status_text = {
+                RunState.SCANNING: "正在扫描本地文件夹...",
+                RunState.RECOVERING: "正在准备待识别文件...",
+                RunState.EXTRACTING: "正在识别发票...",
+                RunState.ARCHIVING: "正在归档发票...",
+                RunState.REPORTING: "正在生成运行报告...",
+            }[state]
+        elif getattr(self, "_fetch_only", False):
+            status_text = {
+                RunState.SCANNING: "正在扫描邮件...",
+                RunState.RECOVERING: "正在提取附件到 inbox...",
+                RunState.EXTRACTING: "正在收尾提取...",
+                RunState.ARCHIVING: "正在核对提取结果...",
+                RunState.REPORTING: "正在生成运行报告...",
+            }[state]
+        else:
+            status_text = {
+                RunState.SCANNING: "正在扫描邮件...",
+                RunState.RECOVERING: "正在提取候选文档...",
+                RunState.EXTRACTING: "正在识别发票...",
+                RunState.ARCHIVING: "正在归档发票...",
+                RunState.REPORTING: "正在生成运行报告...",
+            }[state]
         self._state.update(
             run_state="running",
             progress=progress,
@@ -220,6 +244,9 @@ class RunCoordinator:
         del callbacks
         if not self._run_lock.acquire(blocking=False):
             raise RuntimeError("a run is already active")
+        self._source_mode = str(getattr(request, "source_mode", "mail") or "mail")
+        self._fetch_only = bool(getattr(request, "fetch_only", False))
+        self._dry_run = bool(getattr(request, "dry_run", False))
         session = None
         started_monotonic = time.monotonic()
         started_at_utc = dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
@@ -363,7 +390,14 @@ class RunCoordinator:
                 )
             else:
                 result = replace(result, state=terminal)
-                status = "已安全停止" if result.cancelled else "处理完成"
+                if result.cancelled:
+                    status = "已安全停止"
+                elif self._source_mode == "local":
+                    status = "预览完成" if self._dry_run else "整理完成"
+                elif self._fetch_only:
+                    status = "提取完成"
+                else:
+                    status = "处理完成"
                 self._state.terminalize(
                     "completed",
                     status_text=status,

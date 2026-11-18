@@ -37,7 +37,10 @@ const DEFAULT_SETTINGS = {
   auth_code: "",
   save_path: "",
   company: "",
-  remember_settings: true
+  remember_settings: true,
+  task_mode: "mail",
+  local_input_dir: "",
+  local_dry_run: true
 };
 const DEFAULT_RUN_SETTINGS = {
   ...lastDaysRange(30),
@@ -54,6 +57,8 @@ const DEFAULT_PROGRESS = {
   },
   is_running: false,
   run_state: "idle",
+  task_mode: "mail",
+  dry_run: false,
   last_error: "",
   stop_requested: false,
   can_stop: false,
@@ -70,8 +75,54 @@ const APP_VISIBLE_COPY = {
   footerVersion: "InvoiceFlowAI",
   footerStamp: "P-H-Dx",
   githubLabel: "产品官网",
-  githubUrl: "https://github.com/EthanYoQ/Invoice-Downloader"
+  githubUrl: "https://github.com/EthanYoQ/Invoice-Downloader",
+  localPreviewLabel: "仅预览，不移动文件",
+  taskModes: {
+    mail: {
+      label: "邮箱提取并整理",
+      description: "连接邮箱提取附件，识别后按分类与命名规则归档。",
+      badge: "识别后归档"
+    },
+    fetch: {
+      label: "仅提取到 inbox",
+      description: "只把邮箱附件保存到 inbox 文件夹并生成清单，不做识别和归档。",
+      badge: "只保存附件"
+    },
+    local: {
+      label: "本地文件夹整理",
+      description: "读取本机文件夹中的发票文件，离线识别后归档，不需要邮箱和网络。",
+      badge: "本机离线整理"
+    }
+  },
+  resultBanners: {
+    fetch: {
+      eyebrow: "提取结果",
+      title: "仅提取完成",
+      text: "附件已保存到 inbox 文件夹，并写入 manifest.jsonl；未进行识别和归档。"
+    },
+    localPreview: {
+      eyebrow: "整理预览",
+      title: "本地预览完成",
+      text: "本次仅预览整理结果，未移动或重命名任何文件。确认无误后可关闭预览再执行整理。"
+    },
+    localApply: {
+      eyebrow: "整理结果",
+      title: "本地整理完成",
+      text: "已按分类与命名规则归档本地发票。"
+    }
+  }
 };
+const TASK_MODE_OPTIONS = [{
+  value: "mail",
+  ...APP_VISIBLE_COPY.taskModes.mail
+}, {
+  value: "fetch",
+  ...APP_VISIBLE_COPY.taskModes.fetch
+}, {
+  value: "local",
+  ...APP_VISIBLE_COPY.taskModes.local
+}];
+const TASK_MODE_VALUES = new Set(TASK_MODE_OPTIONS.map(option => option.value));
 const EMAIL_DOMAIN_OPTIONS = [{
   value: "qq.com",
   label: "qq.com"
@@ -156,6 +207,10 @@ const UI_COPY = {
       stopPending: "已收到安全停止指令。",
       stopDetail: "系统将在当前文件处理完成后安全停止。",
       processingDetail: "邮件抓取、票据恢复与本地识别将依次执行。",
+      processingDetailFetch: "本轮只提取邮箱附件，不会进行识别与归档。",
+      processingDetailLocal: "本地文件扫描、票据识别与归档整理将依次执行。",
+      scanEmailsLabel: "已扫描邮件",
+      scanFilesLabel: "已扫描文件",
       stopNotice: "已收到安全停止指令，当前邮件或当前文件处理完成后将结束任务。"
     },
     analysis: {
@@ -257,6 +312,18 @@ function preferNonEmpty(...values) {
   }
   return "";
 }
+function normalizeTaskMode(value) {
+  const mode = String(value || "").trim();
+  return TASK_MODE_VALUES.has(mode) ? mode : "mail";
+}
+function resolveLocalDryRun(...values) {
+  for (const value of values) {
+    if (typeof value === "boolean") {
+      return value;
+    }
+  }
+  return true;
+}
 function fileNameFromPath(path, fallback = "未命名文件") {
   const value = String(path || "");
   if (!value) {
@@ -329,6 +396,9 @@ function buildPersistPayload(settings, runSettings, runContext) {
       payload.date_to = runContext.locked_date_to;
     }
   }
+  payload.task_mode = normalizeTaskMode(payload.task_mode);
+  payload.local_input_dir = String(payload.local_input_dir || "").trim();
+  payload.local_dry_run = payload.local_dry_run !== false;
   return payload;
 }
 async function loadShellState() {
@@ -343,7 +413,10 @@ async function loadShellState() {
     auth_code: preferNonEmpty(storedPayload.auth_code),
     save_path: preferNonEmpty(sessionSettings.save_path, storedPayload.save_path),
     company: preferNonEmpty(sessionSettings.company, storedPayload.company),
-    remember_settings: sessionSettings.remember_settings === undefined ? storedPayload.remember_settings !== false : sessionSettings.remember_settings !== false
+    remember_settings: sessionSettings.remember_settings === undefined ? storedPayload.remember_settings !== false : sessionSettings.remember_settings !== false,
+    task_mode: normalizeTaskMode(preferNonEmpty(sessionSettings.task_mode, storedPayload.task_mode, "mail")),
+    local_input_dir: preferNonEmpty(sessionSettings.local_input_dir, storedPayload.local_input_dir),
+    local_dry_run: resolveLocalDryRun(sessionSettings.local_dry_run, storedPayload.local_dry_run)
   };
   const runSettings = {
     date_from: preferNonEmpty(sessionRunSettings.date_from, storedPayload.date_from, DEFAULT_RUN_SETTINGS.date_from),
@@ -376,7 +449,10 @@ async function persistUserSettings(settings, runSettings, runContext) {
     email: payload.email || "",
     save_path: payload.save_path || "",
     company: payload.company || "",
-    remember_settings: payload.remember_settings !== false
+    remember_settings: payload.remember_settings !== false,
+    task_mode: normalizeTaskMode(payload.task_mode),
+    local_input_dir: payload.local_input_dir || "",
+    local_dry_run: payload.local_dry_run !== false
   });
   writeSessionValue(SESSION_RUN_SETTINGS_KEY, {
     date_from: payload.date_from || "",
@@ -970,9 +1046,17 @@ function SettingsPage({
     };
   }, [bootstrapState, settings, runSettings, runContext]);
   const controlledRun = hasExplicitQaRunContext(runContext);
+  const taskMode = normalizeTaskMode(settings.task_mode);
+  const isMailMode = taskMode === "mail";
+  const isFetchMode = taskMode === "fetch";
+  const isLocalMode = taskMode === "local";
+  const localDryRun = settings.local_dry_run !== false;
+  const activeTaskMode = TASK_MODE_OPTIONS.find(option => option.value === taskMode) || TASK_MODE_OPTIONS[0];
   const emailParts = splitEmailAddress(settings.email);
   const dateError = validateDateRange(runSettings.date_from, runSettings.date_to);
-  const canStart = !validateEmail(settings.email) && !!settings.auth_code && !!String(settings.company || "").trim() && !!String(settings.save_path || "").trim() && !dateError;
+  const startButtonLabel = isLocalMode ? localDryRun ? "开始预览" : "开始整理" : isFetchMode ? "开始提取" : "开始处理";
+  const startButtonIcon = isLocalMode && localDryRun ? "visibility" : "play_arrow";
+  const canStart = isLocalMode ? !!String(settings.local_input_dir || "").trim() && !!String(settings.save_path || "").trim() : !validateEmail(settings.email) && !!settings.auth_code && (isFetchMode || !!String(settings.company || "").trim()) && !!String(settings.save_path || "").trim() && !dateError;
   useEffect(() => {
     if (bootstrapState !== "bootstrapped" || starting || autostartTriggeredRef.current || !shouldAutostartControlledRun(runContext)) return undefined;
     if (isControlledAutostartConsumed(runContext)) {
@@ -1017,6 +1101,14 @@ function SettingsPage({
       setPageError(error.message || "选择目录失败。");
     }
   }
+  async function handleChooseInputDirectory() {
+    try {
+      const result = await callApi("choose_directory");
+      if (result && result.success && result.path) updateSetting("local_input_dir", result.path);
+    } catch (error) {
+      setPageError(error.message || "选择文件夹失败。");
+    }
+  }
   async function handleTestConnection() {
     const emailError = validateEmail(settings.email);
     if (emailError) {
@@ -1051,16 +1143,36 @@ function SettingsPage({
     }
   }
   async function handleStart() {
+    if (isLocalMode) {
+      const inputDir = String(settings.local_input_dir || "").trim();
+      if (!inputDir) return setPageError("请选择要整理的本地文件夹。");
+      if (!settings.save_path) return setPageError("请选择输出目录。");
+      setStarting(true);
+      try {
+        await persistUserSettings(settings, runSettings, runContext);
+        const result = await callApi("start_local_organize", inputDir, settings.save_path, settings.local_dry_run !== false);
+        if (!result || !result.success) {
+          setPageError(result && result.message ? result.message : "任务启动失败。");
+          return;
+        }
+        navigate("/processing");
+      } catch (error) {
+        setPageError(error.message || "任务启动失败。");
+      } finally {
+        setStarting(false);
+      }
+      return;
+    }
     const emailError = validateEmail(settings.email);
     if (emailError) return setPageError(emailError);
     if (!settings.auth_code) return setPageError("请输入邮箱授权码。");
-    if (!settings.company || !settings.company.trim()) return setPageError("请填写公司名称。");
+    if (isMailMode && (!settings.company || !settings.company.trim())) return setPageError("请填写公司名称。");
     if (!settings.save_path) return setPageError("请选择输出目录。");
     if (dateError) return setPageError(dateError);
     setStarting(true);
     try {
       await persistUserSettings(settings, runSettings, runContext);
-      const result = await callApi("start_processing", "", settings.save_path, runSettings.date_from, runSettings.date_to, String(settings.email).trim(), settings.auth_code);
+      const result = isFetchMode ? await callApi("start_fetch_only", settings.save_path, runSettings.date_from, runSettings.date_to, String(settings.email).trim(), settings.auth_code) : await callApi("start_processing", "", settings.save_path, runSettings.date_from, runSettings.date_to, String(settings.email).trim(), settings.auth_code);
       if (!result || !result.success) {
         setPageError(result && result.message ? result.message : "任务启动失败。");
         return;
@@ -1113,7 +1225,7 @@ function SettingsPage({
       disabled: !canStart || starting
     }, /*#__PURE__*/React.createElement("span", {
       className: "material-symbols-outlined"
-    }, starting ? "sync" : "play_arrow"), /*#__PURE__*/React.createElement("span", null, starting ? "启动中..." : "开始提取"))
+    }, starting ? "sync" : startButtonIcon), /*#__PURE__*/React.createElement("span", null, starting ? "启动中..." : startButtonLabel))
   }, /*#__PURE__*/React.createElement("div", {
     className: "page-wrap page-wrap--settings"
   }, /*#__PURE__*/React.createElement(PageHeader, {
@@ -1127,11 +1239,72 @@ function SettingsPage({
     tone: "error"
   }, pageError) : null, controlledRun ? /*#__PURE__*/React.createElement("p", {
     className: "page-inline-note"
-  }, UI_COPY.pages.settings.controlledNotice) : null, /*#__PURE__*/React.createElement("div", {
+  }, UI_COPY.pages.settings.controlledNotice) : null, /*#__PURE__*/React.createElement("section", {
+    className: "surface-card"
+  }, /*#__PURE__*/React.createElement(SectionHeader, {
+    icon: "category",
+    title: "\u4EFB\u52A1\u7C7B\u578B",
+    indicator: /*#__PURE__*/React.createElement(StatusPill, {
+      tone: "info",
+      icon: isLocalMode ? "offline_bolt" : isFetchMode ? "inbox" : "mail"
+    }, activeTaskMode.badge)
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "card-stack card-stack--compact"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "quick-range",
+    role: "group",
+    "aria-label": "\u4EFB\u52A1\u7C7B\u578B"
+  }, TASK_MODE_OPTIONS.map(option => /*#__PURE__*/React.createElement("button", {
+    key: option.value,
+    type: "button",
+    className: joinClasses("quick-chip", taskMode === option.value && "is-active"),
+    "aria-pressed": taskMode === option.value,
+    onClick: () => updateSetting("task_mode", option.value)
+  }, option.label))), /*#__PURE__*/React.createElement("p", {
+    className: "field-help"
+  }, activeTaskMode.description))), /*#__PURE__*/React.createElement("div", {
     className: "settings-grid settings-grid--fit"
   }, /*#__PURE__*/React.createElement("div", {
     className: "settings-column"
-  }, /*#__PURE__*/React.createElement("section", {
+  }, isLocalMode ? /*#__PURE__*/React.createElement("section", {
+    className: "surface-card"
+  }, /*#__PURE__*/React.createElement(SectionHeader, {
+    icon: "folder_open",
+    title: "\u53D1\u7968\u6587\u4EF6\u5939",
+    indicator: /*#__PURE__*/React.createElement(StatusPill, {
+      tone: settings.local_input_dir ? "success" : "warning",
+      icon: "folder"
+    }, settings.local_input_dir ? "已选择" : "待选择")
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "card-stack card-stack--compact"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: joinClasses("field-shell", "field-shell--readonly", !settings.local_input_dir && "field-shell--error")
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "field-icon material-symbols-outlined"
+  }, "folder"), /*#__PURE__*/React.createElement("input", {
+    type: "text",
+    readOnly: true,
+    className: "field-input u-mono",
+    value: settings.local_input_dir || "",
+    placeholder: "\u8BF7\u9009\u62E9\u8981\u6574\u7406\u7684\u672C\u5730\u6587\u4EF6\u5939",
+    title: settings.local_input_dir || ""
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "footer-cluster"
+  }, /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn--secondary btn--sm",
+    onClick: handleChooseInputDirectory
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "material-symbols-outlined"
+  }, "folder_open"), /*#__PURE__*/React.createElement("span", null, "\u9009\u62E9\u6587\u4EF6\u5939"))), /*#__PURE__*/React.createElement("label", {
+    className: "toggle-row"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    checked: localDryRun,
+    onChange: event => updateSetting("local_dry_run", event.target.checked)
+  }), /*#__PURE__*/React.createElement("span", null, APP_VISIBLE_COPY.localPreviewLabel)), /*#__PURE__*/React.createElement("p", {
+    className: "field-help"
+  }, localDryRun ? "仅预览整理结果，不会移动或重命名任何文件。" : "确认后将按分类与命名规则归档文件。"))) : /*#__PURE__*/React.createElement("section", {
     className: "surface-card"
   }, /*#__PURE__*/React.createElement(SectionHeader, {
     icon: "mail",
@@ -1216,7 +1389,7 @@ function SettingsPage({
     indicator: controlledRun ? /*#__PURE__*/React.createElement(StatusPill, {
       tone: "info",
       icon: "lock"
-    }, "\u5DF2\u9501\u5B9A") : "保存原件与结果"
+    }, "\u5DF2\u9501\u5B9A") : isLocalMode ? "保存整理结果" : isFetchMode ? "保存提取附件" : "保存原件与结果"
   }), /*#__PURE__*/React.createElement("div", {
     className: "card-stack card-stack--compact"
   }, /*#__PURE__*/React.createElement("div", {
@@ -1241,7 +1414,7 @@ function SettingsPage({
     className: "material-symbols-outlined"
   }, "folder_open"), /*#__PURE__*/React.createElement("span", null, controlledRun ? "路径已锁定" : "浏览目录"))), /*#__PURE__*/React.createElement("p", {
     className: "field-help"
-  }, controlledRun ? "当前为受控前端复跑，本轮输出目录由诊断上下文锁定。" : "系统会在此目录下按发票类型保存归档文件，并生成待人工复核目录。")))), /*#__PURE__*/React.createElement("div", {
+  }, controlledRun ? "当前为受控前端复跑，本轮输出目录由诊断上下文锁定。" : isLocalMode ? "整理结果会按分类与命名规则归档到该目录。" : isFetchMode ? "邮箱附件会保存到该目录下的 inbox 文件夹，并生成清单文件。" : "系统会在此目录下按发票类型保存归档文件，并生成待人工复核目录。")))), /*#__PURE__*/React.createElement("div", {
     className: "settings-column"
   }, /*#__PURE__*/React.createElement("section", {
     className: "surface-card"
@@ -1267,7 +1440,7 @@ function SettingsPage({
     className: "engine-item__tag"
   }, "\u5185\u7F6E")))), /*#__PURE__*/React.createElement("p", {
     className: "field-help"
-  }, "\u65E0\u9700\u8054\u7F51\u3001\u65E0\u9700\u586B\u5199\u5BC6\u94A5\uFF0C\u652F\u6301\u7535\u5B50\u53D1\u7968\u3001OFD \u7248\u5F0F\u6587\u4EF6\u4E0E\u626B\u63CF\u4EF6\u7684\u672C\u5730\u89E3\u6790\uFF0C\u7968\u636E\u5185\u5BB9\u4E0D\u4F1A\u4E0A\u4F20\u3002"))), /*#__PURE__*/React.createElement("section", {
+  }, "\u65E0\u9700\u8054\u7F51\u3001\u65E0\u9700\u586B\u5199\u5BC6\u94A5\uFF0C\u652F\u6301\u7535\u5B50\u53D1\u7968\u3001OFD \u7248\u5F0F\u6587\u4EF6\u4E0E\u626B\u63CF\u4EF6\u7684\u672C\u5730\u89E3\u6790\uFF0C\u7968\u636E\u5185\u5BB9\u4E0D\u4F1A\u4E0A\u4F20\u3002"))), isLocalMode ? null : /*#__PURE__*/React.createElement("section", {
     className: "surface-card surface-card--compact settings-date-card"
   }, /*#__PURE__*/React.createElement(SectionHeader, {
     icon: "calendar_month",
@@ -1296,7 +1469,7 @@ function SettingsPage({
     className: "field-help field-help--subtle"
   }, "\u5F53\u524D\u4E3A\u53D7\u63A7\u590D\u8DD1\uFF0C\u65E5\u671F\u8303\u56F4\u5DF2\u6309\u4E0A\u4E0B\u6587\u9501\u5B9A\u3002") : /*#__PURE__*/React.createElement("p", {
     className: "field-help field-help--subtle"
-  }, "\u786E\u8BA4\u8D77\u6B62\u65E5\u671F\u540E\u53EF\u76F4\u63A5\u5F00\u59CB\u63D0\u53D6\uFF0C\u672C\u9875\u4E0D\u518D\u8FDB\u5165\u72EC\u7ACB\u786E\u8BA4\u6D41\u7A0B\u3002"))), /*#__PURE__*/React.createElement("section", {
+  }, "\u786E\u8BA4\u8D77\u6B62\u65E5\u671F\u540E\u53EF\u76F4\u63A5\u5F00\u59CB\u63D0\u53D6\uFF0C\u672C\u9875\u4E0D\u518D\u8FDB\u5165\u72EC\u7ACB\u786E\u8BA4\u6D41\u7A0B\u3002"))), isMailMode ? /*#__PURE__*/React.createElement("section", {
     className: "surface-card"
   }, /*#__PURE__*/React.createElement(SectionHeader, {
     icon: "business",
@@ -1327,7 +1500,7 @@ function SettingsPage({
     className: "field-help field-help--subtle"
   }, "\u586B\u5199\u516C\u53F8\u540D\u79F0\u540E\u6309\u8D2D\u4E70\u65B9\u5B57\u6BB5\u5339\u914D\u3002") : /*#__PURE__*/React.createElement("p", {
     className: "field-help field-help--subtle"
-  }, "\u6309\u8D2D\u4E70\u65B9\u5305\u542B\u201C", settings.company.trim(), "\u201D\u8FDB\u884C\u5339\u914D\uFF1B\u660E\u786E\u4E0D\u5339\u914D\u7684\u7968\u636E\u4F1A\u5355\u72EC\u8FDB\u5165\u201C\u975E\u76EE\u6807\u516C\u53F8\u53D1\u7968\u201D\u3002"))))))));
+  }, "\u6309\u8D2D\u4E70\u65B9\u5305\u542B\u201C", settings.company.trim(), "\u201D\u8FDB\u884C\u5339\u914D\uFF1B\u660E\u786E\u4E0D\u5339\u914D\u7684\u7968\u636E\u4F1A\u5355\u72EC\u8FDB\u5165\u201C\u975E\u76EE\u6807\u516C\u53F8\u53D1\u7968\u201D\u3002")))) : null))));
 }
 function ProcessingPage({
   onOpenDisclaimer
@@ -1377,8 +1550,11 @@ function ProcessingPage({
   }
   const stats = progressState.stats || DEFAULT_PROGRESS.stats;
   const logs = progressState.logs || [];
+  const taskMode = normalizeTaskMode(progressState.task_mode);
+  const isLocalTask = taskMode === "local";
   const statusTone = progressState.run_state === "failed" ? "error" : progressState.run_state === "completed" ? "success" : progressState.is_running ? "info" : "neutral";
   const statusLabel = progressState.run_state === "failed" ? "处理失败" : progressState.run_state === "completed" ? "处理完成" : progressState.is_running ? "实时连接已建立" : UI_COPY.pages.processing.statusWaiting;
+  const processingDetail = progressState.stop_requested ? UI_COPY.pages.processing.stopDetail : taskMode === "fetch" ? UI_COPY.pages.processing.processingDetailFetch : isLocalTask ? UI_COPY.pages.processing.processingDetailLocal : UI_COPY.pages.processing.processingDetail;
   useEffect(() => {
     if (!terminalBodyRef.current) return;
     terminalBodyRef.current.scrollTop = terminalBodyRef.current.scrollHeight;
@@ -1411,7 +1587,7 @@ function ProcessingPage({
     className: "progress-title"
   }, progressState.status_text), /*#__PURE__*/React.createElement("p", {
     className: "progress-meta"
-  }, progressState.stop_requested ? UI_COPY.pages.processing.stopDetail : UI_COPY.pages.processing.processingDetail)), /*#__PURE__*/React.createElement("div", {
+  }, processingDetail)), /*#__PURE__*/React.createElement("div", {
     className: "progress-actions"
   }, /*#__PURE__*/React.createElement("div", {
     className: "progress-value"
@@ -1449,11 +1625,11 @@ function ProcessingPage({
     className: "metric-card__icon"
   }, /*#__PURE__*/React.createElement("span", {
     className: "material-symbols-outlined"
-  }, "mail")), /*#__PURE__*/React.createElement("div", {
+  }, isLocalTask ? "folder_open" : "mail")), /*#__PURE__*/React.createElement("div", {
     className: "metric-card__copy"
   }, /*#__PURE__*/React.createElement("p", {
     className: "metric-card__label"
-  }, "\u5DF2\u626B\u63CF\u90AE\u4EF6"), /*#__PURE__*/React.createElement("p", {
+  }, isLocalTask ? UI_COPY.pages.processing.scanFilesLabel : UI_COPY.pages.processing.scanEmailsLabel), /*#__PURE__*/React.createElement("p", {
     className: "metric-card__value u-tabular"
   }, stats.emails || 0))), /*#__PURE__*/React.createElement("div", {
     className: "metric-card metric-card--green"
@@ -1714,6 +1890,10 @@ function AnalysisPage({
   const [lastExportPath, setLastExportPath] = useState("");
   const [loadingError, setLoadingError] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [resultTaskMode, setResultTaskMode] = useState("mail");
+  const [resultDryRun, setResultDryRun] = useState(false);
+  const [resultInputDir, setResultInputDir] = useState("");
+  const [fetchSummary, setFetchSummary] = useState({});
   useEffect(() => {
     let active = true;
     let timer = null;
@@ -1729,6 +1909,10 @@ function AnalysisPage({
         setQuotaExhausted(!!results.quota_exhausted);
         setQuotaMessage(results.quota_message || "");
         setLastExportPath(results.last_export_path || "");
+        setResultTaskMode(normalizeTaskMode(results.task_mode));
+        setResultDryRun(!!results.dry_run);
+        setResultInputDir(results.input_dir || "");
+        setFetchSummary(results.fetch_summary || {});
         const baseOutput = results.output_path || parentFolder(results.manual_check_path || "") || (settingsRes && settingsRes.settings ? settingsRes.settings.save_path || "" : "");
         setOutputPath(baseOutput);
         setLoadingError("");
@@ -1753,8 +1937,34 @@ function AnalysisPage({
   const totalResultCount = successCount + pendingCount;
   const statusText = buildResultStatusText(successCount, manualCheckCount, retentionCount, processingErrorCount);
   const groupedVisible = groupedErrors.filter(group => Number(group.count || group.items.length || 0) > 0);
-  async function handleOpenOutput() {
-    const target = outputPath || parentFolder(manualCheckPath);
+  const isFetchResult = resultTaskMode === "fetch";
+  const isLocalResult = resultTaskMode === "local";
+  const localPreview = isLocalResult && resultDryRun;
+  const resultHeadline = isFetchResult ? "本次提取完成" : localPreview ? "本次预览完成" : isLocalResult ? "本次整理完成" : UI_COPY.pages.analysis.resultTitle;
+  const fetchAttachments = Number(fetchSummary.attachments || 0);
+  const fetchTodoCount = Number(fetchSummary.todos || 0);
+  const fetchInboxDir = fetchSummary.inbox_dir || "";
+  const fetchManifestPath = fetchSummary.manifest_path || "";
+  const bannerCopy = isFetchResult ? APP_VISIBLE_COPY.resultBanners.fetch : localPreview ? APP_VISIBLE_COPY.resultBanners.localPreview : isLocalResult ? APP_VISIBLE_COPY.resultBanners.localApply : null;
+  const completionBanner = bannerCopy ? {
+    eyebrow: bannerCopy.eyebrow,
+    title: bannerCopy.title,
+    text: bannerCopy.text,
+    icon: isFetchResult ? "inbox" : localPreview ? "preview" : "task_alt",
+    pathText: isFetchResult ? fetchManifestPath || fetchInboxDir || outputPath : localPreview ? resultInputDir : outputPath,
+    openPath: isFetchResult ? fetchInboxDir || outputPath : localPreview ? resultInputDir || outputPath : outputPath,
+    buttonLabel: isFetchResult ? "打开 inbox 文件夹" : localPreview ? "打开发票文件夹" : "打开输出目录"
+  } : null;
+  const outputBanner = {
+    icon: "folder",
+    eyebrow: "输出目录",
+    title: outputPath ? isFetchResult ? "提取结果已写入输出目录" : localPreview ? "预览结果尚未写入输出目录" : "归档结果与暂存记录已写入输出目录" : "当前还没有可打开的输出目录",
+    text: outputPath ? isFetchResult ? "inbox 文件夹与 manifest.jsonl 位于该目录下，可从这里继续查看。" : localPreview ? "确认后再执行整理，归档结果会写入该目录。" : "成功归档文件、暂存记录和导出结果都可以从这里继续查看。" : "待本轮生成结果后，可从这里直接打开输出目录。",
+    pathText: outputPath || "",
+    buttonLabel: "打开输出目录",
+    openPath: outputPath || parentFolder(manualCheckPath)
+  };
+  async function handleOpenPath(target) {
     if (!target) return;
     await callApi("open_folder", target);
   }
@@ -1783,12 +1993,26 @@ function AnalysisPage({
       setExporting(false);
     }
   }
-  const summaryCards = [{
+  const summaryCards = isFetchResult ? [{
+    key: "attachments",
+    icon: "attach_file",
+    label: "已提取附件",
+    value: fetchAttachments,
+    helper: fetchAttachments > 0 ? "附件已保存到 inbox 文件夹。" : "本轮未提取到附件。",
+    tone: "success"
+  }, {
+    key: "todos",
+    icon: "pending_actions",
+    label: "待处理事项",
+    value: fetchTodoCount,
+    helper: fetchTodoCount > 0 ? "提取过程中有记录需要后续处理。" : "本轮提取没有待处理事项。",
+    tone: fetchTodoCount > 0 ? "warning" : "info"
+  }] : [{
     key: "success",
     icon: "task_alt",
     label: "处理成功",
     value: successCount,
-    helper: successCount > 0 ? "归档文件已写入输出目录。" : "当前还没有成功记录。",
+    helper: successCount > 0 ? localPreview ? "这些记录计划归档到输出目录。" : "归档文件已写入输出目录。" : "当前还没有成功记录。",
     tone: "success"
   }, {
     key: "retention",
@@ -1824,7 +2048,17 @@ function AnalysisPage({
   }, /*#__PURE__*/React.createElement(PageHeader, {
     eyebrow: UI_COPY.pages.analysis.eyebrow,
     title: UI_COPY.pages.analysis.title
-  }), /*#__PURE__*/React.createElement("section", {
+  }), completionBanner ? /*#__PURE__*/React.createElement(ResultActionBanner, {
+    tone: "neutral",
+    icon: completionBanner.icon,
+    eyebrow: completionBanner.eyebrow,
+    title: completionBanner.title,
+    text: completionBanner.text,
+    pathText: completionBanner.pathText || "",
+    buttonLabel: completionBanner.buttonLabel,
+    onClick: () => handleOpenPath(completionBanner.openPath),
+    disabled: !completionBanner.openPath
+  }) : null, /*#__PURE__*/React.createElement("section", {
     className: "surface-card surface-card--hero"
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -1845,7 +2079,17 @@ function AnalysisPage({
     className: "progress-kicker"
   }, UI_COPY.pages.analysis.statusSummary), /*#__PURE__*/React.createElement("h2", {
     className: "progress-title"
-  }, UI_COPY.pages.analysis.resultTitle), /*#__PURE__*/React.createElement("p", {
+  }, resultHeadline), isFetchResult ? /*#__PURE__*/React.createElement("p", {
+    className: "progress-meta"
+  }, "\u672C\u8F6E\u5171\u63D0\u53D6 ", /*#__PURE__*/React.createElement("strong", {
+    className: "u-tabular"
+  }, fetchAttachments), " \u4E2A\u9644\u4EF6\uFF0C\u6E05\u5355\u5DF2\u5199\u5165 inbox \u6587\u4EF6\u5939\u3002") : localPreview ? /*#__PURE__*/React.createElement("p", {
+    className: "progress-meta"
+  }, "\u672C\u6B21\u4E3A\u9884\u89C8\uFF1A\u5171 ", /*#__PURE__*/React.createElement("strong", {
+    className: "u-tabular"
+  }, totalResultCount), " \u6761\u7ED3\u679C\u8BB0\u5F55\uFF0C\u5176\u4E2D ", /*#__PURE__*/React.createElement("strong", {
+    className: "u-tabular"
+  }, successCount), " \u6761\u53EF\u6309\u89C4\u5219\u5F52\u6863\u3002") : /*#__PURE__*/React.createElement("p", {
     className: "progress-meta"
   }, "\u5171\u6574\u7406 ", /*#__PURE__*/React.createElement("strong", {
     className: "u-tabular"
@@ -1885,14 +2129,14 @@ function AnalysisPage({
     disabled: !manualCheckCount
   }) : null, /*#__PURE__*/React.createElement(ResultActionBanner, {
     tone: "neutral",
-    icon: "folder",
-    eyebrow: "\u8F93\u51FA\u76EE\u5F55",
-    title: outputPath ? "归档结果与暂存记录已写入输出目录" : "当前还没有可打开的输出目录",
-    text: outputPath ? "成功归档文件、暂存记录和导出结果都可以从这里继续查看。" : "待本轮生成结果后，可从这里直接打开输出目录。",
-    pathText: outputPath || "",
-    buttonLabel: "\u6253\u5F00\u8F93\u51FA\u76EE\u5F55",
-    onClick: handleOpenOutput,
-    disabled: !outputPath
+    icon: outputBanner.icon,
+    eyebrow: outputBanner.eyebrow,
+    title: outputBanner.title,
+    text: outputBanner.text,
+    pathText: outputBanner.pathText,
+    buttonLabel: outputBanner.buttonLabel,
+    onClick: () => handleOpenPath(outputBanner.openPath),
+    disabled: !outputBanner.openPath
   })));
 }
 function App() {

@@ -1976,8 +1976,123 @@ class InvoiceExtractor:
             and _has_positive_amount(invoice_info.get("Amount"))
         )
 
+    def _plan_archive_target(self, pdf_path, invoice_info, custom_rules=None):
+        """Pure routing/naming decision shared by the apply and the preview path.
+
+        The returned plan never touches the filesystem. ``status`` is either
+        ``archived`` (a normal archive target was resolved) or ``manual_check``
+        (the caller must rescue the file into the manual-review folder).
+        """
+        plan = {
+            "status": "archived",
+            "reason_code": None,
+            "target_folder": None,
+            "display_type": None,
+            "candidate_filename": None,
+        }
+        base_name = os.path.basename(pdf_path)
+        if not invoice_info or not isinstance(invoice_info, dict):
+            logging.warning(
+                f"No valid invoice info returned for {pdf_path}. Moving to {MANUAL_REVIEW_FOLDER}."
+            )
+            return {
+                **plan,
+                "status": "manual_check",
+                "reason_code": "UNRECOGNIZED_DOCUMENT",
+                "target_folder": MANUAL_REVIEW_FOLDER,
+                "display_type": "Unrecognized",
+                "candidate_filename": f"Unrecognized_{base_name}",
+                "manual_prefix": "Unrecognized",
+            }
+
+        if not self._has_minimum_archive_fields(invoice_info):
+            logging.warning(
+                f"Invoice info missing minimum archive fields for {pdf_path}. Moving to {MANUAL_REVIEW_FOLDER}."
+            )
+            return {
+                **plan,
+                "status": "manual_check",
+                "reason_code": "LOW_CONFIDENCE_INVOICE_FIELDS",
+                "target_folder": MANUAL_REVIEW_FOLDER,
+                "display_type": "NeedsReview",
+                "candidate_filename": f"NeedsReview_{base_name}",
+                "manual_prefix": "NeedsReview",
+            }
+
+        inv_type = self.safe_filename(invoice_info.get("Type", "未知分类"))
+        _, ext = os.path.splitext(pdf_path)
+
+        if inv_type == "火车票":
+            date = self.safe_filename(invoice_info.get("Departure_Date", invoice_info.get("Date", "UnknownDate")))
+            dep_city = self.safe_filename(invoice_info.get("Departure_City", "未知起始"))
+            dest_city = self.safe_filename(invoice_info.get("Destination_City", "未知终点"))
+            new_filename = f"{date}-{dep_city}-{dest_city}-火车票{ext}"
+            display_type = inv_type
+        else:
+            date = self.safe_filename(invoice_info.get("Date", "UnknownDate"))
+            seller = self.safe_filename(invoice_info.get("Seller", "UnknownSeller"))
+            amount = self.safe_filename(str(invoice_info.get("Amount", "0.00")))
+
+            # 行程单/水单在文件名中保留类型标识，供 Phase 2 撮合使用
+            if invoice_info.get("_is_itinerary"):
+                display_type = f"{inv_type}行程单"
+            elif invoice_info.get("_is_folio"):
+                display_type = "住宿水单"
+            else:
+                display_type = inv_type
+            new_filename = f"{date}_{display_type}_{amount}_{seller}{ext}"
+
+        # Routing Logics (Use Type as folder, fallback to '其他')
+        target_folder = inv_type if inv_type else "其他"
+
+        # Apply custom rules if provided
+        if custom_rules:
+            for keyword, folder_name in custom_rules.items():
+                if keyword in target_folder:
+                    target_folder = folder_name
+                    break
+
+        return {
+            **plan,
+            "target_folder": target_folder,
+            "display_type": display_type if inv_type != "火车票" else inv_type,
+            "candidate_filename": new_filename,
+        }
+
+    def preview_archive_target(self, pdf_path, invoice_info, custom_rules=None):
+        """Return the planned archive destination without writing anything.
+
+        Used by the local-organize dry-run/预览 mode. Collisions are resolved
+        deterministically (``_2``, ``_3`` ...) because a preview must be stable
+        and must never reserve or create real files.
+        """
+        plan = self._plan_archive_target(pdf_path, invoice_info, custom_rules)
+        folder = plan["target_folder"] or "其他"
+        base_name = plan["candidate_filename"] or os.path.basename(pdf_path)
+        final_dir = os.path.join(self.output_dir, folder)
+        reserved = getattr(self, "_preview_reserved_paths", None)
+        if reserved is None:
+            reserved = set()
+            self._preview_reserved_paths = reserved
+        stem, ext = os.path.splitext(base_name)
+        planned_path = os.path.join(final_dir, base_name)
+        index = 2
+        while os.path.exists(planned_path) or planned_path in reserved:
+            planned_path = os.path.join(final_dir, f"{stem}_{index}{ext}")
+            index += 1
+        reserved.add(planned_path)
+        return {
+            "status": plan["status"],
+            "reason_code": plan["reason_code"],
+            "target_folder": folder,
+            "display_type": plan["display_type"],
+            "candidate_filename": base_name,
+            "planned_path": planned_path,
+            "manual_prefix": plan.get("manual_prefix"),
+        }
+
     def route_and_rename_file(self, pdf_path, invoice_info, custom_rules=None):
-        """3.4 Implement the renaming and folder routing logic with Manual_Check rescuing"""
+        """3.4 Apply the routing plan: rename/copy or rescue to Manual_Check"""
         import uuid
 
         route_trace = {
@@ -1992,22 +2107,27 @@ class InvoiceExtractor:
             "used_manual_check": False,
         }
         self.last_route_trace = copy.deepcopy(route_trace)
-        
-        def save_to_manual_check(reason_prefix):
+        plan = self._plan_archive_target(pdf_path, invoice_info, custom_rules)
+
+        if plan["status"] == "manual_check":
+            reason_prefix = plan.get("manual_prefix") or "NeedsReview"
             target_folder = MANUAL_REVIEW_FOLDER
-            new_filename = f"{reason_prefix}_{os.path.basename(pdf_path)}"
+            original_new_filename = (
+                plan["candidate_filename"]
+                or f"{reason_prefix}_{os.path.basename(pdf_path)}"
+            )
+            new_filename = original_new_filename
             final_dir = os.path.join(self.output_dir, target_folder)
             os.makedirs(final_dir, exist_ok=True)
-            
+
             final_path = os.path.join(final_dir, new_filename)
-            original_new_filename = new_filename
             while os.path.exists(final_path):
                 name, ext = os.path.splitext(original_new_filename)
                 short_uuid = str(uuid.uuid4())[:4]
                 new_filename = f"{name}_{short_uuid}{ext}"
                 final_path = os.path.join(final_dir, new_filename)
                 route_trace["collision_resolved"] = True
-                
+
             try:
                 shutil.copy2(pdf_path, final_path)
                 logging.warning(f"File rescued to {MANUAL_REVIEW_FOLDER}: {final_path}")
@@ -2037,66 +2157,25 @@ class InvoiceExtractor:
                 })
                 self.last_route_trace = copy.deepcopy(route_trace)
                 return False, str(e)
-                
-        if not invoice_info or not isinstance(invoice_info, dict):
-            logging.warning(f"No valid LLM info returned for {pdf_path}. Moving to {MANUAL_REVIEW_FOLDER}.")
-            return save_to_manual_check("Unrecognized")
 
-        if not self._has_minimum_archive_fields(invoice_info):
-            logging.warning(f"Invoice info missing minimum archive fields for {pdf_path}. Moving to {MANUAL_REVIEW_FOLDER}.")
-            route_trace["reason_code"] = "LOW_CONFIDENCE_INVOICE_FIELDS"
-            self.last_route_trace = copy.deepcopy(route_trace)
-            return save_to_manual_check("NeedsReview")
-            
-        inv_type = self.safe_filename(invoice_info.get("Type", "未知分类"))
-        _, ext = os.path.splitext(pdf_path)
-        
-        if inv_type == "火车票":
-            date = self.safe_filename(invoice_info.get("Departure_Date", invoice_info.get("Date", "UnknownDate")))
-            dep_city = self.safe_filename(invoice_info.get("Departure_City", "未知起始"))
-            dest_city = self.safe_filename(invoice_info.get("Destination_City", "未知终点"))
-            new_filename = f"{date}-{dep_city}-{dest_city}-火车票{ext}"
-        else:
-            date = self.safe_filename(invoice_info.get("Date", "UnknownDate"))
-            seller = self.safe_filename(invoice_info.get("Seller", "UnknownSeller"))
-            amount = self.safe_filename(str(invoice_info.get("Amount", "0.00")))
-            
-            # 行程单/水单在文件名中保留类型标识，供 Phase 2 撮合使用
-            if invoice_info.get("_is_itinerary"):
-                display_type = f"{inv_type}行程单"
-            elif invoice_info.get("_is_folio"):
-                display_type = "住宿水单"
-            else:
-                display_type = inv_type
-            new_filename = f"{date}_{display_type}_{amount}_{seller}{ext}"
-        route_trace["display_type"] = display_type if inv_type != "火车票" else inv_type
-            
-        # Routing Logics (Use Type as folder, fallback to '其他')
-        target_folder = inv_type if inv_type else "其他"
-        
-        # Apply custom rules if provided
-        if custom_rules:
-            for keyword, folder_name in custom_rules.items():
-                if keyword in target_folder:
-                    target_folder = folder_name
-                    break
-                    
-        final_dir = os.path.join(self.output_dir, target_folder)
+        final_dir = os.path.join(self.output_dir, plan["target_folder"])
         os.makedirs(final_dir, exist_ok=True)
-        route_trace["target_folder"] = target_folder
-        route_trace["candidate_filename"] = new_filename
-        
+        route_trace["target_folder"] = plan["target_folder"]
+        route_trace["display_type"] = plan["display_type"]
+        route_trace["candidate_filename"] = plan["candidate_filename"]
+
+        original_new_filename = plan["candidate_filename"]
+        new_filename = original_new_filename
         final_path = os.path.join(final_dir, new_filename)
-        
+
         # Handle filename collisions with UUID
-        original_new_filename = new_filename
         while os.path.exists(final_path):
             name, f_ext = os.path.splitext(original_new_filename)
             short_uuid = str(uuid.uuid4())[:4]
             new_filename = f"{name}_{short_uuid}{f_ext}"
             final_path = os.path.join(final_dir, new_filename)
             route_trace["collision_resolved"] = True
-            
+
         try:
             # Move and rename
             shutil.copy2(pdf_path, final_path)
@@ -2110,7 +2189,7 @@ class InvoiceExtractor:
                 "used_manual_check": False,
             })
             self.last_route_trace = copy.deepcopy(route_trace)
-            
+
             # Since we removed `key` generation from here earlier in favor of app_api.py persistent state tracking,
             # we just return successfully.
             return True, final_path

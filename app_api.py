@@ -168,11 +168,13 @@ class _ProcessingPipelineSession:
         owned_extractor=None,
         provider_retry_delay_seconds=0.0,
         url_recovery_scheduler=None,
+        dry_run=False,
     ):
         self._api = api
         self.candidates = candidates
         self._pipeline = pipeline
         self._archive_service = archive_service
+        self._dry_run = bool(dry_run)
         self._save_path = save_path
         self._output_state_dir = output_state_dir
         self._working_history = working_history
@@ -480,6 +482,15 @@ class _ProcessingPipelineSession:
 
         report = merge_reports(reports)
         report = self._archive_service.finalize(report, self._save_path)
+        if self._dry_run:
+            # Preview runs never move files, never persist a ledger, and never
+            # leave "running/failed" markers in the user's output directory.
+            report = self._normalize_preview_report(report)
+            self._sync_preview_paths(report)
+            sync = getattr(self._api, "_sync_run_state_store_from_legacy", None)
+            if callable(sync):
+                sync()
+            return report
         self._sync_final_archive_paths(report)
         if not report.can_complete:
             self._api._mark_output_run_state(
@@ -494,6 +505,43 @@ class _ProcessingPipelineSession:
             self._business_records,
         )
         return report
+
+    def _normalize_preview_report(self, report):
+        """Keep preview errors visible while letting the preview run finish.
+
+        A preview is not an archive: manual-review and unresolved rows are
+        reported in the result page, they must not turn the whole preview into a
+        failed run (the user is only inspecting the plan).
+        """
+        from dataclasses import replace
+
+        if report.can_complete:
+            return report
+        return replace(report, unresolved_count=0)
+
+    def _sync_preview_paths(self, report):
+        """Refresh planned preview paths without requiring files to exist."""
+        iter_records = getattr(self._trace_store, "iter_records", None)
+        planned = {
+            str(row.get("document_id")): str(row.get("archive_target") or "")
+            for row in (iter_records() if callable(iter_records) else ())
+            if row.get("document_id") and row.get("archive_target")
+        }
+        for item in report.outcomes:
+            path = str(item.archive_path or "")
+            if path:
+                planned[item.outcome.candidate.identity.document_id] = path
+        for records in (
+            getattr(self._api, "processed_invoices", []),
+            getattr(self._api, "error_invoices", []),
+        ):
+            for row in list(records):
+                document_id = str(row.get("document_id") or "")
+                path = planned.get(document_id, "")
+                if path:
+                    row["path"] = path
+                    if "name" in row:
+                        row["name"] = os.path.basename(path)
 
     def _sync_final_archive_paths(self, report):
         iter_records = getattr(self._trace_store, "iter_records", None)
@@ -846,6 +894,9 @@ class InvoiceAppAPI:
         self.stats = {"emails": 0, "invoices": 0, "errors": 0}
         self._email_level_url_evidence_seen = set()
         self._last_export_path = ""
+        self._active_task_mode = "mail"
+        self._last_fetch_summary = {}
+        self._last_organize_result = None
         self._active_run_config = {}
         self._timing_metrics = {}
         self._run_state_store = RunStateStore(state_sink=self._apply_run_state_snapshot)
@@ -2311,7 +2362,7 @@ class InvoiceAppAPI:
             if isinstance(item, str) and str(item).strip()
         }
 
-    def _load_business_records(self, save_path, output_state_dir, extractor=None):
+    def _load_business_records(self, save_path, output_state_dir, extractor=None, backup_legacy=True):
         legacy_path = os.path.join(save_path, "processed_records.json")
         legacy = extractor.load_processed_records() if extractor else {}
         if os.path.isfile(legacy_path):
@@ -2319,7 +2370,7 @@ class InvoiceAppAPI:
                 legacy = json.load(handle)
         if not isinstance(legacy, dict):
             raise ValueError("Legacy business records must be an object")
-        if os.path.isfile(legacy_path):
+        if os.path.isfile(legacy_path) and backup_legacy:
             backup = os.path.join(output_state_dir, "processed_records.legacy-backup.json")
             if not os.path.exists(backup):
                 self._write_json_file(backup, legacy)
@@ -2484,7 +2535,16 @@ class InvoiceAppAPI:
             "glm_profile_limits": copy.deepcopy(DEFAULT_GLM_PROFILE_LIMITS),
             "glm_model_candidates": copy.deepcopy(DEFAULT_GLM_MODEL_CANDIDATES),
             "remember_settings": True,
+            # Feature split (v0.3): mail / fetch-only / local-folder organizing.
+            "task_mode": "mail",
+            "local_input_dir": "",
+            "local_dry_run": True,
         }
+
+    @staticmethod
+    def _normalize_task_mode(value):
+        mode = str(value or "").strip().lower()
+        return mode if mode in {"mail", "fetch", "local"} else "mail"
 
     def load_user_settings(self):
         self._refresh_run_context()
@@ -2495,6 +2555,9 @@ class InvoiceAppAPI:
         merged.update({key: value for key, value in (stored or {}).items() if key in merged})
         merged["ai_provider"] = normalize_provider(merged.get("ai_provider"))
         merged["save_path"] = self._normalize_user_save_path(merged.get("save_path", ""))
+        merged["task_mode"] = self._normalize_task_mode(merged.get("task_mode"))
+        merged["local_input_dir"] = str(merged.get("local_input_dir") or "")
+        merged["local_dry_run"] = bool(merged.get("local_dry_run", True))
 
         return {
             "success": True,
@@ -2515,6 +2578,9 @@ class InvoiceAppAPI:
             merged["remember_settings"] = False
         merged["ai_provider"] = normalize_provider(merged.get("ai_provider"))
         merged["save_path"] = self._normalize_user_save_path(merged.get("save_path", ""))
+        merged["task_mode"] = self._normalize_task_mode(merged.get("task_mode"))
+        merged["local_input_dir"] = str(merged.get("local_input_dir") or "")
+        merged["local_dry_run"] = bool(merged.get("local_dry_run", True))
         raw_save_path = str(merged.get("save_path") or "")
         if raw_save_path.startswith("\\\\") or ".." in Path(raw_save_path).parts:
             return {"success": False, "message": "保存路径不可用"}
@@ -2694,6 +2760,7 @@ class InvoiceAppAPI:
         auth_code,
         api_key,
         ai_provider="glm",
+        fetch_only=False,
     ):
         from datetime import datetime, timedelta
         import inspect
@@ -2811,10 +2878,33 @@ class InvoiceAppAPI:
                 if cancelled_imap_abort(fetcher, exc):
                     raise RunImapCancelled(request.run_id) from exc
                 raise
+            if fetch_only:
+                # Feature ① stops here: save files + manifest, never parse.
+                from fetch_only import save_fetch_rows
+
+                summary = save_fetch_rows(
+                    request.save_path, list(attachments or []), mailbox="INBOX"
+                )
+                self._last_fetch_summary = summary.to_dict()
+                self._append_log(
+                    "信息",
+                    (
+                        f"已提取 {summary.saved_count} 个附件到 inbox"
+                        f"（重复 {summary.duplicate_count} 个，"
+                        f"需人工打开链接 {summary.link_count} 个）。"
+                    ),
+                    "text-emerald-400",
+                )
+                if summary.warnings:
+                    for warning in summary.warnings[:5]:
+                        self._append_log("提示", warning, "text-amber-500")
+                return []
             self._append_log("信息", f"共提取到 {len(attachments)} 个附件。", "text-emerald-400")
             return attachments
 
         def extract(attachments, _request):
+            if fetch_only:
+                return []
             compatibility_hook = self.__dict__.get("_run_processing_loop")
             if callable(compatibility_hook):
                 resources["compatibility_report"] = compatibility_hook(
@@ -2859,6 +2949,21 @@ class InvoiceAppAPI:
             return pipeline.extract()
 
         def archive(outcomes, _request):
+            if fetch_only:
+                # Feature ① deliberately performs no archiving: the inbox handoff
+                # is the final artifact of a fetch-only run.
+                return type(
+                    "FetchOnlyArchiveReport",
+                    (),
+                    {
+                        "can_complete": True,
+                        "archived_count": 0,
+                        "retained_count": 0,
+                        "manual_count": 0,
+                        "unresolved_count": 0,
+                        "duplicate_count": 0,
+                    },
+                )()
             if "compatibility_report" in resources:
                 if self.quota_exhausted:
                     raise QuotaExhaustedError(self.quota_message or "QUOTA_EXHAUSTED")
@@ -2933,6 +3038,142 @@ class InvoiceAppAPI:
             state_flush=self._sync_run_state_store_from_legacy,
         )
 
+
+    def _build_local_organize_dependencies(self, request):
+        """Dependencies for feature ②: local files in, archive + ledger out.
+
+        The mailbox is never connected and no mail configuration is read.
+        """
+        from local_organize import LocalOrganizer, OrganizeRequest, export_summary, scan_input
+        from organize_source import rows_from_documents
+
+        organize_request = OrganizeRequest(
+            input_dir=str(request.input_dir or ""),
+            output_dir=str(request.save_path or ""),
+            rules_text=str(getattr(request, "rules_text", "") or ""),
+            dry_run=bool(getattr(request, "dry_run", False)),
+            run_id=str(request.run_id or ""),
+        )
+        resources = {"scan": None, "organizer": None}
+
+        def connect(_request):
+            self._append_log(
+                "运行",
+                "本地整理模式：不连接邮箱，不读取邮箱配置。",
+                "text-blue-400",
+            )
+            return None
+
+        def scan(_session, _request):
+            self._append_log(
+                "运行", f"正在扫描本地文件夹：{request.input_dir}", "text-blue-400"
+            )
+            scan_result = scan_input(organize_request)
+            resources["scan"] = scan_result
+            self.stats["emails"] = scan_result.file_count
+            self._append_log(
+                "信息",
+                f"共发现 {scan_result.file_count} 个可整理文件。",
+                "text-emerald-400",
+            )
+            if scan_result.manifest_entries:
+                self._append_log(
+                    "信息",
+                    (
+                        f"检测到提取清单 manifest.jsonl（{scan_result.manifest_entries} 条），"
+                        "将保留邮箱来源信息。"
+                    ),
+                    "text-slate-400",
+                )
+            for warning in scan_result.warnings[:5]:
+                self._append_log("提示", warning, "text-amber-500")
+            if self._stop_requested:
+                self._sync_run_state_store_from_legacy()
+            return scan_result.documents
+
+        def candidate(documents, _request):
+            rows = rows_from_documents(tuple(documents))
+            self._append_log(
+                "信息", f"共收集到 {len(rows)} 个待识别文件。", "text-emerald-400"
+            )
+            return rows
+
+        def extract(rows, _request):
+            organizer = LocalOrganizer(self, organize_request)
+            resources["organizer"] = organizer
+            return organizer.extract(list(rows))
+
+        def archive(outcomes, _request):
+            organizer = resources.get("organizer")
+            if organizer is None:
+                raise ProcessingLoopFailure("ORGANIZE_SESSION_MISSING")
+            return organizer.archive(outcomes)
+
+        def report_callback(_context, run_result):
+            scan_result = resources.get("scan")
+            report = getattr(run_result, "archive_report", None)
+            if scan_result is not None:
+                self._last_organize_result = {
+                    "input_dir": str(request.input_dir or ""),
+                    "output_dir": str(request.save_path or ""),
+                    "dry_run": bool(getattr(request, "dry_run", False)),
+                    "scanned_files": int(getattr(scan_result, "file_count", 0) or 0),
+                    "duplicate_files": int(
+                        getattr(scan_result, "skipped_duplicates", 0) or 0
+                    ),
+                    "manifest_entries": int(
+                        getattr(scan_result, "manifest_entries", 0) or 0
+                    ),
+                    "archived_count": int(
+                        getattr(report, "archived_count", 0) or 0
+                    ),
+                    "duplicate_count": int(
+                        getattr(report, "duplicate_count", 0) or 0
+                    ),
+                    "manual_count": int(getattr(report, "manual_count", 0) or 0),
+                    "retained_count": int(
+                        getattr(report, "retained_count", 0) or 0
+                    ),
+                    "unresolved_count": int(
+                        getattr(report, "unresolved_count", 0) or 0
+                    ),
+                }
+            if not bool(getattr(request, "dry_run", False)):
+                path = export_summary(self, request.save_path)
+                if path:
+                    self._last_export_path = path
+                    self._append_log(
+                        "信息", f"结果明细已导出：{path}", "text-emerald-400"
+                    )
+            self._sync_run_state_store_from_legacy()
+
+        def pipeline_close():
+            organizer = resources.get("organizer")
+            if organizer is not None:
+                organizer.close()
+            self._sync_run_state_store_from_legacy()
+
+        def cleanup_callback(context):
+            self._cleanup_temp_folders(
+                staging_dir=context.staging_dir,
+                temp_dir=self._active_temp_dir,
+            )
+
+        return RunDependencies(
+            connect=connect,
+            scan=scan,
+            candidate=candidate,
+            extract=extract,
+            archive=archive,
+            report_service=ReportService(
+                report_callback=report_callback,
+                cleanup_callback=cleanup_callback,
+                timeout_seconds=120.0,
+            ),
+            cancel_requested=lambda: bool(self._stop_requested),
+            pipeline_close=pipeline_close,
+            state_flush=self._sync_run_state_store_from_legacy,
+        )
 
     def _run_processing_loop(
         self,
@@ -3046,6 +3287,7 @@ class InvoiceAppAPI:
         _pairing_finalizer=None,
         _owned_extractor=None,
         _prepare_remote_images=True,
+        _dry_run=False,
     ):
         from app_archive_adapter import AppArchiveAdapter
         from archive_service import ArchiveService
@@ -3058,19 +3300,33 @@ class InvoiceAppAPI:
         from extraction_pipeline import ExtractionPipeline, SharedRuntimeRemoteExtractor
         from invoice_extractor import InvoiceExtractor
 
+        dry_run = bool(_dry_run)
         candidates = CandidatePipeline().collect(attachments_info)
         output_state_dir = self._output_state_dir(save_path)
-        self._migrate_completed_output_state(output_state_dir)
-        business_records = self._load_business_records(save_path, output_state_dir, _extractor)
-        working_history = set(self._load_committed_history(output_state_dir))
-        business_records, working_history = self._repair_stale_archive_ledger(
-            save_path, output_state_dir, business_records, working_history
-        )
+        if dry_run:
+            # Preview must not migrate, repair, or rewrite the user's ledger.
+            business_records = self._load_business_records(
+                save_path, output_state_dir, _extractor, backup_legacy=False
+            )
+            working_history = set(self._load_committed_history(output_state_dir))
+        else:
+            self._migrate_completed_output_state(output_state_dir)
+            business_records = self._load_business_records(
+                save_path, output_state_dir, _extractor
+            )
+            working_history = set(self._load_committed_history(output_state_dir))
+            business_records, working_history = self._repair_stale_archive_ledger(
+                save_path, output_state_dir, business_records, working_history
+            )
         sidecar = {}
         sidecar_lock = threading.Lock()
         self._pipeline_sidecar = sidecar
         trace_store = self._create_document_trace_store(
-            output_path=self._run_context.get("debug_trace_path") or None
+            output_path=(
+                None
+                if dry_run
+                else self._run_context.get("debug_trace_path") or None
+            )
         )
         for candidate in candidates:
             trace_store.start_document(
@@ -3079,7 +3335,8 @@ class InvoiceAppAPI:
                 document_id=candidate.identity.document_id,
                 persistence_is_url=candidate.identity.source_kind == "url",
             )
-        self._mark_output_run_state(output_state_dir, "running")
+        if not dry_run:
+            self._mark_output_run_state(output_state_dir, "running")
 
         worker_factory = _worker_extractor_factory
         if worker_factory is None:
@@ -3135,6 +3392,7 @@ class InvoiceAppAPI:
             business_records=business_records,
             trace_store=trace_store,
             pairing_finalizer=_pairing_finalizer,
+            dry_run=dry_run,
         )
         archive_service = ArchiveService(
             normalizer=adapter.normalize,
@@ -3176,6 +3434,7 @@ class InvoiceAppAPI:
             owned_extractor=_owned_extractor,
             provider_retry_delay_seconds=20.0,
             url_recovery_scheduler=url_recovery_scheduler,
+            dry_run=dry_run,
         )
 
     def _retain_artifact(self, save_path, source_path, bucket, reason, metadata=None):
@@ -4097,6 +4356,7 @@ class InvoiceAppAPI:
         *,
         candidate,
         secrets,
+        fetch_only=False,
     ):
         with self._admission_lock:
             worker_active = bool(self._worker_thread and self._worker_thread.is_alive())
@@ -4223,13 +4483,19 @@ class InvoiceAppAPI:
                     manifest_included_count=int(
                         self._run_context.get("manifest_included_count", 0) or 0
                     ),
+                    source_mode="mail",
+                    fetch_only=bool(fetch_only),
                 )
+                self._active_task_mode = "fetch" if fetch_only else "mail"
+                self._last_fetch_summary = {}
+                self._last_organize_result = None
                 dependencies = self._build_run_dependencies(
                     request,
                     email_address=secrets.email_address,
                     auth_code=secrets.auth_code,
                     api_key=secrets.api_key,
                     ai_provider=secrets.ai_provider,
+                    fetch_only=bool(fetch_only),
                 )
                 self._safe_write_run_config(
                     secrets.email_address,
@@ -4303,7 +4569,8 @@ class InvoiceAppAPI:
                 },
             )
             try:
-                self._start_truth_audit_async(secrets.email_address, secrets.auth_code)
+                if not fetch_only:
+                    self._start_truth_audit_async(secrets.email_address, secrets.auth_code)
             except Exception as exc:
                 self._close_run_dependencies(dependencies)
                 self._safe_emit_stage_event(
@@ -4374,6 +4641,229 @@ class InvoiceAppAPI:
             secrets=secrets,
         )
 
+    def start_local_organize(self, input_dir, save_path, dry_run=False):
+        """Feature ②: organize an arbitrary local folder without a mailbox."""
+        if (
+            not self._run_lifecycle.can_begin
+            or self._is_running
+            or (self._worker_thread and self._worker_thread.is_alive())
+        ):
+            return {"success": False, "message": "任务已在运行中"}
+
+        input_text = str(input_dir or "").strip()
+        save_text = str(save_path or "").strip()
+        if not input_text:
+            return {"success": False, "message": "请选择要整理的本地文件夹"}
+        if not os.path.isdir(input_text):
+            return {"success": False, "message": "要整理的本地文件夹不存在"}
+        if not save_text:
+            return {"success": False, "message": "请选择输出目录"}
+        if os.path.exists(save_text) and not os.path.isdir(save_text):
+            return {"success": False, "message": "输出路径不是文件夹"}
+        try:
+            input_real = os.path.realpath(input_text)
+            save_real = os.path.realpath(save_text)
+        except OSError:
+            return {"success": False, "message": "文件夹路径不可用"}
+        if input_real == save_real:
+            return {"success": False, "message": "输出目录不能与发票文件夹相同"}
+        if str(save_text).startswith(("\\\\", "//")):
+            return {"success": False, "message": "不支持网络共享路径"}
+
+        return self._admit_local_organize(input_text, save_text, bool(dry_run))
+
+    def _admit_local_organize(self, input_dir, save_path, dry_run):
+        with self._admission_lock:
+            worker_active = bool(self._worker_thread and self._worker_thread.is_alive())
+            active_handle = self._active_run_handle
+            handle_active = bool(
+                active_handle
+                and active_handle.state not in {RunState.COMPLETED, RunState.FAILED}
+            )
+            if worker_active or handle_active or not self._run_lifecycle.can_begin:
+                return {"success": False, "message": "任务已在运行中"}
+            if active_handle is not None:
+                self._active_run_handle = None
+
+            previous = {
+                "_run_context": self._run_context,
+                "_current_run_id": self._current_run_id,
+                "_requested_save_path": self._requested_save_path,
+                "_effective_save_path": self._effective_save_path,
+                "_effective_date_from": self._effective_date_from,
+                "_effective_date_to": self._effective_date_to,
+                "_raw_date_range_display": self._raw_date_range_display,
+                "_imap_query_range_display": self._imap_query_range_display,
+                "_active_run_config": self._active_run_config,
+                "_active_temp_dir": self._active_temp_dir,
+                "_active_task_mode": getattr(self, "_active_task_mode", "mail"),
+                "_last_fetch_summary": getattr(self, "_last_fetch_summary", {}),
+                "_last_organize_result": getattr(self, "_last_organize_result", None),
+            }
+            previous_settings = {}
+            settings_existed = os.path.exists(self._settings_store.settings_path)
+            settings_touched = False
+            handle = None
+            dependencies = None
+            admission_missing_dirs = ()
+            try:
+                context = dict(self._run_context or {})
+                context.setdefault("enabled", False)
+                effective_save_path = str(save_path or "")
+                if context.get("enabled") and context.get("output_dir"):
+                    effective_save_path = str(context.get("output_dir"))
+                effective_save_path = os.path.abspath(effective_save_path)
+                context["output_dir"] = effective_save_path
+                context["run_root"] = str(context.get("run_root") or effective_save_path)
+                if not str(context.get("staging_dir") or "").strip():
+                    import tempfile
+
+                    context["staging_dir"] = os.path.join(
+                        tempfile.gettempdir(), "invoiceflowai-local"
+                    )
+                self._run_context = context
+                self._current_run_id = str(context.get("run_id") or "")
+                admission_missing_dirs = self._admission_missing_directories(
+                    context, effective_save_path
+                )
+                handle = self._prepare_run_lifecycle()
+                self._reset_run_state_for_admission(handle.run_id)
+                ensure_run_context_dirs(context)
+                previous_settings = self._settings_store.load() or {}
+                self._requested_save_path = effective_save_path
+                self._effective_save_path = effective_save_path
+                self._effective_date_from = ""
+                self._effective_date_to = ""
+                self._raw_date_range_display = ""
+                self._imap_query_range_display = ""
+
+                active_company = str(previous_settings.get("company") or "").strip()
+                self._active_run_config = {
+                    "company": active_company,
+                    "save_path": effective_save_path,
+                    "date_from": "",
+                    "date_to": "",
+                    "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                }
+                os.makedirs(effective_save_path, exist_ok=True)
+                settings_touched = True
+                save_result = self.save_user_settings(
+                    {
+                        "task_mode": "local",
+                        "local_input_dir": input_dir,
+                        "local_dry_run": bool(dry_run),
+                        "save_path": effective_save_path,
+                        "company": active_company,
+                    }
+                )
+                if not bool((save_result or {}).get("success")):
+                    raise RuntimeError("settings persistence failed")
+
+                request = RunRequest(
+                    run_id=handle.run_id,
+                    date_from="",
+                    date_to="",
+                    save_path=effective_save_path,
+                    rules_text="",
+                    account_id=stable_hash(input_dir)[:12],
+                    channel_id="local",
+                    run_mode=str(
+                        self._run_context.get("autostart_mode")
+                        or (
+                            "controlled-run"
+                            if self._run_context.get("enabled")
+                            else "interactive"
+                        )
+                    ),
+                    run_root=str(self._run_context.get("run_root") or ""),
+                    source_mode="local",
+                    input_dir=input_dir,
+                    dry_run=bool(dry_run),
+                )
+                self._active_task_mode = "local"
+                self._last_fetch_summary = {}
+                self._last_organize_result = None
+                dependencies = self._build_local_organize_dependencies(request)
+            except Exception as exc:
+                self._close_run_dependencies(dependencies)
+                if handle is not None:
+                    reason_code = str(
+                        getattr(exc, "reason_code", "") or "WORKER_START_FAILED"
+                    )
+                    self._finalize_admission_failure(
+                        handle, exc, reason_code=reason_code
+                    )
+                self._restore_failed_admission(
+                    previous, previous_settings, settings_existed, settings_touched
+                )
+                self._remove_empty_admission_directories(admission_missing_dirs)
+                return {"success": False, "message": "本地整理任务启动失败"}
+
+            self._run_state_store.append_log(
+                "信息", "本地整理请求已接收，后台任务正在启动。", "text-blue-400"
+            )
+            self._safe_emit_stage_event(
+                "start_local_organize",
+                "enter",
+                {
+                    "input_dir": input_dir,
+                    "output_dir": str(request.save_path),
+                    "dry_run": bool(dry_run),
+                },
+            )
+            thread = threading.Thread(
+                target=self._processing_worker,
+                args=(request, handle, dependencies),
+                name="InvoiceFlowWorker",
+                daemon=True,
+            )
+            self._worker_thread = thread
+            try:
+                thread.start()
+            except Exception as exc:
+                self._close_run_dependencies(dependencies)
+                self._finalize_admission_failure(handle, exc)
+                self._restore_failed_admission(
+                    previous, previous_settings, settings_existed, settings_touched
+                )
+                return {"success": False, "message": "本地整理任务启动失败"}
+            self._safe_emit_stage_event(
+                "start_local_organize", "exit", {"result": "started"}
+            )
+            return {
+                "success": True,
+                "message": "本地整理任务已启动" if not dry_run else "本地预览任务已启动",
+            }
+
+    def start_fetch_only(
+        self, save_path, date_from=None, date_to=None, email_address=None, auth_code=None
+    ):
+        """Feature ①: extract attachments into inbox/ + manifest.jsonl only."""
+        if (
+            not self._run_lifecycle.can_begin
+            or self._is_running
+            or (self._worker_thread and self._worker_thread.is_alive())
+        ):
+            return {"success": False, "message": "任务已在运行中"}
+        if not email_address or not auth_code:
+            return {"success": False, "message": "缺少必要凭证，请填写邮箱地址和授权码"}
+
+        candidate, secrets, date_error = self._build_admission_candidate(
+            rules_text="",
+            save_path=save_path,
+            date_from=date_from,
+            date_to=date_to,
+            email_address=email_address,
+            auth_code=auth_code,
+            api_key="",
+            ai_provider="glm",
+        )
+        if date_error:
+            return {"success": False, "message": date_error}
+        return self._admit_processing_run(
+            candidate=candidate, secrets=secrets, fetch_only=True
+        )
+
     def get_processed_records(self):
         """前端数据分析页面调用，获取已处理的账单或发票记录"""
         self._sync_run_state_store_from_legacy()
@@ -4386,6 +4876,11 @@ class InvoiceAppAPI:
             build_identity=self.build_identity,
             raw_date_range=self._raw_date_range_display,
             imap_query_range=self._imap_query_range_display,
+        )
+        payload["task_mode"] = str(getattr(self, "_active_task_mode", "mail") or "mail")
+        payload["dry_run"] = bool(
+            payload["task_mode"] == "local"
+            and (getattr(self, "_last_organize_result", None) or {}).get("dry_run")
         )
         self._packaged_diag_log_progress_poll(payload)
         return payload
@@ -4415,6 +4910,14 @@ class InvoiceAppAPI:
             "quota_exhausted": self.quota_exhausted,
             "quota_message": self.quota_message,
             "last_export_path": self._last_export_path,
+            "task_mode": str(getattr(self, "_active_task_mode", "mail") or "mail"),
+            "dry_run": bool(
+                getattr(self, "_active_task_mode", "mail") == "local"
+                and (self._last_organize_result or {}).get("dry_run")
+            ),
+            "input_dir": str((self._last_organize_result or {}).get("input_dir") or ""),
+            "fetch_summary": dict(getattr(self, "_last_fetch_summary", {}) or {}),
+            "organize_summary": dict(getattr(self, "_last_organize_result", None) or {}),
             "invoices": processed_invoices # 兼容旧的数据结构
         }
 

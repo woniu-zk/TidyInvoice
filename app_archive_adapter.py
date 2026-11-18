@@ -21,12 +21,14 @@ class AppArchiveAdapter:
         trace_store: Any,
         acceptance_service: Any | None = None,
         pairing_finalizer: Callable[[ArchiveReport, Path], None] | None = None,
+        dry_run: bool = False,
     ) -> None:
         self.api = api
         self.extractor = extractor
         self.save_path = save_path
         self.business_records = business_records
         self.trace_store = trace_store
+        self.dry_run = bool(dry_run)
         if acceptance_service is None:
             from document_acceptance import DocumentAcceptanceService
 
@@ -301,6 +303,245 @@ class AppArchiveAdapter:
             )
         return outcome.candidate.identity.document_id
 
+    # ------------------------------------------------------------------ preview
+    @staticmethod
+    def _planned_manual_path(save_path: str, filename: str, reason_prefix: str) -> str:
+        from document_types import MANUAL_REVIEW_FOLDER
+
+        return os.path.join(
+            save_path,
+            MANUAL_REVIEW_FOLDER,
+            f"{reason_prefix}_{os.path.basename(filename)}",
+        )
+
+    @staticmethod
+    def _planned_retention_path(save_path: str, bucket: str, filename: str) -> str:
+        return os.path.join(
+            save_path,
+            "_audit_retention",
+            str(bucket or "preview"),
+            os.path.basename(filename),
+        )
+
+    def _append_preview_success_state(self, outcome, info_json, category, path):
+        import time
+
+        self.api.discovered_categories.add(category)
+        self.api.processed_invoices.append(
+            {
+                "id": f"inv_preview_{time.time()}_{outcome.candidate.sequence}",
+                "document_id": outcome.candidate.identity.document_id,
+                "date": info_json.get("Date", "---"),
+                "amount": f"¥ {info_json.get('Amount', '0.00')}",
+                "category": category,
+                "merchant": info_json.get("Seller", "未知开票方"),
+                "path": path,
+                "source": outcome.candidate.source_filename,
+                "status": "预览归档",
+                "preview": True,
+            }
+        )
+        self.api.stats["invoices"] = int(self.api.stats.get("invoices", 0)) + 1
+
+    def _append_preview_error_state(
+        self, outcome, path, info_json, category, reason, *, manual
+    ):
+        import time
+
+        info_json = dict(info_json or {})
+        self.api.stats["errors"] = int(self.api.stats.get("errors", 0)) + 1
+        self.api.error_invoices.append(
+            {
+                "id": f"inv_preview_{time.time()}_{outcome.candidate.sequence}",
+                "document_id": outcome.candidate.identity.document_id,
+                "date": info_json.get("Date", "---"),
+                "amount": (
+                    f"¥ {info_json.get('Amount')}"
+                    if info_json.get("Amount")
+                    else "---"
+                ),
+                "category": category or ("人工复核" if manual else "证据保全"),
+                "merchant": info_json.get("Seller", "未知开票方"),
+                "path": path,
+                "name": os.path.basename(path),
+                "source": outcome.candidate.source_filename,
+                "artifact_kind": "preview_manual" if manual else "preview_retention",
+                "sColor": "bg-yellow-500" if manual else "bg-blue-500",
+                "status": "预览-待人工确认" if manual else "预览-仅保全",
+                "reason": reason,
+                "rColor": (
+                    "text-yellow-600 border-yellow-200 bg-yellow-50"
+                    if manual
+                    else "text-blue-600 border-blue-200 bg-blue-50"
+                ),
+                "preview": True,
+            }
+        )
+
+    def preview_operation(
+        self,
+        outcome: ExtractionOutcome,
+        payload: dict[str, Any] | None,
+        category: str,
+        root: Path,
+    ) -> ArchiveDecision:
+        """Compute the planned outcome without copying, renaming, or persisting."""
+        del category, root
+        from document_types import MANUAL_REVIEW_FOLDER, get_archive_folder
+
+        info_json = dict((payload or {}).get("info_json") or {})
+        metadata = (
+            dict(payload.get("metadata") or {})
+            if isinstance(payload, dict)
+            else outcome.candidate.to_legacy()
+        )
+        source_candidates = (
+            (payload.get("pdf_path") if isinstance(payload, dict) else None),
+            outcome.artifact_path,
+            metadata.get("filepath"),
+            outcome.candidate.source_path,
+        )
+        source_path = next((str(path) for path in source_candidates if path), "")
+        base_name = (
+            os.path.basename(source_path)
+            or outcome.candidate.source_filename
+            or "document"
+        )
+
+        if outcome.status != "resolved":
+            if outcome.status == "manual_review":
+                reason = outcome.reason_code or "PIPELINE_MANUAL_REVIEW"
+                planned = self._planned_manual_path(self.save_path, base_name, reason)
+                self._append_preview_error_state(
+                    outcome, planned, {}, "人工复核", reason, manual=True
+                )
+                return ArchiveDecision(
+                    path=planned, status="manual_review", reason_code=reason
+                )
+            planned = self._planned_retention_path(
+                self.save_path, f"pipeline_{outcome.status}", base_name
+            )
+            self._append_preview_error_state(
+                outcome,
+                planned,
+                {},
+                "预过滤保全",
+                outcome.reason_code or outcome.status,
+                manual=False,
+            )
+            return ArchiveDecision(
+                path=planned,
+                status="unresolved",
+                reason_code=outcome.reason_code or outcome.status,
+            )
+
+        archive_status = str((payload or {}).get("archive_status") or "")
+        if archive_status == "acceptance_rejected":
+            acceptance = dict((payload or {}).get("document_acceptance") or {})
+            reason = acceptance.get("reason_code") or "DOCUMENT_ACCEPTANCE_REJECTED"
+            planned = self._planned_retention_path(
+                self.save_path,
+                acceptance.get("bucket") or "provider_guard_rejected",
+                base_name,
+            )
+            self._append_preview_error_state(
+                outcome, planned, info_json, "验收拦截", reason, manual=False
+            )
+            return ArchiveDecision(
+                path=planned, status="unresolved", reason_code=reason
+            )
+        if bool(info_json.get("_cwt_cancellation")):
+            planned = self._planned_manual_path(
+                self.save_path, base_name, "CWT_HOTEL_CANCELLATION"
+            )
+            self._append_preview_error_state(
+                outcome,
+                planned,
+                info_json,
+                MANUAL_REVIEW_FOLDER,
+                "CWT_HOTEL_CANCELLATION",
+                manual=True,
+            )
+            return ArchiveDecision(
+                path=planned,
+                status="manual_review",
+                reason_code="CWT_HOTEL_CANCELLATION",
+            )
+        if archive_status == "manual_review":
+            reason = str(
+                (payload or {}).get("manual_reason_code") or "PIPELINE_MANUAL_REVIEW"
+            )
+            planned = self._planned_manual_path(self.save_path, base_name, reason)
+            self._append_preview_error_state(
+                outcome,
+                planned,
+                info_json,
+                str((payload or {}).get("category") or MANUAL_REVIEW_FOLDER),
+                reason,
+                manual=True,
+            )
+            return ArchiveDecision(
+                path=planned, status="manual_review", reason_code=reason
+            )
+        if archive_status == "retained":
+            planned = self._planned_retention_path(
+                self.save_path, "model_rejected", base_name
+            )
+            self._append_preview_error_state(
+                outcome,
+                planned,
+                info_json,
+                "保留记录",
+                "MODEL_REJECTED_NON_INVOICE",
+                manual=False,
+            )
+            return ArchiveDecision(
+                path=planned,
+                status="retained",
+                reason_code="MODEL_REJECTED_NON_INVOICE",
+            )
+
+        mapped_folder = get_archive_folder(info_json.get("Type", ""))
+        custom_rules = (
+            {info_json.get("Type", ""): mapped_folder}
+            if mapped_folder != info_json.get("Type", "")
+            else None
+        )
+        previewer = getattr(self.extractor, "preview_archive_target", None)
+        if not callable(previewer):
+            raise RuntimeError("extractor does not support archive preview")
+        preview = previewer(source_path, info_json, custom_rules=custom_rules)
+        planned = str(preview.get("planned_path") or "")
+        target_folder = str(preview.get("target_folder") or "")
+        if preview.get("status") == "manual_check" or MANUAL_REVIEW_FOLDER in target_folder:
+            reason = str(preview.get("reason_code") or "ROUTE_TO_MANUAL_CHECK")
+            self._append_preview_error_state(
+                outcome,
+                planned,
+                info_json,
+                target_folder or MANUAL_REVIEW_FOLDER,
+                reason,
+                manual=True,
+            )
+            return ArchiveDecision(
+                path=planned, status="manual_review", reason_code=reason
+            )
+
+        self.trace_store.set_fields(
+            outcome.candidate.identity.document_id,
+            normalized_fields=info_json,
+            classification_result={"status": "classified", "category": mapped_folder},
+            naming_result={
+                "status": "preview",
+                "target_folder": target_folder,
+                "final_filename": os.path.basename(planned),
+                "final_path": planned,
+            },
+            archive_target=planned,
+        )
+        self._append_preview_success_state(outcome, info_json, mapped_folder, planned)
+        return ArchiveDecision(path=planned, status="archived")
+
     def archive_operation(
         self,
         outcome: ExtractionOutcome,
@@ -308,6 +549,8 @@ class AppArchiveAdapter:
         category: str,
         root: Path,
     ) -> ArchiveDecision:
+        if self.dry_run:
+            return self.preview_operation(outcome, payload, category, root)
         del category, root
         from app_api import record_business_success
         from document_types import MANUAL_REVIEW_FOLDER, get_archive_folder
@@ -607,6 +850,9 @@ class AppArchiveAdapter:
         return ArchiveDecision(path=path, status="archived")
 
     def finalize(self, report: ArchiveReport, root: Path) -> dict[str, str] | None:
+        if self.dry_run:
+            # A preview must not rename paired files or move CWT cancellations.
+            return None
         if self.pairing_finalizer is not None:
             return self.pairing_finalizer(report, root)
         reconcile_archive_pairs(

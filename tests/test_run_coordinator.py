@@ -56,6 +56,10 @@ def test_run_request_is_frozen_and_contains_no_secret_fields(tmp_path: Path):
         "trusted_revision",
         "validation_required",
         "manifest_included_count",
+        "source_mode",
+        "fetch_only",
+        "input_dir",
+        "dry_run",
     }
     serialized = repr(request) + repr(asdict(request))
     assert "auth_code" not in serialized
@@ -661,6 +665,8 @@ def test_app_api_progress_snapshot_is_independent_and_keeps_exact_frontend_shape
         "build_identity",
         "raw_date_range",
         "imap_query_range",
+        "task_mode",
+        "dry_run",
     }
     assert second["logs"][0]["msg"] == "safe"
     assert second["stats"]["emails"] == 1
