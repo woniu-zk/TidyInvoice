@@ -507,6 +507,14 @@
             min-height: 100%;
             height: auto;
             justify-content: flex-start;
+            /* The settings page grows with its content and scrolls in .page-scroll;
+               never let the flex column shrink a card into a 1px sliver. */
+            flex: 0 0 auto;
+        }
+
+        .page-wrap--settings > .surface-card {
+            flex: 0 0 auto;
+            min-height: auto;
         }
 
         .page-wrap--settings .surface-card {

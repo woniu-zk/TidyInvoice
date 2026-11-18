@@ -234,3 +234,19 @@ def test_task_mode_ui_follows_organize_frontend_contract():
 
     start_calls = re.findall(r'callApi\("(start_[a-z_]+)"', source)
     assert sorted(start_calls) == ["start_fetch_only", "start_local_organize", "start_processing"], start_calls
+
+
+def test_settings_top_level_cards_never_flex_shrink_into_slivers():
+    """Regression: the 任务类型 card must not be flex-shrunk to a 1px sliver.
+
+    The settings page is a flex column; a new top-level card without an explicit
+    ``flex: 0 0 auto`` was shrunk to one pixel by the page layout, so the whole
+    mode selector was invisible while still present in the DOM.
+    """
+    html = _read(HTML_PATH)
+    normalized = " ".join(html.split())
+    assert ".page-wrap--settings > .surface-card" in normalized, (
+        "top-level settings cards need an explicit flex-shrink opt-out"
+    )
+    assert ".page-wrap--settings { min-height: 100%; height: auto; justify-content: flex-start;" in normalized
+    assert normalized.count("flex: 0 0 auto") >= 2

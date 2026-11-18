@@ -85,6 +85,21 @@ console : 无 page/console error
 report  : tmp/gui-e2e/report.json -> {"ok": true, ...}
 ```
 
+## Post-verification UI fix（用户反馈「重启后还是旧 UI」）
+
+根因不是缓存或构建产物：新「任务类型」卡片插入到 `page-wrap--settings` 这个 **flex 列** 后，作为可收缩 flex item 被压缩到 **1px 高**。DOM 与文案查询全部正常，所以自动化断言与文本冒烟都通过，但视觉上整张卡片不可见，等于旧 UI。用真实 WebView2 + CDP 测得该 section 高度 `h=1`、下一张卡片上移。
+
+修复（`templates/index.html`）：
+
+```css
+.page-wrap--settings { ... flex: 0 0 auto; }
+.page-wrap--settings > .surface-card { flex: 0 0 auto; min-height: auto; }
+```
+
+新增回归测试 `test_settings_top_level_cards_never_flex_shrink_into_slivers`（同一文件的构建契约测试内，断言两条 CSS 规则存在）。
+
+修复后真实 WebView2 CDP 实测：任务类型 section `h=1 -> 136`；`任务类型` 卡片与三种模式按钮可见；重新执行真实 GUI e2e（预览→结果→取消预览→整理）全部通过，无 console error。
+
 ## Concerns / Limitations
 
 - 真实邮箱 IMAP 的 fetch-only 链路只做了依赖注入级单测（假 fetcher）+ 真实 EmailFetcher 既有测试，没有用真实账号跑（与仓库既有测试策略一致；mail 全链路行为未改动）。
@@ -96,4 +111,4 @@ report  : tmp/gui-e2e/report.json -> {"ok": true, ...}
 ## Files
 
 新增：`fetch_handoff.py` `organize_source.py` `local_organize.py` `fetch_only.py` `organize_cli.py` `tests/test_organize_local_mode.py` `tests/test_organize_local_source.py`
-修改：`app_api.py` `app_archive_adapter.py` `invoice_extractor.py` `run_coordinator.py` `email_fetcher.py` `templates/index_app.js` `templates/index_app.built.js` `tests/test_frontend_build_contract.py` `tests/test_run_coordinator.py` `build/windows/resources.manifest.json` `README.md` `README.en.md`
+修改：`app_api.py` `app_archive_adapter.py` `invoice_extractor.py` `run_coordinator.py` `email_fetcher.py` `templates/index.html` `templates/index_app.js` `templates/index_app.built.js` `tests/test_frontend_build_contract.py` `tests/test_run_coordinator.py` `build/windows/resources.manifest.json` `README.md` `README.en.md`
