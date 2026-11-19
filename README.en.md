@@ -54,7 +54,7 @@ Open **Invoice Downloader** from the right-side entry, choose an output director
 | 📄 | **Link-based invoice auto-recovery** | Playwright automatically opens Baiwang Cloud and tax platform links, downloading official PDF archives |
 | 🧾 | **Automatic invoice/document pairing** | Hotel invoice/folio and ride invoice/itinerary pairs are archived with adjacent names |
 | 🪟 | **Quiet background processing** | URL workers, Node, and Chromium run without repeatedly opening console windows |
-| 🗂️ | **Natural language classification rules** | Supports custom rules like "Didi rides over 100 yuan go into the high-amount category" |
+| 🗂️ | **Open expense classification rules** | Built-in defaults + user rules + global custom invoice types + seller dictionary + rule packs; target type and amount range generate archive folders automatically; unmatched invoices go to review |
 | 📂 | **Local folder organizing** | Works without any mailbox: one-click offline organizing of phone exports, WeChat/Alipay download folders, and photographed receipts; archives in place and keeps originals verbatim under `整理前发票/` |
 | 📥 | **Fetch to inbox only** | Saves attachments plus a source manifest into `inbox/` without parsing or renaming, ready for your own tools or a later organizing step |
 | 📊 | **One-click Excel report** | Automatically generates `summary_report.xlsx`, covering invoice lists and amount summaries |
@@ -93,6 +93,40 @@ Recognition runs entirely on this machine in the order "deterministic parsing fi
 > - **Rule extraction**: fields are mapped by anchor and regex rules, for example amounts are located via the "tax-inclusive total (in words) / (in figures)" anchors
 >
 > **Offline consistency checks**: verify that the amount plus tax reconciles with the tax-inclusive total, that dates are parseable, and that invoice numbers are valid digit strings; anything that cannot be confirmed is not guessed but routed to Manual Review for the user to check.
+
+---
+
+## 🧩 Expense Classification Rules
+
+Expense categories are no longer hard-coded. Built-in rules provide factory defaults only; users can add rules, choose or create a target invoice type, enter a keyword and optional amount range, and maintain the same rules through the UI, a text editor, or the CLI.
+
+- **Rule locations**
+  - Global: `%APPDATA%\InvoiceFlowAI\rules\` (macOS: `~/Library/Application Support/InvoiceFlowAI/rules/`)
+  - Current invoice library override: `<library>\rules\`
+  - Files: `categories.yaml` (rules and keywords), `custom_types.yaml` (global custom invoice types), `user_terms.yaml` (seller → category), `rules.d/*.yaml` (optional rule packs)
+- **Precedence**: current library rules → global rules → built-in defaults. Within one scope, rules match top-to-bottom and the first match wins; no priority is needed.
+- **A rule only needs**: target invoice type, keyword, amount range (optional), enabled state. The archive folder is generated from "target type + amount range" — no manual folder entry.
+- **Target invoice type**: choose a built-in type (taxi, hotel invoice, meal, etc.) or create a custom type in any scope. Custom types are stored globally in `custom_types.yaml`, are selectable by global and all library rules, and cannot be deleted while referenced by a rule.
+- **Folder naming**: target type "酒店" with amount 100–200 produces `酒店-100-200/`; lower bound only produces `酒店-100以上/`; upper bound only produces `酒店-200以下/`; no amount range uses `酒店/`.
+- **Matching order**: seller dictionary first, then user rules by keyword + amount in list order. The matched rule's target type decides the folder. Built-in defaults are the final fallback; if nothing matches, the invoice is marked unclassified and moved to Manual Review instead of being silently filed as "Other".
+- **Types and recognition**: built-in types are recognized from the document; custom types are user-defined rule outputs and are not produced directly by recognition, but any keyword rule can target one.
+- **Built-in defaults are editable too**: a built-in rule's target type, keywords, amount range, and enabled state can be changed; changes are saved as an override in the current scope. Single-rule and “restore all” actions require a second confirmation and let you choose “current scope only” or “global + current library”; the previous files are backed up first. Built-in rules keep their internal invoice-type fallback gate.
+- **Why this category**: the rules page test panel and `rules test` / `rules explain` show the matched dictionary/rule, keyword, target type, archive folder, and source file line.
+- **Backup and rollback**: every UI/CLI save copies the previous files to `rules/.backup/`; each scope can be reset to its defaults. Direct YAML edits take effect on the next organize run without a restart.
+
+Example: create target type "酒店", then a rule with keyword "酒店住宿" and amount 100–200; it archives to `酒店-100-200/`. A 150-yuan hotel invoice goes there, while a 90-yuan one still goes to `住宿发票/` by its recognized type. The rule decides the folder; the file name still carries the document type.
+
+UI entry: **Settings → Expense classification rules**. CLI:
+
+```powershell
+python organize_cli.py rules list
+python organize_cli.py rules test --text "酒店住宿" --amount 150.00
+python organize_cli.py rules types add 酒店
+python organize_cli.py rules add-rule 酒店住宿 --type 酒店 --amount-min 100 --amount-max 200
+python organize_cli.py rules validate
+```
+
+> Saving from the UI rewrites the current scope's rule file; edit the YAML directly if you want to preserve comments. Library rules match before global rules, and resetting a library falls back to global/built-in rules. Changing the target type, keyword, or amount range only affects future archives; existing files are not moved automatically.
 
 ---
 
@@ -338,6 +372,41 @@ No. E-invoices are parsed directly on this machine, and scans or images go throu
 <summary>Q: Some invoices end up in the Manual Review folder?</summary>
 
 This is normal. When local parsing and rule checks cannot confirm a result reliably, the system places the invoice in the Manual Review folder for human confirmation. This is usually caused by blurry images, non-standard documents, or encrypted PDFs.
+
+</details>
+
+<details>
+<summary>Q: Why does an invoice say "no classification rule matched"?</summary>
+
+When no expense category rule matches, the invoice is marked unclassified and moved to Manual Review instead of being silently filed under "Other". Add a seller/item keyword, invoice type, or amount rule under **Settings → Expense classification rules**, save it, move the file back into the invoice folder, and organize again.
+
+</details>
+
+<details>
+<summary>Q: What does the target invoice type in a rule do?</summary>
+
+The target type is what the rule outputs when it matches, and it determines the archive folder and classification result. You can choose a built-in type (taxi, hotel invoice, meal, etc.) or create a custom type. Built-in types are recognized from the document; custom types are user-defined rule outputs, are available globally, and are not produced directly by recognition.
+
+</details>
+
+<details>
+<summary>Q: How is the archive folder name generated?</summary>
+
+You do not enter it manually. It is built from the target type and amount range: target type "酒店" with amount 100–200 produces `酒店-100-200/`; a lower bound only produces `酒店-100以上/`; an upper bound only produces `酒店-200以下/`; no amount range uses `酒店/`. Changing the target type, keyword, or range affects future archives only; existing files are not moved automatically.
+
+</details>
+
+<details>
+<summary>Q: Can built-in rules be edited, and is restoring defaults safe?</summary>
+
+Yes. A built-in rule's target type, keywords, amount range, and enabled state can be edited; saving creates an override in the current scope. Single-rule and “restore all” actions open a confirmation dialog first, where you choose “current scope only” or “global + current library”. Only after confirmation are the overrides removed and the built-in defaults restored; the previous rule files are backed up automatically.
+
+</details>
+
+<details>
+<summary>Q: Where are the classification rule files, and can I edit them?</summary>
+
+Yes. Global rules live in `%APPDATA%\InvoiceFlowAI\rules\` (macOS: `~/Library/Application Support/InvoiceFlowAI/rules/`); library overrides live in `<library>\rules\`. The files are open YAML: `categories.yaml`, global custom types `custom_types.yaml`, `user_terms.yaml`, and optional `rules.d/*.yaml`. Every save is backed up under `.backup/`, and both the UI and CLI can reset a scope to its defaults.
 
 </details>
 

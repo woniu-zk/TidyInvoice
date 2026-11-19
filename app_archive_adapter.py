@@ -23,6 +23,7 @@ class AppArchiveAdapter:
         pairing_finalizer: Callable[[ArchiveReport, Path], None] | None = None,
         dry_run: bool = False,
         flat_layout: bool = False,
+        classification_rule_set: Any | None = None,
     ) -> None:
         self.api = api
         self.extractor = extractor
@@ -34,6 +35,11 @@ class AppArchiveAdapter:
         # output root. Tool buckets (待人工复核/_audit_retention) keep their
         # folders so unreadable or retained material stays separable.
         self.flat_layout = bool(flat_layout)
+        if classification_rule_set is None:
+            from expense_rules import load_rule_set
+
+            classification_rule_set = load_rule_set(save_path)
+        self.classification_rule_set = classification_rule_set
         if acceptance_service is None:
             from document_acceptance import DocumentAcceptanceService
 
@@ -42,6 +48,145 @@ class AppArchiveAdapter:
         self.pairing_finalizer = pairing_finalizer
         self.pairing_metadata: dict[str, dict[str, Any]] = {}
         self.business_keys_by_document_id: dict[str, str] = {}
+
+    @staticmethod
+    def _classification_row_fields(info_json: dict[str, Any]) -> dict[str, Any]:
+        info_json = info_json or {}
+        return {
+            "type": str(info_json.get("Type") or ""),
+            "category_id": str(info_json.get("category_id") or ""),
+            "category_src": str(info_json.get("category_src") or ""),
+            "classification_source": str(
+                info_json.get("classification_source") or ""
+            ),
+            "classification_rule": str(info_json.get("classification_rule") or ""),
+        }
+
+    @staticmethod
+    def _classification_reason_code(result: Any) -> str:
+        source = str(getattr(result, "source", "") or "")
+        if source == "dictionary":
+            return "CLASSIFIED_BY_USER_TERM"
+        if source in {"user_rule", "rule_pack"}:
+            return "CLASSIFIED_BY_USER_RULE"
+        if source == "builtin_keyword":
+            return "CLASSIFIED_BY_BUILTIN_KEYWORD"
+        if source == "builtin_type":
+            return "CLASSIFIED_BY_INVOICE_TYPE"
+        if source == "unknown":
+            return "CLASSIFICATION_UNKNOWN"
+        return ""
+
+    @staticmethod
+    def _classification_display_rule(result: Any) -> str:
+        source = str(getattr(result, "source", "") or "")
+        rule_id = str(getattr(result, "rule_id", "") or "")
+        keyword = str(getattr(result, "keyword", "") or "")
+        if source == "unknown":
+            return "未命中"
+        if source == "builtin_type":
+            return rule_id or "票种兜底"
+        if keyword:
+            return f"{rule_id}:{keyword}" if rule_id else keyword
+        return rule_id or source
+
+    def _apply_expense_classification(
+        self,
+        *,
+        payload: dict[str, Any],
+        info_json: dict[str, Any],
+        reason_codes: list[str],
+    ) -> None:
+        """Classify a safely archivable invoice and record the explanation."""
+        from document_types import get_archive_folder, normalize_document_type
+        from expense_rules import classify
+
+        doc_type = normalize_document_type(info_json.get("Type", ""))
+        info_json["Type"] = doc_type
+        payload["info_json"] = info_json
+        archive_status = str(payload.get("archive_status") or "")
+        manual_reason = str(payload.get("manual_reason_code") or "")
+        isolated_types = {"非目标公司发票", "个人非报销发票"}
+
+        if archive_status in {"retained", "acceptance_rejected"} or manual_reason:
+            folder = get_archive_folder(doc_type)
+            payload.update(
+                {
+                    "category": folder,
+                    "category_id": "",
+                    "category_src": "builtin",
+                    "archive_folder": folder,
+                    "classification_source": "skipped",
+                    "classification_rule": "",
+                    "classification_explain": {
+                        "status": "skipped",
+                        "reason": manual_reason or archive_status,
+                        "category": folder,
+                    },
+                }
+            )
+            return
+
+        if doc_type in isolated_types:
+            folder = get_archive_folder(doc_type)
+            payload.update(
+                {
+                    "category": folder,
+                    "category_id": "",
+                    "category_src": "builtin",
+                    "archive_folder": folder,
+                    "classification_source": "isolation",
+                    "classification_rule": doc_type,
+                    "classification_explain": {
+                        "status": "isolation",
+                        "reason": "SAFETY_ISOLATION_TYPE",
+                        "category": folder,
+                    },
+                }
+            )
+            return
+
+        result = classify(
+            {
+                "seller": info_json.get("Seller", ""),
+                "seller_tin": info_json.get("seller_tin")
+                or info_json.get("Seller_TIN", ""),
+                "item": info_json.get("Item") or info_json.get("item_name", ""),
+                "type": doc_type,
+                "amount": info_json.get("Amount", ""),
+                "purchaser": info_json.get("Purchaser", ""),
+            },
+            self.classification_rule_set,
+        )
+        reason_code = self._classification_reason_code(result)
+        if reason_code and reason_code not in reason_codes:
+            reason_codes.append(reason_code)
+        display_rule = self._classification_display_rule(result)
+        payload.update(
+            {
+                "category": result.category_name,
+                "category_id": result.category_id,
+                "category_src": result.category_src,
+                "archive_folder": result.archive_folder,
+                "classification_source": result.source,
+                "classification_rule": display_rule,
+                "classification_explain": result.to_dict()
+                if hasattr(result, "to_dict")
+                else dict(getattr(result, "__dict__", {})),
+            }
+        )
+        info_json.update(
+            {
+                "category": result.category_name,
+                "category_id": result.category_id,
+                "category_src": result.category_src,
+                "classification_source": result.source,
+                "classification_rule": display_rule,
+            }
+        )
+        if result.source == "unknown":
+            payload["archive_status"] = "manual_review"
+            payload["manual_reason_code"] = "CLASSIFICATION_UNKNOWN"
 
     def _append_success_state(
         self,
@@ -62,6 +207,7 @@ class AppArchiveAdapter:
                 "category": category,
                 "merchant": info_json.get("Seller", "未知开票方"),
                 "path": path,
+                **self._classification_row_fields(info_json),
             }
         )
         self.api.stats["invoices"] = int(self.api.stats.get("invoices", 0)) + 1
@@ -123,6 +269,7 @@ class AppArchiveAdapter:
                 "status": "待人工复核",
                 "reason": reason_code,
                 "rColor": "text-yellow-600 border-yellow-200 bg-yellow-50",
+                **self._classification_row_fields(info_json),
             }
         )
 
@@ -134,7 +281,6 @@ class AppArchiveAdapter:
         from document_types import (
             apply_strong_train_evidence_override,
             classify_cwt_document_type,
-            get_archive_folder,
             is_exempt_type,
         )
 
@@ -282,11 +428,16 @@ class AppArchiveAdapter:
             payload["manual_reason_code"] = "TIER3_MANUAL_REVIEW"
         if not acceptance_rejected and info_json.get("_cwt_cancellation"):
             payload["archive_status"] = "manual_review"
-        payload["info_json"] = info_json
-        payload["category"] = get_archive_folder(info_json.get("Type", "其他"))
+        self._apply_expense_classification(
+            payload=payload,
+            info_json=info_json,
+            reason_codes=reason_codes,
+        )
+        payload["classification_reason_codes"] = reason_codes
         if (
             payload.get("archive_status") not in {"retained", "acceptance_rejected"}
             and payload.get("manual_reason_code") != "COMPANY_PURCHASER_UNKNOWN"
+            and payload.get("classification_source") != "unknown"
         ):
             self.api.discovered_categories.add(payload["category"])
         return payload
@@ -344,6 +495,7 @@ class AppArchiveAdapter:
                 "source": outcome.candidate.source_filename,
                 "status": "预览归档",
                 "preview": True,
+                **self._classification_row_fields(info_json),
             }
         )
         self.api.stats["invoices"] = int(self.api.stats.get("invoices", 0)) + 1
@@ -380,6 +532,7 @@ class AppArchiveAdapter:
                     else "text-blue-600 border-blue-200 bg-blue-50"
                 ),
                 "preview": True,
+                **self._classification_row_fields(info_json),
             }
         )
 
@@ -506,10 +659,20 @@ class AppArchiveAdapter:
                 reason_code="MODEL_REJECTED_NON_INVOICE",
             )
 
-        mapped_folder = get_archive_folder(info_json.get("Type", ""))
+        type_folder = get_archive_folder(info_json.get("Type", ""))
+        mapped_folder = str(
+            (payload or {}).get("archive_folder") or type_folder
+        )
+        from expense_rules import is_safe_folder_name
+
+        if mapped_folder and not is_safe_folder_name(mapped_folder):
+            mapped_folder = type_folder
+        category_name = str(
+            (payload or {}).get("category") or mapped_folder
+        )
         custom_rules = (
             {info_json.get("Type", ""): mapped_folder}
-            if mapped_folder != info_json.get("Type", "")
+            if mapped_folder != type_folder
             else None
         )
         previewer = getattr(self.extractor, "preview_archive_target", None)
@@ -535,10 +698,20 @@ class AppArchiveAdapter:
                 path=planned, status="manual_review", reason_code=reason
             )
 
+        classification_result = {
+            "status": "classified",
+            "category": category_name,
+            "category_id": str((payload or {}).get("category_id") or ""),
+            "archive_folder": mapped_folder,
+            "source": str((payload or {}).get("classification_source") or ""),
+            "rule": str((payload or {}).get("classification_rule") or ""),
+            "unmatched": str((payload or {}).get("classification_source") or "")
+            == "unknown",
+        }
         self.trace_store.set_fields(
             outcome.candidate.identity.document_id,
             normalized_fields=info_json,
-            classification_result={"status": "classified", "category": mapped_folder},
+            classification_result=classification_result,
             naming_result={
                 "status": "preview",
                 "target_folder": target_folder,
@@ -547,7 +720,7 @@ class AppArchiveAdapter:
             },
             archive_target=planned,
         )
-        self._append_preview_success_state(outcome, info_json, mapped_folder, planned)
+        self._append_preview_success_state(outcome, info_json, category_name, planned)
         return ArchiveDecision(path=planned, status="archived")
 
     def archive_operation(
@@ -774,10 +947,34 @@ class AppArchiveAdapter:
             return ArchiveDecision(path=path, status="retained")
 
         info_json = payload["info_json"]
-        mapped_folder = get_archive_folder(info_json.get("Type", ""))
+        from app_api import canonical_artifact_role
+
+        category_name = str(payload.get("category") or "其他")
+        type_folder = get_archive_folder(info_json.get("Type", ""))
+        mapped_folder = str(payload.get("archive_folder") or type_folder)
+        from expense_rules import is_safe_folder_name
+
+        if mapped_folder and not is_safe_folder_name(mapped_folder):
+            mapped_folder = type_folder
+        artifact_role = canonical_artifact_role(
+            info_json, os.path.basename(source_path)
+        )
+        pairing_roles = {
+            "ride_invoice",
+            "ride_itinerary",
+            "hotel_invoice",
+            "hotel_folio",
+        }
+        if artifact_role in pairing_roles and mapped_folder != type_folder:
+            # Keep pairing artifacts in their document-type folder until the
+            # pairing finalizer has paired/renamed them. They are moved to the
+            # configured category folder afterwards, as a pair.
+            route_folder = type_folder
+        else:
+            route_folder = mapped_folder
         custom_rules = (
-            {info_json.get("Type", ""): mapped_folder}
-            if mapped_folder != info_json.get("Type", "")
+            {info_json.get("Type", ""): route_folder}
+            if route_folder != type_folder
             else None
         )
         success, path = self.extractor.route_and_rename_file(
@@ -803,7 +1000,7 @@ class AppArchiveAdapter:
             self._append_classified_manual_state(
                 outcome,
                 info_json,
-                mapped_folder,
+                category_name,
                 path,
                 reason_code,
             )
@@ -823,7 +1020,6 @@ class AppArchiveAdapter:
                 os.path.basename(path),
             )
             self.business_keys_by_document_id[outcome.candidate.identity.document_id] = business_key
-        from app_api import canonical_artifact_role
 
         artifact_role = canonical_artifact_role(info_json, os.path.basename(path))
         if info_json.get("Type") == "住宿确认单":
@@ -847,7 +1043,19 @@ class AppArchiveAdapter:
         self.trace_store.set_fields(
             outcome.candidate.identity.document_id,
             normalized_fields=info_json,
-            classification_result={"status": "classified", "category": mapped_folder},
+            classification_result={
+                "status": "classified",
+                "category": category_name,
+                "category_id": str(payload.get("category_id") or ""),
+                "archive_folder": mapped_folder,
+                "source": str(payload.get("classification_source") or ""),
+                "rule": str(payload.get("classification_rule") or ""),
+                "unmatched": str(payload.get("classification_source") or "")
+                == "unknown",
+                "artifact_role": artifact_role,
+                "pairing_deferred": artifact_role in pairing_roles
+                and mapped_folder != type_folder,
+            },
             naming_result=dict(naming_trace) or {"status": "archived"},
             archive_target=path,
         )
@@ -855,10 +1063,224 @@ class AppArchiveAdapter:
             "archived",
             path,
             document_id=outcome.candidate.identity.document_id,
-            category=mapped_folder,
+            category=category_name,
         )
-        self._append_success_state(outcome, info_json, mapped_folder, path)
+        self._append_success_state(outcome, info_json, category_name, path)
         return ArchiveDecision(path=path, status="archived")
+
+    @staticmethod
+    def _is_linklike_path(path: str) -> bool:
+        import stat
+
+        try:
+            info = os.lstat(path)
+        except FileNotFoundError:
+            return False
+        except OSError:
+            return True
+        if stat.S_ISLNK(info.st_mode):
+            return True
+        return bool(getattr(info, "st_reparse_tag", 0))
+
+    @staticmethod
+    def _is_inside_root(path: str, root: str) -> bool:
+        try:
+            resolved = os.path.realpath(path)
+            base = os.path.realpath(root)
+            return os.path.commonpath([resolved, base]) == base
+        except (OSError, ValueError):
+            return False
+
+    def _move_file_into_folder(
+        self, root: str, source: str, folder: str
+    ) -> str | None:
+        """Move one archived file into a category folder without overwriting."""
+        from expense_rules import is_safe_folder_name
+
+        if not folder or not is_safe_folder_name(folder):
+            return None
+        if not source or not os.path.isfile(source):
+            return None
+        if not self._is_inside_root(source, root):
+            return None
+        target_dir = os.path.join(root, folder)
+        if not self._is_inside_root(target_dir, root):
+            return None
+        if self._is_linklike_path(target_dir):
+            return None
+        try:
+            if os.path.exists(target_dir) and not os.path.isdir(target_dir):
+                return None
+            os.makedirs(target_dir, exist_ok=True)
+        except OSError:
+            return None
+        name = os.path.basename(source)
+        target = os.path.join(target_dir, name)
+        stem, suffix = os.path.splitext(name)
+        index = 2
+        while os.path.exists(target):
+            target = os.path.join(target_dir, f"{stem}_{index}{suffix}")
+            index += 1
+        try:
+            os.replace(source, target)
+        except OSError:
+            try:
+                import shutil
+
+                shutil.move(source, target)
+            except OSError:
+                return None
+        return target
+
+    def _update_processed_row(
+        self, document_id: str, *, category: dict[str, Any], path: str
+    ) -> None:
+        for row in list(getattr(self.api, "processed_invoices", []) or ()):
+            if str(row.get("document_id") or "") != document_id:
+                continue
+            row["path"] = path
+            if "name" in row:
+                row["name"] = os.path.basename(path)
+            row["category"] = category.get("category", row.get("category", ""))
+            row["category_id"] = category.get(
+                "category_id", row.get("category_id", "")
+            )
+            row["category_src"] = category.get(
+                "category_src", row.get("category_src", "")
+            )
+            row["classification_rule"] = category.get(
+                "rule", row.get("classification_rule", "")
+            )
+
+    def _relocate_deferred_categories(self, root: Path) -> dict[str, str]:
+        """Move pairing artifacts to their configured category folder.
+
+        Pairing must run in the document-type folders first. Once pairing has
+        produced the final names, the invoice's expense category decides where
+        the pair lives; both members move together and share the invoice's
+        category so reports and filesystem agree.
+        """
+        if self.flat_layout:
+            return {}
+        iterator = getattr(self.trace_store, "iter_records", None)
+        if not callable(iterator):
+            return {}
+        rows = [row for row in iterator() if isinstance(row, dict)]
+        if not rows:
+            return {}
+
+        by_name = {}
+        for row in rows:
+            target = str(row.get("archive_target") or "")
+            if target:
+                by_name.setdefault(os.path.basename(target), row)
+
+        pairing_roles = {
+            "ride_invoice",
+            "ride_itinerary",
+            "hotel_invoice",
+            "hotel_folio",
+        }
+        primary_roles = {"ride_invoice", "hotel_invoice"}
+        root_text = str(root)
+
+        def classification(row: dict[str, Any]) -> dict[str, Any]:
+            value = row.get("classification_result")
+            return dict(value) if isinstance(value, dict) else {}
+
+        def role(row: dict[str, Any]) -> str:
+            return str(classification(row).get("artifact_role") or "")
+
+        def desired_folder(row: dict[str, Any]) -> str:
+            return str(classification(row).get("archive_folder") or "").strip()
+
+        def is_deferred(row: dict[str, Any]) -> bool:
+            return bool(classification(row).get("pairing_deferred"))
+
+        groups: list[list[dict[str, Any]]] = []
+        visited: set[str] = set()
+        for row in rows:
+            document_id = str(row.get("document_id") or "")
+            if not document_id or document_id in visited:
+                continue
+            if role(row) not in pairing_roles:
+                continue
+            counterpart_name = str(
+                (row.get("combine_result") or {}).get("paired_with") or ""
+            )
+            counterpart = by_name.get(os.path.basename(counterpart_name))
+            if counterpart is not None and counterpart is not row:
+                group = [row, counterpart]
+            else:
+                group = [row]
+            if not any(is_deferred(item) for item in group):
+                continue
+            groups.append(group)
+            visited.update(str(item.get("document_id") or "") for item in group)
+
+        moved: dict[str, str] = {}
+        for group in groups:
+            primary = next(
+                (item for item in group if role(item) in primary_roles),
+                group[0],
+            )
+            primary_classification = classification(primary)
+            folder = str(
+                primary_classification.get("archive_folder") or ""
+            ).strip()
+            if not folder:
+                folder = desired_folder(group[0])
+            if not folder:
+                continue
+            for item in group:
+                document_id = str(item.get("document_id") or "")
+                source = str(item.get("archive_target") or "")
+                if not document_id or not source:
+                    continue
+                current_folder = os.path.basename(os.path.dirname(source))
+                if current_folder == folder:
+                    target = source
+                else:
+                    target = self._move_file_into_folder(
+                        root_text, source, folder
+                    ) or ""
+                if not target:
+                    continue
+                inherited = item is not primary
+                updated = dict(classification(item))
+                updated.update(
+                    {
+                        "category": primary_classification.get(
+                            "category", updated.get("category", "")
+                        ),
+                        "category_id": primary_classification.get(
+                            "category_id", updated.get("category_id", "")
+                        ),
+                        "archive_folder": folder,
+                        "pair_category_inherited": inherited,
+                    }
+                )
+                if target != source:
+                    move = getattr(self.trace_store, "move_archive_target", None)
+                    if callable(move):
+                        move(source, target)
+                self.trace_store.set_fields(
+                    document_id,
+                    archive_target=target,
+                    classification_result=updated,
+                )
+                category_payload = {
+                    "category": updated.get("category", ""),
+                    "category_id": updated.get("category_id", ""),
+                    "category_src": updated.get("category_src", ""),
+                    "rule": updated.get("rule", ""),
+                }
+                self._update_processed_row(
+                    document_id, category=category_payload, path=target
+                )
+                if target != source:
+                    moved[document_id] = target
+        return moved
 
     def finalize(self, report: ArchiveReport, root: Path) -> dict[str, str] | None:
         if self.dry_run:
@@ -882,11 +1304,47 @@ class AppArchiveAdapter:
                     self.trace_store.set_fields(
                         str(row["document_id"]), archive_target=moved_paths[old_path]
                     )
+        self._relocate_deferred_categories(root)
         iterator = getattr(self.trace_store, "iter_records", None)
         if not callable(iterator):
             return None
+        rows = [row for row in iterator() if isinstance(row, dict)]
+        history_folders: list[str] = []
+        for category in getattr(self.classification_rule_set, "categories", ()) or ():
+            folder = str(getattr(category, "archive_folder", "") or "").strip()
+            if folder:
+                history_folders.append(folder)
+        root_text = str(root)
+        file_folders: dict[str, str] = {}
+        for row in rows:
+            target = str(row.get("archive_target") or "")
+            if not target or not self._is_inside_root(target, root_text):
+                continue
+            classification = row.get("classification_result")
+            classification = (
+                dict(classification) if isinstance(classification, dict) else {}
+            )
+            desired_folder = str(
+                classification.get("archive_folder") or ""
+            ).strip()
+            parent_folder = os.path.basename(os.path.dirname(target))
+            folder = desired_folder or parent_folder
+            if (
+                folder
+                and os.path.dirname(os.path.abspath(target))
+                != os.path.abspath(root_text)
+            ):
+                history_folders.append(folder)
+            if folder:
+                file_folders[os.path.basename(target)] = folder
+        recorder = getattr(self.api, "_record_archive_folder_history", None)
+        if callable(recorder):
+            try:
+                recorder(self.save_path, history_folders, file_folders)
+            except Exception:
+                pass
         return {
             str(row.get("document_id")): str(row.get("archive_target"))
-            for row in iterator()
+            for row in rows
             if row.get("document_id") and row.get("archive_target")
         }

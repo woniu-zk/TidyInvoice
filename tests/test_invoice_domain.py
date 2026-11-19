@@ -318,6 +318,36 @@ class InvoiceRecordTests(unittest.TestCase):
             },
         )
 
+    def test_item_name_reads_legacy_item_and_item_name_keys(self):
+        legacy = {
+            "Date": "20260601",
+            "Amount": "441.15",
+            "Type": "住宿发票",
+            "Item": "*住宿服务*住宿费",
+        }
+
+        record = InvoiceRecord.from_legacy(legacy, self.identity)
+
+        self.assertEqual(record.item_name, "*住宿服务*住宿费")
+        self.assertEqual(record.to_legacy(), legacy)
+
+        lowercase = InvoiceRecord.from_legacy(
+            {"Date": "20260601", "item_name": "*餐饮服务*餐费"}, self.identity
+        )
+        self.assertEqual(lowercase.item_name, "*餐饮服务*餐费")
+        self.assertEqual(lowercase.to_legacy()["Item"], "*餐饮服务*餐费")
+
+    def test_item_name_is_omitted_when_empty_and_serialized_when_set(self):
+        legacy = {"Date": "20260601", "Amount": "100.00", "Type": "其他"}
+
+        self.assertEqual(
+            InvoiceRecord.from_legacy(legacy, self.identity).to_legacy(), legacy
+        )
+        self.assertNotIn("Item", InvoiceRecord(identity=self.identity).to_legacy())
+
+        record = InvoiceRecord(identity=self.identity, item_name="*住宿服务*住宿费")
+        self.assertEqual(record.to_legacy()["Item"], "*住宿服务*住宿费")
+
     def test_bool_amount_is_rejected_at_legacy_boundary(self):
         with self.assertRaises(TypeError):
             InvoiceRecord.from_legacy({"Amount": True}, self.identity)

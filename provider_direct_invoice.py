@@ -263,6 +263,8 @@ def parse_direct_invoice_xml_fields(xml_bytes):
         "invoice_code": "",
         "seller": "",
         "purchaser": "",
+        "seller_tin": "",
+        "buyer_tin": "",
         "amount": "",
         "invoice_date": "",
         "item_name": "",
@@ -280,6 +282,12 @@ def parse_direct_invoice_xml_fields(xml_bytes):
         )
         result["purchaser"] = normalize_token(
             _xml_first_text(root, {"gmfmc", "buyername", "buyer_name", "purchaser"})
+        )
+        result["seller_tin"] = normalize_token(
+            _xml_first_text(root, {"xfsbh", "seller_tin", "seller_tax_id", "xfsh"})
+        )
+        result["buyer_tin"] = normalize_token(
+            _xml_first_text(root, {"gfsbh", "buyer_tin", "buyer_tax_id", "gfsh"})
         )
         result["amount"] = normalize_amount(
             _xml_first_text(root, {"jshj", "amount", "total_amount", "totaltax-includedamount", "totaltaxincludedamount", "价税合计"})
@@ -303,6 +311,28 @@ def parse_direct_invoice_xml_fields(xml_bytes):
             match = re.search(pattern, xml_text, flags=re.IGNORECASE | re.DOTALL)
             if match:
                 result["seller"] = normalize_token(match.group(1))
+                break
+    if not result["seller_tin"]:
+        for pattern in (
+            r"<xfsbh[^>]*>(.*?)</xfsbh>",
+            r"<seller_tin[^>]*>(.*?)</seller_tin>",
+            r"<seller_tax_id[^>]*>(.*?)</seller_tax_id>",
+            r"<xfsh[^>]*>(.*?)</xfsh>",
+        ):
+            match = re.search(pattern, xml_text, flags=re.IGNORECASE | re.DOTALL)
+            if match:
+                result["seller_tin"] = normalize_token(match.group(1))
+                break
+    if not result["buyer_tin"]:
+        for pattern in (
+            r"<gfsbh[^>]*>(.*?)</gfsbh>",
+            r"<buyer_tin[^>]*>(.*?)</buyer_tin>",
+            r"<buyer_tax_id[^>]*>(.*?)</buyer_tax_id>",
+            r"<gfsh[^>]*>(.*?)</gfsh>",
+        ):
+            match = re.search(pattern, xml_text, flags=re.IGNORECASE | re.DOTALL)
+            if match:
+                result["buyer_tin"] = normalize_token(match.group(1))
                 break
     if not result["amount"]:
         amounts = re.findall(r"([0-9]+\.[0-9]{2})", xml_text)

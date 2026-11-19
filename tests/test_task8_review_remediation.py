@@ -635,7 +635,7 @@ def test_archive_success_restores_frontend_row_category_stats_and_event_shape(tm
     assert report.can_complete is True
     assert len(api.processed_invoices) == 1
     row = api.processed_invoices[0]
-    assert set(row) == {"id", "document_id", "date", "amount", "category", "merchant", "path"}
+    assert {"id", "document_id", "date", "amount", "category", "merchant", "path"} <= set(row)
     assert row["document_id"] == outcome.candidate.identity.document_id
     assert row | {"id": "ignored"} == {
         "id": "ignored",
@@ -645,6 +645,11 @@ def test_archive_success_restores_frontend_row_category_stats_and_event_shape(tm
         "category": "餐饮",
         "merchant": "成功商户",
         "path": str(source),
+        "type": "餐饮",
+        "category_id": "meal",
+        "category_src": "builtin",
+        "classification_source": "builtin_type",
+        "classification_rule": "meal",
     }
     assert api.discovered_categories == {"餐饮"}
     assert api.stats == {"invoices": 1, "errors": 0}

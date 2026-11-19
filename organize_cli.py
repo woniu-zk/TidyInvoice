@@ -86,6 +86,21 @@ def _print_organize_human(result) -> None:
                 "布局调整: 预览将按「%s」设置移动已归档文件 %d 个"
                 % (layout_label, result.layout_planned_count)
             )
+    classification_counts = dict(getattr(result, "classification_counts", {}) or {})
+    if classification_counts or getattr(result, "unclassified_count", 0):
+        summary = " · ".join(
+            f"{name} {count}" for name, count in classification_counts.items()
+        )
+        if not summary:
+            summary = "已归类 0"
+        print(
+            "归类: %s · 未分类 %d · 词典命中 %d"
+            % (
+                summary,
+                int(getattr(result, "unclassified_count", 0) or 0),
+                int(getattr(result, "dictionary_hit_count", 0) or 0),
+            )
+        )
     if result.preview_rows:
         print("-" * 70)
         print(f"{'原文件':<28}{'→ 分类/新文件名':<40}")
@@ -134,6 +149,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     organize.add_argument("--verbose", action="store_true", help="输出识别过程日志")
 
+    rules = sub.add_parser("rules", help="查看、校验和修改费用归类规则")
+    rules.add_argument("rules_args", nargs=argparse.REMAINDER)
+
     fetch = sub.add_parser("fetch", help="只从邮箱提取附件到 inbox（不解析）")
     fetch.add_argument("--email", required=True, help="邮箱地址")
     fetch.add_argument(
@@ -153,9 +171,21 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _run_organize(args: argparse.Namespace) -> int:
     from app_api import InvoiceAppAPI
+    from expense_rules import RuleConfigError, load_rule_set
     from local_organize import OrganizeRequest, LocalOrganizer, validate_request
 
     output_dir = args.output or _default_output_dir(args.input)
+    try:
+        load_rule_set(output_dir)
+    except RuleConfigError as exc:
+        print("归类规则配置有误：", file=sys.stderr)
+        for issue in getattr(exc, "issues", ()) or ():
+            print(
+                f"{getattr(issue, 'file', '')}:{getattr(issue, 'line', 0)}: "
+                f"{getattr(issue, 'message', issue)}",
+                file=sys.stderr,
+            )
+        return 2
     rules_text = ""
     if args.rules:
         try:
@@ -256,9 +286,17 @@ def _run_fetch(args: argparse.Namespace) -> int:
     return 0 if result.ok else 1
 
 
+def _run_rules(args: argparse.Namespace) -> int:
+    from expense_rules.cli import main as rules_main
+
+    return int(rules_main(list(getattr(args, "rules_args", []) or [])))
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
+    if args.command == "rules":
+        return _run_rules(args)
     _configure_logging(bool(getattr(args, "verbose", False)))
     if args.command == "organize":
         return _run_organize(args)

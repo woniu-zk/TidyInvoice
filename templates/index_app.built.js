@@ -195,6 +195,12 @@ const UI_COPY = {
     description: "总览与导出",
     icon: "assessment",
     path: "/analysis"
+  }, {
+    key: "rules",
+    label: "归类规则",
+    description: "目标票种、关键词与金额",
+    icon: "rule",
+    path: "/rules"
   }],
   pages: {
     settings: {
@@ -234,10 +240,440 @@ const UI_COPY = {
       reviewTitle: "待人工复核",
       reviewEmpty: "当前没有待人工复核记录。",
       reviewReady: "请优先前往待人工复核文件夹处理这些记录。",
-      reviewIdle: "结果明细仍可导出查看，输出目录会保留本轮成功归档结果。"
+      reviewIdle: "结果明细仍可导出查看，输出目录会保留本轮成功归档结果。",
+      classificationTitle: "分类汇总",
+      classificationEmpty: "本轮还没有可统计的分类结果。"
+    },
+    rules: {
+      title: "归类规则",
+      description: "用目标票种、关键词和金额范围建立归档规则；保存后在下一次整理时生效。"
     }
   }
 };
+const RULE_SCOPE_OPTIONS = [{
+  value: "global",
+  label: "全局规则",
+  description: "对本机所有发票库生效，适合长期稳定的规则。"
+}, {
+  value: "library",
+  label: "当前发票库",
+  description: "只对当前发票库生效，适合单个项目或单个文件夹的特殊规则。"
+}];
+const RULE_PANEL_OPTIONS = [{
+  value: "rules",
+  label: "规则列表"
+}, {
+  value: "tools",
+  label: "词典与测试"
+}, {
+  value: "types",
+  label: "票种管理"
+}];
+const RULE_SOURCE_LAYER_LABELS = {
+  builtin: "内置",
+  global: "全局",
+  library: "发票库",
+  pack: "规则包"
+};
+const CLASSIFICATION_SOURCE_LABELS = {
+  builtin_keyword: "内置关键词",
+  builtin_type: "票种兜底",
+  user_rule: "用户规则",
+  rule_pack: "规则包",
+  dictionary: "销售方词典",
+  unknown: "未归类",
+  skipped: "未参与归类",
+  isolation: "隔离类型"
+};
+const RULE_CHAIN_REASON_LABELS = {
+  disabled: "规则已停用",
+  invoice_type_mismatch: "票种不符",
+  amount_missing: "票面金额缺失",
+  amount_out_of_range: "金额不在范围内",
+  empty_match_text: "没有可匹配的销售方或明细",
+  excluded: "命中排除关键词",
+  no_keyword_matched: "未命中关键词",
+  keyword: "命中关键词"
+};
+const RULE_ORDER_HELP = "规则从上到下匹配，命中第一条即停止。匹配顺序：当前发票库规则 → 全局规则 → 内置默认。";
+const RULE_TARGET_TYPE_HELP = "目标票种决定归档文件夹和归类结果。内置票种是发票识别结果；自定义票种全局可用，可以给任意规则指定。";
+const RULE_CUSTOM_TYPE_HELP = "自定义票种全局可用，全局规则和当前发票库规则都能选择。";
+function ruleScopeLabel(scope) {
+  const option = RULE_SCOPE_OPTIONS.find(item => item.value === scope);
+  return option ? option.label : RULE_SCOPE_OPTIONS[0].label;
+}
+function ruleScopeDescription(scope) {
+  const option = RULE_SCOPE_OPTIONS.find(item => item.value === scope);
+  return option ? option.description : RULE_SCOPE_OPTIONS[0].description;
+}
+function ruleLayerLabel(layer) {
+  const key = String(layer || "").trim();
+  return RULE_SOURCE_LAYER_LABELS[key] || (key ? key : "未标注");
+}
+function classificationSourceLabel(source) {
+  const key = String(source || "").trim();
+  if (!key) return "未标注";
+  return CLASSIFICATION_SOURCE_LABELS[key] || key;
+}
+function parseRuleAmount(value) {
+  if (value === null || value === undefined || value === "") return null;
+  // Invoice rows can carry currency-formatted amounts ("¥ 103.00").
+  const cleaned = String(value).replace(/[¥￥元,\s]/g, "");
+  if (!cleaned) return null;
+  const number = Number(cleaned);
+  return Number.isFinite(number) ? number : null;
+}
+function ruleAmountInputValue(value) {
+  const number = parseRuleAmount(value);
+  return number === null ? "" : String(number);
+}
+function normalizeRuleAmountRange(value) {
+  if (!Array.isArray(value) || value.length === 0) return [];
+  const min = value.length > 0 ? parseRuleAmount(value[0]) : null;
+  const max = value.length > 1 ? parseRuleAmount(value[1]) : null;
+  if (min === null && max === null) return [];
+  return [min, max];
+}
+function buildRuleAmountRange(minText, maxText) {
+  const min = parseRuleAmount(minText);
+  const max = parseRuleAmount(maxText);
+  if (min === null && max === null) return [];
+  return [min, max];
+}
+function splitRuleKeywords(value) {
+  const tokens = String(value || "").split(/[,，、;；\n\r]+/);
+  const keywords = [];
+  tokens.forEach(token => {
+    const text = token.trim();
+    if (text && keywords.indexOf(text) === -1) keywords.push(text);
+  });
+  return keywords;
+}
+function formatRuleAmountBound(value) {
+  const number = parseRuleAmount(value);
+  if (number === null) return "";
+  // Mirrors the backend Decimal trimming: 100.0 -> "100", 100.50 -> "100.5".
+  return String(number);
+}
+function amountRangeFolderSuffix(amountRange) {
+  const range = normalizeRuleAmountRange(amountRange);
+  if (range.length === 0) return "";
+  const min = range[0];
+  const max = range[1];
+  const minText = formatRuleAmountBound(min);
+  const maxText = formatRuleAmountBound(max);
+  if (min !== null && max !== null && min === max) return minText;
+  if (min !== null && max === null) return `${minText}以上`;
+  if (min === null && max !== null) return `${maxText}以下`;
+  if (min !== null && max !== null) {
+    if (min < 0 || max < 0) return `${minText}至${maxText}`;
+    return `${minText}-${maxText}`;
+  }
+  return "";
+}
+function buildRuleFolderName(targetType, amountRange) {
+  const typeName = String(targetType || "").trim();
+  if (!typeName) return "";
+  const suffix = amountRangeFolderSuffix(amountRange);
+  return suffix ? `${typeName}-${suffix}` : typeName;
+}
+function formatRuleAmountRangeLabel(amountRange) {
+  const range = normalizeRuleAmountRange(amountRange);
+  if (range.length === 0) return "不限金额";
+  const min = range[0];
+  const max = range[1];
+  const minText = formatRuleAmountBound(min);
+  const maxText = formatRuleAmountBound(max);
+  if (min !== null && max !== null && min === max) return `${minText} 元`;
+  if (min !== null && max === null) return `${minText} 元以上`;
+  if (min === null && max !== null) return `${maxText} 元以下`;
+  if (min !== null && max !== null) {
+    return min < 0 || max < 0 ? `${minText} 至 ${maxText} 元` : `${minText}-${maxText} 元`;
+  }
+  return "不限金额";
+}
+function formatRuleInvoiceAmountLabel(value) {
+  const raw = String(value === null || value === undefined ? "" : value).trim();
+  if (!raw) return "--";
+  const number = parseRuleAmount(raw);
+  if (number === null) return raw;
+  return `${number.toFixed(2)} 元`;
+}
+function cleanRuleLocationFile(file) {
+  // Draft-preview source labels may append a trailing parenthetical suffix;
+  // strip it so only the real rule file path is shown to the user.
+  return String(file || "").replace(/（[^（）]*）$/, "").trim();
+}
+function ruleLocationText(file, line) {
+  const cleaned = cleanRuleLocationFile(file);
+  const name = cleaned ? fileNameFromPath(cleaned) : "";
+  const lineNumber = Number(line || 0);
+  if (!name) return "";
+  return lineNumber > 0 ? `${name}:${lineNumber}` : name;
+}
+function ruleLocationTitle(file, line) {
+  const name = cleanRuleLocationFile(file);
+  const lineNumber = Number(line || 0);
+  if (!name) return "";
+  return lineNumber > 0 ? `${name}:${lineNumber}` : name;
+}
+function nextRuleCategoryId(existing) {
+  const used = new Set((existing || []).map(item => String(item && item.id || "")));
+  let index = 1;
+  while (used.has(`rule_${index}`)) index += 1;
+  return `rule_${index}`;
+}
+function normalizeRuleIssues(value) {
+  const issues = [];
+  (Array.isArray(value) ? value : []).forEach(item => {
+    if (!item) return;
+    if (typeof item === "string") {
+      const text = item.trim();
+      if (text) issues.push({
+        file: "",
+        line: 0,
+        message: text,
+        severity: "error",
+        text
+      });
+      return;
+    }
+    const file = String(item.file || "");
+    const line = Number(item.line || 0);
+    const message = String(item.message || item.text || "");
+    const severity = String(item.severity || "error").toLowerCase() === "warning" ? "warning" : "error";
+    const location = file ? ruleLocationTitle(file, line) : "";
+    const text = String(item.text || "").trim() || (location && message ? `${location}: ${message}` : location || message);
+    if (message || text) issues.push({
+      file,
+      line,
+      message,
+      severity,
+      text
+    });
+  });
+  return issues;
+}
+function cloneRuleTerm(term, scope) {
+  const source = term || {};
+  return {
+    term: String(source.term || source.seller_name || source.seller_tin || ""),
+    category: String(source.category || ""),
+    source_layer: String(source.source_layer || scope || ""),
+    source_file: String(source.source_file || ""),
+    source_line: Number(source.source_line || 0)
+  };
+}
+function normalizeRuleTermEntries(value, scope) {
+  const entries = [];
+  if (Array.isArray(value)) {
+    value.forEach(item => entries.push(cloneRuleTerm(item, scope)));
+  } else if (value && typeof value === "object") {
+    Object.keys(value).forEach(term => {
+      entries.push(cloneRuleTerm({
+        term,
+        category: value[term]
+      }, scope));
+    });
+  }
+  return entries.filter(item => item.term);
+}
+function toSaveRuleTerm(term) {
+  const source = term || {};
+  return {
+    term: String(source.term || "").trim(),
+    category: String(source.category || "").trim()
+  };
+}
+function normalizeUserRuleEntry(entry) {
+  const source = entry || {};
+  const keywords = (Array.isArray(source.keywords) ? source.keywords : []).map(item => String(item).trim()).filter(Boolean);
+  const legacyInvoiceTypes = (Array.isArray(source.invoice_types) ? source.invoice_types : []).map(item => String(item).trim()).filter(Boolean);
+  let targetType = String(source.target_type || "").trim();
+  // Legacy rules saved before target types existed: a single invoice type is
+  // the only unambiguous migration hint. Anything else requires the user to pick.
+  if (!targetType && legacyInvoiceTypes.length === 1) targetType = legacyInvoiceTypes[0];
+  return {
+    id: String(source.id || ""),
+    name: String(source.name || ""),
+    target_type: targetType,
+    keywords,
+    mainKeyword: keywords[0] || "",
+    legacyExtraKeywords: keywords.slice(1),
+    amount_range: normalizeRuleAmountRange(source.amount_range),
+    enabled: source.enabled !== false,
+    match: String(source.match || ""),
+    exclude_keywords: (Array.isArray(source.exclude_keywords) ? source.exclude_keywords : []).map(item => String(item)).filter(Boolean)
+  };
+}
+function normalizeBuiltinOverride(entry, documentTypes) {
+  const source = entry || {};
+  // Builtin defaults have no target_type; their archive folder is the
+  // recognized type used as the default target. Legacy overrides may carry an
+  // invalid folder, which requires the user to pick a target type again.
+  const candidate = String(source.target_type || source.archive_folder || "").trim();
+  const targetType = isValidRuleTargetType(candidate, documentTypes) ? candidate : "";
+  return {
+    id: String(source.id || ""),
+    target_type: targetType,
+    keywords: (Array.isArray(source.keywords) ? source.keywords : []).map(item => String(item).trim()).filter(Boolean),
+    amount_range: normalizeRuleAmountRange(source.amount_range),
+    enabled: source.enabled !== false
+  };
+}
+function buildUserRuleDraft(scopeData, scope, builtinIds, documentTypes) {
+  const data = scopeData || {};
+  const builtinIdSet = new Set((builtinIds || []).map(item => String(item)));
+  const categories = [];
+  const builtinOverrides = [];
+  (Array.isArray(data.categories) ? data.categories : []).forEach(item => {
+    const id = String(item && item.id || "");
+    if (id && builtinIdSet.has(id)) builtinOverrides.push(normalizeBuiltinOverride(item, documentTypes));else categories.push(normalizeUserRuleEntry(item));
+  });
+  return {
+    categories,
+    builtinOverrides,
+    terms: normalizeRuleTermEntries(data.terms, scope),
+    fallback: String(data.fallback || "")
+  };
+}
+function toSaveUserRule(entry) {
+  const source = entry || {};
+  const keyword = String(source.mainKeyword || "").trim();
+  const targetType = String(source.target_type || "").trim();
+  const extraKeywords = (Array.isArray(source.legacyExtraKeywords) ? source.legacyExtraKeywords : []).map(item => String(item).trim()).filter(item => item && item !== keyword);
+  const payload = {
+    id: String(source.id || "").trim(),
+    name: String(source.name || "").trim() || buildRuleFolderName(targetType, source.amount_range) || keyword,
+    target_type: targetType,
+    keywords: [keyword].concat(extraKeywords),
+    amount_range: normalizeRuleAmountRange(source.amount_range),
+    enabled: source.enabled !== false
+  };
+  // Legacy fields stay in the saved payload but are not shown in the editor.
+  if (source.match) payload.match = String(source.match);
+  if (Array.isArray(source.exclude_keywords) && source.exclude_keywords.length > 0) {
+    payload.exclude_keywords = source.exclude_keywords.map(item => String(item));
+  }
+  return payload;
+}
+function toSaveBuiltinOverride(entry) {
+  const source = entry || {};
+  // Builtin overrides only carry the target-type rule fields. The builtin
+  // invoice_types gate and default name/folder are inherited on load.
+  return {
+    id: String(source.id || "").trim(),
+    target_type: String(source.target_type || "").trim(),
+    keywords: (Array.isArray(source.keywords) ? source.keywords : []).map(item => String(item)),
+    amount_range: normalizeRuleAmountRange(source.amount_range),
+    enabled: source.enabled !== false
+  };
+}
+function isValidRuleTargetType(value, documentTypes) {
+  const text = String(value || "").trim();
+  if (!text) return false;
+  if (!Array.isArray(documentTypes) || documentTypes.length === 0) return true;
+  return documentTypes.indexOf(text) >= 0;
+}
+function ruleEntryPreviewFolder(entry) {
+  return buildRuleFolderName(entry && entry.target_type, entry && entry.amount_range);
+}
+function buildRuleCategoryNameMap(entries) {
+  const map = {};
+  (entries || []).forEach(item => {
+    const id = String(item && item.id || "");
+    if (id) map[id] = String(item && (item.name || item.archive_folder) || id);
+  });
+  return map;
+}
+function describeRuleChainStep(step, categoryNameById) {
+  if (!step || typeof step !== "object") return "";
+  const lookupCategory = value => {
+    const key = String(value || "");
+    if (!key) return "";
+    const map = categoryNameById || {};
+    const name = map[key];
+    return name ? `${name}` : key;
+  };
+  const stage = String(step.stage || "");
+  if (stage === "input") {
+    const parts = [];
+    if (step.seller) parts.push(`销售方「${step.seller}」`);
+    if (step.seller_tin) parts.push(`税号「${step.seller_tin}」`);
+    if (step.item) parts.push(`明细「${step.item}」`);
+    const typeText = String(step.normalized_type || step.type || "");
+    if (typeText) parts.push(`票种「${typeText}」`);
+    const amountText = step.amount === null || step.amount === undefined ? "" : String(step.amount);
+    if (amountText) parts.push(`金额 ${amountText}`);
+    return `读取字段：${parts.length > 0 ? parts.join("，") : "没有可用字段"}`;
+  }
+  if (stage === "dictionary") {
+    if (!step.hit) return "销售方词典：未命中";
+    const kindText = step.kind === "seller_tin" ? "销售方税号" : step.kind === "seller_name" ? "销售方名称" : "销售方";
+    return `销售方词典：${kindText}「${safeText(step.term, "")}」归入 ${lookupCategory(step.category) || "对应规则"}`;
+  }
+  if (stage === "rule") {
+    const target = lookupCategory(step.rule_id) || safeText(step.rule_id, "规则");
+    if (step.hit) {
+      const keywordText = step.keyword ? `关键词「${step.keyword}」` : "匹配条件";
+      return `规则「${target}」命中${keywordText}`;
+    }
+    const reason = RULE_CHAIN_REASON_LABELS[String(step.reason || "")] || "";
+    return reason ? `规则「${target}」未命中：${reason}` : "";
+  }
+  if (stage === "rule_scan") {
+    const evaluated = Number(step.evaluated || 0);
+    const skipped = Number(step.disabled_skipped || 0);
+    return `按列表顺序检查 ${evaluated} 条启用规则${skipped > 0 ? `，跳过 ${skipped} 条停用规则` : ""}`;
+  }
+  if (stage === "type_fallback") {
+    if (step.hit) return `票种兜底：${safeText(step.invoice_type, "该票种")} 归入 ${lookupCategory(step.category) || "对应类目"}`;
+    return "";
+  }
+  if (stage === "result") {
+    return `最终归类：${classificationSourceLabel(step.source)}${step.category ? ` → ${lookupCategory(step.category) || step.category}` : ""}`;
+  }
+  if (stage === "fallback") {
+    return `使用兜底类目 ${lookupCategory(step.category) || safeText(step.category, "默认类目")}`;
+  }
+  return "";
+}
+function emptyUserRuleEditor() {
+  return {
+    mode: "new",
+    id: "",
+    originalId: "",
+    error: "",
+    targetType: "",
+    keyword: "",
+    amountMin: "",
+    amountMax: "",
+    enabled: true,
+    legacyMatch: "",
+    legacyExcludeKeywords: [],
+    legacyExtraKeywords: [],
+    name: ""
+  };
+}
+function userRuleEditorFromEntry(entry) {
+  const source = entry || {};
+  const range = normalizeRuleAmountRange(source.amount_range);
+  return {
+    mode: "edit",
+    id: String(source.id || ""),
+    originalId: String(source.id || ""),
+    error: "",
+    targetType: String(source.target_type || ""),
+    keyword: String(source.mainKeyword || ""),
+    amountMin: range.length > 0 ? ruleAmountInputValue(range[0]) : "",
+    amountMax: range.length > 1 ? ruleAmountInputValue(range[1]) : "",
+    enabled: source.enabled !== false,
+    legacyMatch: String(source.match || ""),
+    legacyExcludeKeywords: (Array.isArray(source.exclude_keywords) ? source.exclude_keywords : []).map(item => String(item)),
+    legacyExtraKeywords: (Array.isArray(source.legacyExtraKeywords) ? source.legacyExtraKeywords : []).map(item => String(item)),
+    name: String(source.name || "")
+  };
+}
 function joinClasses(...values) {
   return values.filter(Boolean).join(" ");
 }
@@ -407,7 +843,7 @@ function buildPersistPayload(settings, runSettings, runContext) {
   return payload;
 }
 async function loadShellState() {
-  const [settingsRes, runContextRes] = await Promise.all([callApi("load_user_settings"), callApi("get_run_context").catch(() => ({}))]);
+  const [settingsRes, runContextRes, rulesStatusRes] = await Promise.all([callApi("load_user_settings"), callApi("get_run_context").catch(() => ({})), callApi("get_classification_rules_status").catch(() => ({}))]);
   const storedPayload = Object.assign({}, DEFAULT_SETTINGS, DEFAULT_RUN_SETTINGS, settingsRes && settingsRes.settings || {});
   const sessionSettings = readSessionValue(SESSION_SETTINGS_KEY);
   const sessionRunSettings = readSessionValue(SESSION_RUN_SETTINGS_KEY);
@@ -446,7 +882,8 @@ async function loadShellState() {
   return {
     settings,
     runSettings,
-    runContext
+    runContext,
+    rulesStatus: rulesStatusRes || {}
   };
 }
 async function persistUserSettings(settings, runSettings, runContext) {
@@ -1013,6 +1450,7 @@ function SettingsPage({
   const [bootstrapState, setBootstrapState] = useState("bootstrapping");
   const [bootstrapError, setBootstrapError] = useState("");
   const [starting, setStarting] = useState(false);
+  const [rulesStatus, setRulesStatus] = useState({});
   const saveTimerRef = useRef(null);
   const autostartTimerRef = useRef(null);
   const autostartTriggeredRef = useRef(false);
@@ -1025,6 +1463,7 @@ function SettingsPage({
         setSettings(state.settings);
         setRunSettings(state.runSettings);
         setRunContext(state.runContext);
+        setRulesStatus(state.rulesStatus || {});
         setBootstrapError("");
         setBootstrapState("bootstrapped");
       } catch (error) {
@@ -1066,6 +1505,8 @@ function SettingsPage({
   const startButtonLabel = isLocalMode ? "开始整理" : isFetchMode ? "开始提取" : "开始处理";
   const startButtonIcon = "play_arrow";
   const canStart = isLocalMode ? !!localInputDir : !validateEmail(settings.email) && !!settings.auth_code && (isFetchMode || !!String(settings.company || "").trim()) && !!String(settings.save_path || "").trim() && !dateError;
+  const rulesIssues = normalizeRuleIssues(rulesStatus && rulesStatus.issues);
+  const rulesLibraryAvailable = !!(rulesStatus && rulesStatus.library_available);
   useEffect(() => {
     if (bootstrapState !== "bootstrapped" || starting || autostartTriggeredRef.current || !shouldAutostartControlledRun(runContext)) return undefined;
     if (isControlledAutostartConsumed(runContext)) {
@@ -1480,7 +1921,44 @@ function SettingsPage({
     className: "engine-item__tag"
   }, "\u5185\u7F6E")))), /*#__PURE__*/React.createElement("p", {
     className: "field-help"
-  }, "\u65E0\u9700\u8054\u7F51\u3001\u65E0\u9700\u586B\u5199\u5BC6\u94A5\uFF0C\u652F\u6301\u7535\u5B50\u53D1\u7968\u3001OFD \u7248\u5F0F\u6587\u4EF6\u4E0E\u626B\u63CF\u4EF6\u7684\u672C\u5730\u89E3\u6790\uFF0C\u7968\u636E\u5185\u5BB9\u4E0D\u4F1A\u4E0A\u4F20\u3002"))), isLocalMode ? null : /*#__PURE__*/React.createElement("section", {
+  }, "\u65E0\u9700\u8054\u7F51\u3001\u65E0\u9700\u586B\u5199\u5BC6\u94A5\uFF0C\u652F\u6301\u7535\u5B50\u53D1\u7968\u3001OFD \u7248\u5F0F\u6587\u4EF6\u4E0E\u626B\u63CF\u4EF6\u7684\u672C\u5730\u89E3\u6790\uFF0C\u7968\u636E\u5185\u5BB9\u4E0D\u4F1A\u4E0A\u4F20\u3002"))), /*#__PURE__*/React.createElement("section", {
+    className: "surface-card"
+  }, /*#__PURE__*/React.createElement(SectionHeader, {
+    icon: "rule",
+    title: "\u8D39\u7528\u5F52\u7C7B\u89C4\u5219",
+    indicator: rulesIssues.length > 0 ? /*#__PURE__*/React.createElement(StatusPill, {
+      tone: "warning",
+      icon: "warning"
+    }, `${rulesIssues.length} 条提示`) : /*#__PURE__*/React.createElement(StatusPill, {
+      tone: "success",
+      icon: "rule"
+    }, rulesLibraryAvailable ? "含发票库规则" : "使用全局规则")
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "card-stack card-stack--compact"
+  }, /*#__PURE__*/React.createElement("p", {
+    className: "field-help"
+  }, "\u6309\u76EE\u6807\u7968\u79CD\u3001\u5173\u952E\u8BCD\u4E0E\u91D1\u989D\u8303\u56F4\u751F\u6210\u5F52\u6863\u6587\u4EF6\u5939\uFF1B\u4FDD\u5B58\u540E\u7684\u89C4\u5219\u5728\u4E0B\u4E00\u6B21\u6574\u7406\u65F6\u751F\u6548\u3002"), rulesIssues.length > 0 ? /*#__PURE__*/React.createElement(NoticeBox, {
+    tone: "warning"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "rule-issues"
+  }, /*#__PURE__*/React.createElement("p", {
+    className: "rule-issues__title"
+  }, "\u5F52\u7C7B\u89C4\u5219\u914D\u7F6E\u9700\u8981\u786E\u8BA4"), /*#__PURE__*/React.createElement("ul", {
+    className: "rule-issue-list"
+  }, rulesIssues.slice(0, 3).map((issue, index) => /*#__PURE__*/React.createElement("li", {
+    key: `${issue.text}-${index}`,
+    className: "rule-issue-item"
+  }, issue.text))), /*#__PURE__*/React.createElement("p", {
+    className: "field-help"
+  }, "\u8BF7\u8FDB\u5165\u5F52\u7C7B\u89C4\u5219\u9875\u4FEE\u6B63\uFF0C\u6216\u5728\u89C4\u5219\u76EE\u5F55\u4E2D\u76F4\u63A5\u7F16\u8F91\u89C4\u5219\u6587\u4EF6\u3002"))) : null, /*#__PURE__*/React.createElement("div", {
+    className: "footer-cluster"
+  }, /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn--secondary btn--sm",
+    onClick: () => navigate("/rules")
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "material-symbols-outlined"
+  }, "rule"), /*#__PURE__*/React.createElement("span", null, "\u7BA1\u7406\u5F52\u7C7B\u89C4\u5219"))))), isLocalMode ? null : /*#__PURE__*/React.createElement("section", {
     className: "surface-card surface-card--compact settings-date-card"
   }, /*#__PURE__*/React.createElement(SectionHeader, {
     icon: "calendar_month",
@@ -1915,6 +2393,908 @@ function ResultActionBanner({
     className: "material-symbols-outlined"
   }, icon), /*#__PURE__*/React.createElement("span", null, buttonLabel)));
 }
+function RuleIssues({
+  issues,
+  title = "规则校验未通过",
+  tone = "error"
+}) {
+  const items = normalizeRuleIssues(issues);
+  if (items.length === 0) return null;
+  return /*#__PURE__*/React.createElement(NoticeBox, {
+    tone: tone
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "rule-issues"
+  }, /*#__PURE__*/React.createElement("p", {
+    className: "rule-issues__title"
+  }, title), /*#__PURE__*/React.createElement("ul", {
+    className: "rule-issue-list"
+  }, items.map((issue, index) => /*#__PURE__*/React.createElement("li", {
+    key: `${issue.text}-${index}`,
+    className: "rule-issue-item",
+    title: ruleLocationTitle(issue.file, issue.line)
+  }, issue.text)))));
+}
+function RuleEditor({
+  editor,
+  documentTypes,
+  onChange,
+  onCreateType,
+  onCommit,
+  onCancel
+}) {
+  const [creatingType, setCreatingType] = useState(false);
+  const [typeName, setTypeName] = useState("");
+  const [typeError, setTypeError] = useState("");
+  const [typeBusy, setTypeBusy] = useState(false);
+  if (!editor) {
+    return /*#__PURE__*/React.createElement("div", {
+      className: "rules-empty-state"
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "material-symbols-outlined"
+    }, "edit_note"), /*#__PURE__*/React.createElement("p", null, "\u9009\u62E9\u4E00\u6761\u89C4\u5219\u7F16\u8F91\uFF0C\u6216\u65B0\u589E\u4E00\u6761\u89C4\u5219\u3002"));
+  }
+  const previewFolder = buildRuleFolderName(editor.targetType, buildRuleAmountRange(editor.amountMin, editor.amountMax));
+  const typeOptions = [{
+    value: "",
+    label: "请选择目标票种"
+  }].concat(documentTypes.map(type => ({
+    value: type,
+    label: type
+  })));
+  async function handleCreateType() {
+    const name = typeName.trim();
+    if (!name) {
+      setTypeError("请填写票种名称。");
+      return;
+    }
+    if (typeBusy) return;
+    setTypeBusy(true);
+    try {
+      const result = await onCreateType(name);
+      if (!result || result.success !== true) {
+        const issueText = result && Array.isArray(result.issues) && result.issues.length > 0 ? String(result.issues[0].text || result.issues[0].message || "") : "";
+        setTypeError(issueText || result && result.message || "新建票种失败，请稍后重试。");
+        return;
+      }
+      setCreatingType(false);
+      setTypeName("");
+      setTypeError("");
+      onChange({
+        targetType: String(result.name || name)
+      });
+    } finally {
+      setTypeBusy(false);
+    }
+  }
+  function handleCancelCreateType() {
+    setCreatingType(false);
+    setTypeName("");
+    setTypeError("");
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    className: "card-stack card-stack--compact"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "rules-editor-grid"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "field-block field-block--wide"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "field-label"
+  }, "\u76EE\u6807\u7968\u79CD ", /*#__PURE__*/React.createElement("span", {
+    className: "field-required"
+  }, "*")), /*#__PURE__*/React.createElement("div", {
+    className: "rule-target-row"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "rule-target-select"
+  }, /*#__PURE__*/React.createElement(DarkSelect, {
+    value: editor.targetType,
+    options: typeOptions,
+    onChange: value => onChange({
+      targetType: value
+    }),
+    ariaLabel: "\u76EE\u6807\u7968\u79CD"
+  })), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn--ghost btn--sm",
+    onClick: () => {
+      setCreatingType(true);
+      setTypeError("");
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "material-symbols-outlined"
+  }, "add"), /*#__PURE__*/React.createElement("span", null, "\u65B0\u5EFA\u7968\u79CD"))), creatingType ? /*#__PURE__*/React.createElement("div", {
+    className: "rule-type-create"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "field-shell",
+    style: {
+      flex: 1,
+      minWidth: 140
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "field-icon material-symbols-outlined"
+  }, "category"), /*#__PURE__*/React.createElement("input", {
+    type: "text",
+    className: "field-input",
+    placeholder: "\u8F93\u5165\u65B0\u7968\u79CD\u540D\u79F0\uFF0C\u5982 \u4F1A\u8BAE",
+    value: typeName,
+    onChange: event => {
+      setTypeName(event.target.value);
+      setTypeError("");
+    },
+    autoFocus: true
+  })), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn--primary btn--sm",
+    onClick: handleCreateType,
+    disabled: typeBusy
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "material-symbols-outlined"
+  }, typeBusy ? "sync" : "check"), /*#__PURE__*/React.createElement("span", null, typeBusy ? "创建中..." : "确认新建")), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn--ghost btn--sm",
+    onClick: handleCancelCreateType,
+    disabled: typeBusy
+  }, /*#__PURE__*/React.createElement("span", null, "\u53D6\u6D88"))) : null, typeError ? /*#__PURE__*/React.createElement("p", {
+    className: "field-help field-help--error"
+  }, typeError) : null, /*#__PURE__*/React.createElement("p", {
+    className: "field-help"
+  }, RULE_TARGET_TYPE_HELP)), /*#__PURE__*/React.createElement("div", {
+    className: "field-block field-block--wide"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "field-label"
+  }, "\u5173\u952E\u8BCD ", /*#__PURE__*/React.createElement("span", {
+    className: "field-required"
+  }, "*")), /*#__PURE__*/React.createElement("div", {
+    className: "field-shell"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "field-icon material-symbols-outlined"
+  }, "key"), /*#__PURE__*/React.createElement("input", {
+    type: "text",
+    className: "field-input",
+    placeholder: "\u5982 \u6EF4\u6EF4\u3001\u661F\u5DF4\u514B\u3001\u67D0\u67D0\u9152\u5E97",
+    value: editor.keyword,
+    onChange: event => onChange({
+      keyword: event.target.value
+    })
+  })), /*#__PURE__*/React.createElement("p", {
+    className: "field-help"
+  }, "\u53D1\u7968\u7684\u9500\u552E\u65B9\u6216\u660E\u7EC6\u5305\u542B\u8BE5\u5173\u952E\u8BCD\u65F6\u547D\u4E2D\u672C\u89C4\u5219\u3002")), /*#__PURE__*/React.createElement("div", {
+    className: "field-block"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "field-label"
+  }, "\u91D1\u989D\u4E0B\u9650"), /*#__PURE__*/React.createElement("div", {
+    className: "field-shell"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "text",
+    inputMode: "decimal",
+    className: "field-input u-tabular",
+    placeholder: "\u4E0D\u9650",
+    value: editor.amountMin,
+    onChange: event => onChange({
+      amountMin: event.target.value
+    })
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "field-block"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "field-label"
+  }, "\u91D1\u989D\u4E0A\u9650"), /*#__PURE__*/React.createElement("div", {
+    className: "field-shell"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "text",
+    inputMode: "decimal",
+    className: "field-input u-tabular",
+    placeholder: "\u4E0D\u9650",
+    value: editor.amountMax,
+    onChange: event => onChange({
+      amountMax: event.target.value
+    })
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "field-block"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "field-label"
+  }, "\u542F\u7528"), /*#__PURE__*/React.createElement("label", {
+    className: "toggle-row"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    checked: editor.enabled !== false,
+    onChange: event => onChange({
+      enabled: event.target.checked
+    })
+  }), /*#__PURE__*/React.createElement("span", null, editor.enabled !== false ? "已启用" : "已停用"))), /*#__PURE__*/React.createElement("div", {
+    className: "field-block field-block--wide"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "field-label"
+  }, "\u5F52\u6863\u5230"), /*#__PURE__*/React.createElement("div", {
+    className: "rule-archive-summary"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "material-symbols-outlined"
+  }, "folder"), /*#__PURE__*/React.createElement("span", null, previewFolder ? `归档到：${previewFolder}` : "请选择目标票种，并填写关键词和金额范围")), /*#__PURE__*/React.createElement("p", {
+    className: "field-help"
+  }, "\u6587\u4EF6\u5939\u7531\u76EE\u6807\u7968\u79CD\u548C\u91D1\u989D\u8303\u56F4\u81EA\u52A8\u751F\u6210\uFF0C\u4E0D\u9700\u8981\u624B\u52A8\u586B\u5199\uFF1B\u4FDD\u5B58\u540E\u751F\u6548\u3002"))), editor.error ? /*#__PURE__*/React.createElement(NoticeBox, {
+    tone: "error"
+  }, editor.error) : null, /*#__PURE__*/React.createElement("div", {
+    className: "footer-cluster"
+  }, /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn--primary btn--sm",
+    onClick: onCommit
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "material-symbols-outlined"
+  }, "check"), /*#__PURE__*/React.createElement("span", null, editor.mode === "new" ? "添加规则" : "保存修改")), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn--ghost btn--sm",
+    onClick: onCancel
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "material-symbols-outlined"
+  }, "close"), /*#__PURE__*/React.createElement("span", null, "\u53D6\u6D88"))));
+}
+function RuleTestResult({
+  result,
+  categoryNameById,
+  targetTypeById
+}) {
+  if (!result) return null;
+  const unknown = String(result.source || "") === "unknown" || !String(result.category_id || "").trim();
+  if (unknown) {
+    return /*#__PURE__*/React.createElement(NoticeBox, {
+      tone: "warning"
+    }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("p", {
+      className: "rule-test-result__unknown"
+    }, "\u5C06\u8FDB\u5165\u5F85\u4EBA\u5DE5\u590D\u6838"), /*#__PURE__*/React.createElement("p", {
+      className: "field-help"
+    }, "\u8FD9\u5F20\u53D1\u7968\u6CA1\u6709\u547D\u4E2D\u4EFB\u4F55\u5DF2\u542F\u7528\u89C4\u5219\uFF0C\u6574\u7406\u65F6\u4F1A\u653E\u5165\u300C\u5F85\u4EBA\u5DE5\u590D\u6838\u300D\u6587\u4EF6\u5939\u3002")));
+  }
+  const categoryId = String(result.category_id || "");
+  const targetType = String(result.target_type || (targetTypeById || {})[categoryId] || "");
+  const chainSteps = (Array.isArray(result.chain) ? result.chain : []).map(step => describeRuleChainStep(step, categoryNameById)).filter(Boolean).slice(0, 10);
+  return /*#__PURE__*/React.createElement("div", {
+    className: "rule-test-result"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "rule-category-row__title"
+  }, /*#__PURE__*/React.createElement(StatusPill, {
+    tone: "success",
+    icon: "task_alt"
+  }, safeText(result.category_name, safeText(result.archive_folder, "已归类"))), targetType ? /*#__PURE__*/React.createElement("span", {
+    className: "rule-target-tag",
+    title: `目标票种：${targetType}`
+  }, targetType) : null), /*#__PURE__*/React.createElement("div", {
+    className: "rules-kv-list"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "rules-kv"
+  }, /*#__PURE__*/React.createElement("span", null, "\u76EE\u6807\u7968\u79CD"), /*#__PURE__*/React.createElement("strong", null, targetType || "--")), /*#__PURE__*/React.createElement("div", {
+    className: "rules-kv"
+  }, /*#__PURE__*/React.createElement("span", null, "\u5F52\u6863\u5230"), /*#__PURE__*/React.createElement("strong", {
+    className: "u-mono"
+  }, safeText(result.archive_folder, "--"))), /*#__PURE__*/React.createElement("div", {
+    className: "rules-kv"
+  }, /*#__PURE__*/React.createElement("span", null, "\u547D\u4E2D\u5173\u952E\u8BCD"), /*#__PURE__*/React.createElement("strong", null, safeText(result.keyword, "--"))), /*#__PURE__*/React.createElement("div", {
+    className: "rules-kv"
+  }, /*#__PURE__*/React.createElement("span", null, "\u89C4\u5219\u4F4D\u7F6E"), /*#__PURE__*/React.createElement("strong", {
+    className: "u-mono"
+  }, ruleLocationText(result.source_file, result.source_line) || "--")), /*#__PURE__*/React.createElement("div", {
+    className: "rules-kv"
+  }, /*#__PURE__*/React.createElement("span", null, "\u5F52\u7C7B\u6765\u6E90"), /*#__PURE__*/React.createElement("strong", null, classificationSourceLabel(result.source)))), chainSteps.length > 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "rule-chain-block"
+  }, /*#__PURE__*/React.createElement("p", {
+    className: "field-label"
+  }, "\u5339\u914D\u8FC7\u7A0B"), /*#__PURE__*/React.createElement("div", {
+    className: "rule-chain"
+  }, chainSteps.map((step, index) => /*#__PURE__*/React.createElement("span", {
+    key: `${index}-${step}`,
+    className: "rule-chain__step"
+  }, step)))) : null);
+}
+function RuleDictionarySection({
+  terms,
+  categoryOptions,
+  scope,
+  onAddTerm,
+  onDeleteTerm
+}) {
+  const [termText, setTermText] = useState("");
+  const [category, setCategory] = useState("");
+  const [error, setError] = useState("");
+  const categoryNameById = useMemo(() => {
+    const map = {};
+    (categoryOptions || []).forEach(item => {
+      const id = String(item && item.id || "");
+      if (!id) return;
+      map[id] = buildRuleFolderName(item.target_type, item.amount_range) || String(item.name || item.archive_folder || id);
+    });
+    return map;
+  }, [categoryOptions]);
+  const selectOptions = useMemo(() => {
+    const options = [{
+      value: "",
+      label: "选择规则"
+    }];
+    (categoryOptions || []).forEach(item => {
+      const id = String(item && item.id || "");
+      if (!id) return;
+      const name = buildRuleFolderName(item.target_type, item.amount_range) || String(item.name || "");
+      options.push({
+        value: id,
+        label: name ? `${name}（${id}）` : id
+      });
+    });
+    return options;
+  }, [categoryOptions]);
+  function handleAdd() {
+    const term = termText.trim();
+    if (!term) return setError("请填写销售方名称或税号。");
+    if (!category) return setError("请选择归入的规则。");
+    if ((terms || []).some(item => String(item && item.term || "").trim() === term)) {
+      return setError("该销售方已在词典中，请直接修改现有条目。");
+    }
+    setError("");
+    onAddTerm({
+      term,
+      category
+    });
+    setTermText("");
+    setCategory("");
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    className: "card-stack card-stack--compact"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "rule-dictionary-form"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "field-block"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "field-label"
+  }, "\u9500\u552E\u65B9\u540D\u79F0\u6216\u7A0E\u53F7"), /*#__PURE__*/React.createElement("div", {
+    className: "field-shell"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "text",
+    className: "field-input",
+    placeholder: "\u5982 \u67D0\u67D0\u9910\u996E\u7BA1\u7406\u6709\u9650\u516C\u53F8",
+    value: termText,
+    onChange: event => {
+      setTermText(event.target.value);
+      setError("");
+    }
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "field-block"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "field-label"
+  }, "\u5F52\u5165\u89C4\u5219"), /*#__PURE__*/React.createElement(DarkSelect, {
+    value: category,
+    options: selectOptions,
+    onChange: value => {
+      setCategory(value);
+      setError("");
+    },
+    ariaLabel: "\u8BCD\u5178\u5F52\u5165\u89C4\u5219"
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "footer-cluster"
+  }, /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn--secondary btn--sm",
+    onClick: handleAdd
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "material-symbols-outlined"
+  }, "add_circle"), /*#__PURE__*/React.createElement("span", null, "\u6DFB\u52A0\u8BCD\u5178")), /*#__PURE__*/React.createElement("span", {
+    className: "field-help"
+  }, "\u6309\u9500\u552E\u65B9\u7CBE\u786E\u5339\u914D\uFF0C\u9002\u5408\u56FA\u5B9A\u4F9B\u5E94\u5546\u3002")), error ? /*#__PURE__*/React.createElement(NoticeBox, {
+    tone: "error"
+  }, error) : null, (terms || []).length === 0 ? /*#__PURE__*/React.createElement("p", {
+    className: "field-help"
+  }, "\u8FD8\u6CA1\u6709\u9500\u552E\u65B9\u8BCD\u5178\u6761\u76EE\u3002") : /*#__PURE__*/React.createElement("div", {
+    className: "rule-dictionary-list"
+  }, terms.map((term, index) => /*#__PURE__*/React.createElement("div", {
+    key: `${term.term}-${index}`,
+    className: "rule-dictionary-row"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "rule-dictionary-row__copy"
+  }, /*#__PURE__*/React.createElement("strong", {
+    className: "u-truncate",
+    title: term.term
+  }, term.term || "未命名销售方"), /*#__PURE__*/React.createElement("span", null, "\u5F52\u5165 ", categoryNameById[String(term.category || "")] || safeText(term.category, "未指定规则"))), /*#__PURE__*/React.createElement(StatusPill, {
+    tone: "neutral"
+  }, ruleLayerLabel(term.source_layer || scope)), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "rule-icon-button",
+    title: "\u5220\u9664\u8BCD\u5178\u6761\u76EE",
+    "aria-label": `删除 ${term.term}`,
+    onClick: () => onDeleteTerm(index)
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "material-symbols-outlined"
+  }, "delete"))))));
+}
+function RuleUnclassifiedSection({
+  invoices,
+  onPrefill
+}) {
+  const rows = Array.isArray(invoices) ? invoices : [];
+  if (rows.length === 0) return null;
+  return /*#__PURE__*/React.createElement("section", {
+    className: "surface-card"
+  }, /*#__PURE__*/React.createElement(SectionHeader, {
+    icon: "help",
+    title: "\u672A\u5F52\u7C7B\u53D1\u7968",
+    indicator: /*#__PURE__*/React.createElement(StatusPill, {
+      tone: "warning",
+      icon: "warning"
+    }, "\u5F85\u8865\u5145\u89C4\u5219")
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "card-stack card-stack--compact"
+  }, /*#__PURE__*/React.createElement("p", {
+    className: "field-help"
+  }, "\u8FD9\u4E9B\u53D1\u7968\u5728\u6700\u8FD1\u4E00\u6B21\u6574\u7406\u4E2D\u6CA1\u6709\u547D\u4E2D\u4EFB\u4F55\u89C4\u5219\uFF0C\u6574\u7406\u540E\u4F1A\u8FDB\u5165\u5F85\u4EBA\u5DE5\u590D\u6838\u3002\u53EF\u6309\u53D1\u7968\u4FE1\u606F\u9884\u586B\u4E00\u6761\u89C4\u5219\uFF0C\u5E76\u9009\u62E9\u76EE\u6807\u7968\u79CD\u3002"), /*#__PURE__*/React.createElement("div", {
+    className: "rule-unclassified-list"
+  }, rows.slice(0, 20).map((row, index) => /*#__PURE__*/React.createElement("div", {
+    key: `${row.document_id || row.path || "invoice"}-${index}`,
+    className: "rule-unclassified-row"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "rule-unclassified-row__copy"
+  }, /*#__PURE__*/React.createElement("strong", {
+    className: "u-truncate",
+    title: safeText(row.merchant, "")
+  }, safeText(row.merchant, "未识别销售方")), /*#__PURE__*/React.createElement("span", null, safeText(row.type, "未知票种"), " \xB7 ", formatRuleInvoiceAmountLabel(row.amount), row.date ? ` · ${row.date}` : "")), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn--secondary btn--sm",
+    onClick: () => onPrefill(row)
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "material-symbols-outlined"
+  }, "add_circle"), /*#__PURE__*/React.createElement("span", null, "\u636E\u6B64\u65B0\u5EFA\u89C4\u5219"))))), rows.length > 20 ? /*#__PURE__*/React.createElement("p", {
+    className: "field-help"
+  }, "\u4EC5\u663E\u793A\u524D 20 \u6761\uFF0C\u5171 ", rows.length, " \u6761\u3002") : null));
+}
+function RuleBuiltinSection({
+  rows,
+  busy,
+  onEdit,
+  onToggle,
+  onRestore,
+  onRestoreAll
+}) {
+  const items = Array.isArray(rows) ? rows : [];
+  return /*#__PURE__*/React.createElement("section", {
+    className: "surface-card rules-builtin"
+  }, /*#__PURE__*/React.createElement(SectionHeader, {
+    icon: "inventory_2",
+    title: "\u5185\u7F6E\u9ED8\u8BA4\u89C4\u5219",
+    indicator: /*#__PURE__*/React.createElement(StatusPill, {
+      tone: "neutral"
+    }, `${items.length} 条 · 可覆盖`)
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "card-stack card-stack--compact"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "rules-toolbar"
+  }, /*#__PURE__*/React.createElement("p", {
+    className: "field-help"
+  }, "\u5185\u7F6E\u89C4\u5219\u53EF\u6309\u5F53\u524D\u4F5C\u7528\u8303\u56F4\u8986\u76D6\uFF1B\u76EE\u6807\u7968\u79CD\u51B3\u5B9A\u5F52\u6863\u6587\u4EF6\u5939\u548C\u5F52\u7C7B\u7ED3\u679C\uFF0C\u5185\u7F6E\u89C4\u5219\u539F\u6709\u7684\u7968\u79CD\u515C\u5E95\u6761\u4EF6\u4F1A\u81EA\u52A8\u4FDD\u7559\u3002\u672A\u547D\u4E2D\u81EA\u5B9A\u4E49\u89C4\u5219\u65F6\u6309\u5217\u8868\u987A\u5E8F\u515C\u5E95\u3002"), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn--ghost btn--sm",
+    onClick: onRestoreAll,
+    disabled: busy
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "material-symbols-outlined"
+  }, "restart_alt"), /*#__PURE__*/React.createElement("span", null, "\u5168\u90E8\u6062\u590D\u9ED8\u8BA4"))), items.length === 0 ? /*#__PURE__*/React.createElement("p", {
+    className: "field-help"
+  }, "\u6682\u672A\u83B7\u53D6\u5230\u5185\u7F6E\u89C4\u5219\u3002") : /*#__PURE__*/React.createElement("div", {
+    className: "rules-builtin-list"
+  }, items.map(row => {
+    const keywords = (Array.isArray(row.keywords) ? row.keywords : []).map(value => String(value));
+    const folderText = row.previewFolder || "请选择目标票种";
+    return /*#__PURE__*/React.createElement("div", {
+      className: "rules-builtin-row",
+      key: row.id
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "rules-builtin-row__folder u-truncate",
+      title: folderText
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "material-symbols-outlined"
+    }, "folder"), /*#__PURE__*/React.createElement("span", {
+      className: "u-truncate"
+    }, folderText), row.target_type ? /*#__PURE__*/React.createElement("span", {
+      className: "rule-target-tag",
+      title: `目标票种：${row.target_type}`
+    }, row.target_type) : /*#__PURE__*/React.createElement(StatusPill, {
+      tone: "warning"
+    }, "\u7F3A\u5C11\u76EE\u6807\u7968\u79CD")), /*#__PURE__*/React.createElement("span", {
+      className: "rules-builtin-row__keywords u-truncate",
+      title: keywords.join("、")
+    }, keywords.length > 0 ? keywords.join("、") : "无关键词"), /*#__PURE__*/React.createElement("span", {
+      className: "rules-builtin-row__badge"
+    }, /*#__PURE__*/React.createElement(StatusPill, {
+      tone: row.modified ? "warning" : "neutral"
+    }, row.modified ? "已修改" : "内置"), row.enabled === false ? /*#__PURE__*/React.createElement(StatusPill, {
+      tone: "warning"
+    }, "\u5DF2\u505C\u7528") : null), /*#__PURE__*/React.createElement("span", {
+      className: "rules-builtin-row__actions"
+    }, /*#__PURE__*/React.createElement("button", {
+      type: "button",
+      className: joinClasses("rule-icon-button", row.enabled !== false && "is-active"),
+      title: row.enabled !== false ? "停用" : "启用",
+      "aria-label": `${row.enabled !== false ? "停用" : "启用"}内置规则 ${folderText}`,
+      onClick: () => onToggle(row)
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "material-symbols-outlined"
+    }, row.enabled !== false ? "toggle_on" : "toggle_off")), /*#__PURE__*/React.createElement("button", {
+      type: "button",
+      className: "rule-icon-button",
+      title: "\u7F16\u8F91",
+      "aria-label": `编辑内置规则 ${folderText}`,
+      onClick: () => onEdit(row)
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "material-symbols-outlined"
+    }, "edit")), /*#__PURE__*/React.createElement("button", {
+      type: "button",
+      className: "rule-icon-button",
+      title: "\u6062\u590D\u9ED8\u8BA4",
+      "aria-label": `恢复默认内置规则 ${folderText}`,
+      onClick: () => onRestore(row)
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "material-symbols-outlined"
+    }, "restart_alt"))));
+  }))));
+}
+function RuleBuiltinEditor({
+  editor,
+  documentTypes,
+  onChange,
+  onCreateType,
+  onCommit,
+  onCancel
+}) {
+  const [creatingType, setCreatingType] = useState(false);
+  const [typeName, setTypeName] = useState("");
+  const [typeError, setTypeError] = useState("");
+  const [typeBusy, setTypeBusy] = useState(false);
+  if (!editor) {
+    return /*#__PURE__*/React.createElement("div", {
+      className: "rules-empty-state"
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "material-symbols-outlined"
+    }, "inventory_2"), /*#__PURE__*/React.createElement("p", null, "\u4ECE\u5185\u7F6E\u9ED8\u8BA4\u89C4\u5219\u4E2D\u9009\u62E9\u4E00\u6761\u8FDB\u884C\u8986\u76D6\u7F16\u8F91\u3002"));
+  }
+  const previewFolder = buildRuleFolderName(editor.targetType, buildRuleAmountRange(editor.amountMin, editor.amountMax));
+  const typeOptions = [{
+    value: "",
+    label: "请选择目标票种"
+  }].concat(documentTypes.map(type => ({
+    value: type,
+    label: type
+  })));
+  async function handleCreateType() {
+    const name = typeName.trim();
+    if (!name) {
+      setTypeError("请填写票种名称。");
+      return;
+    }
+    if (typeBusy) return;
+    setTypeBusy(true);
+    try {
+      const result = await onCreateType(name);
+      if (!result || result.success !== true) {
+        const issueText = result && Array.isArray(result.issues) && result.issues.length > 0 ? String(result.issues[0].text || result.issues[0].message || "") : "";
+        setTypeError(issueText || result && result.message || "新建票种失败，请稍后重试。");
+        return;
+      }
+      setCreatingType(false);
+      setTypeName("");
+      setTypeError("");
+      onChange({
+        targetType: String(result.name || name)
+      });
+    } finally {
+      setTypeBusy(false);
+    }
+  }
+  function handleCancelCreateType() {
+    setCreatingType(false);
+    setTypeName("");
+    setTypeError("");
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    className: "card-stack card-stack--compact"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "rules-editor-grid"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "field-block field-block--wide"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "field-label"
+  }, "\u76EE\u6807\u7968\u79CD ", /*#__PURE__*/React.createElement("span", {
+    className: "field-required"
+  }, "*")), /*#__PURE__*/React.createElement("div", {
+    className: "rule-target-row"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "rule-target-select"
+  }, /*#__PURE__*/React.createElement(DarkSelect, {
+    value: editor.targetType,
+    options: typeOptions,
+    onChange: value => onChange({
+      targetType: value
+    }),
+    ariaLabel: "\u76EE\u6807\u7968\u79CD"
+  })), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn--ghost btn--sm",
+    onClick: () => {
+      setCreatingType(true);
+      setTypeError("");
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "material-symbols-outlined"
+  }, "add"), /*#__PURE__*/React.createElement("span", null, "\u65B0\u5EFA\u7968\u79CD"))), creatingType ? /*#__PURE__*/React.createElement("div", {
+    className: "rule-type-create"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "field-shell",
+    style: {
+      flex: 1,
+      minWidth: 140
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "field-icon material-symbols-outlined"
+  }, "category"), /*#__PURE__*/React.createElement("input", {
+    type: "text",
+    className: "field-input",
+    placeholder: "\u8F93\u5165\u65B0\u7968\u79CD\u540D\u79F0\uFF0C\u5982 \u4F1A\u8BAE",
+    value: typeName,
+    onChange: event => {
+      setTypeName(event.target.value);
+      setTypeError("");
+    },
+    autoFocus: true
+  })), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn--primary btn--sm",
+    onClick: handleCreateType,
+    disabled: typeBusy
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "material-symbols-outlined"
+  }, typeBusy ? "sync" : "check"), /*#__PURE__*/React.createElement("span", null, typeBusy ? "创建中..." : "确认新建")), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn--ghost btn--sm",
+    onClick: handleCancelCreateType,
+    disabled: typeBusy
+  }, /*#__PURE__*/React.createElement("span", null, "\u53D6\u6D88"))) : null, typeError ? /*#__PURE__*/React.createElement("p", {
+    className: "field-help field-help--error"
+  }, typeError) : null, /*#__PURE__*/React.createElement("p", {
+    className: "field-help"
+  }, RULE_TARGET_TYPE_HELP)), /*#__PURE__*/React.createElement("div", {
+    className: "field-block field-block--wide"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "field-label"
+  }, "\u5173\u952E\u8BCD"), /*#__PURE__*/React.createElement("textarea", {
+    className: "rule-textarea",
+    placeholder: "\u591A\u4E2A\u5173\u952E\u8BCD\u7528\u9017\u53F7\u6216\u6362\u884C\u5206\u9694",
+    value: editor.keywordsText,
+    onChange: event => onChange({
+      keywordsText: event.target.value
+    })
+  }), /*#__PURE__*/React.createElement("p", {
+    className: "field-help"
+  }, "\u547D\u4E2D\u4EFB\u4E00\u5173\u952E\u8BCD\u65F6\u4F7F\u7528\u8FD9\u6761\u5185\u7F6E\u89C4\u5219\uFF1B\u7559\u7A7A\u8868\u793A\u8BE5\u89C4\u5219\u53EA\u6309\u7968\u79CD\u515C\u5E95\u3002")), /*#__PURE__*/React.createElement("div", {
+    className: "field-block"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "field-label"
+  }, "\u91D1\u989D\u4E0B\u9650"), /*#__PURE__*/React.createElement("div", {
+    className: "field-shell"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "text",
+    inputMode: "decimal",
+    className: "field-input u-tabular",
+    placeholder: "\u4E0D\u9650",
+    value: editor.amountMin,
+    onChange: event => onChange({
+      amountMin: event.target.value
+    })
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "field-block"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "field-label"
+  }, "\u91D1\u989D\u4E0A\u9650"), /*#__PURE__*/React.createElement("div", {
+    className: "field-shell"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "text",
+    inputMode: "decimal",
+    className: "field-input u-tabular",
+    placeholder: "\u4E0D\u9650",
+    value: editor.amountMax,
+    onChange: event => onChange({
+      amountMax: event.target.value
+    })
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "field-block"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "field-label"
+  }, "\u542F\u7528"), /*#__PURE__*/React.createElement("label", {
+    className: "toggle-row"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    checked: editor.enabled !== false,
+    onChange: event => onChange({
+      enabled: event.target.checked
+    })
+  }), /*#__PURE__*/React.createElement("span", null, editor.enabled !== false ? "已启用" : "已停用"))), /*#__PURE__*/React.createElement("div", {
+    className: "field-block field-block--wide"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "field-label"
+  }, "\u5F52\u6863\u5230"), /*#__PURE__*/React.createElement("div", {
+    className: "rule-archive-summary"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "material-symbols-outlined"
+  }, "folder"), /*#__PURE__*/React.createElement("span", null, previewFolder ? `归档到：${previewFolder}` : "请选择目标票种，并填写关键词和金额范围")), /*#__PURE__*/React.createElement("p", {
+    className: "field-help"
+  }, "\u6587\u4EF6\u5939\u7531\u76EE\u6807\u7968\u79CD\u548C\u91D1\u989D\u8303\u56F4\u81EA\u52A8\u751F\u6210\uFF0C\u4E0D\u9700\u8981\u624B\u52A8\u586B\u5199\uFF1B\u4FDD\u5B58\u540E\u751F\u6548\u3002"))), editor.error ? /*#__PURE__*/React.createElement(NoticeBox, {
+    tone: "error"
+  }, editor.error) : null, /*#__PURE__*/React.createElement("div", {
+    className: "footer-cluster"
+  }, /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn--primary btn--sm",
+    onClick: onCommit
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "material-symbols-outlined"
+  }, "check"), /*#__PURE__*/React.createElement("span", null, "\u4FDD\u5B58\u8986\u76D6")), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn--ghost btn--sm",
+    onClick: onCancel
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "material-symbols-outlined"
+  }, "close"), /*#__PURE__*/React.createElement("span", null, "\u53D6\u6D88"))));
+}
+function RuleRestoreDialog({
+  dialog,
+  mode,
+  busy,
+  error,
+  issues,
+  libraryAvailable,
+  scopeLabel,
+  dirty,
+  onModeChange,
+  onConfirm,
+  onCancel
+}) {
+  if (!dialog) return null;
+  return /*#__PURE__*/React.createElement("div", {
+    className: "modal-overlay",
+    onClick: onCancel
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "modal-card restore-dialog",
+    onClick: event => event.stopPropagation()
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "modal-head"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("p", {
+    className: "page-eyebrow"
+  }, "\u6062\u590D\u9ED8\u8BA4"), /*#__PURE__*/React.createElement("h2", {
+    className: "page-title",
+    style: {
+      fontSize: 26
+    }
+  }, dialog.title)), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn--ghost btn--sm",
+    onClick: onCancel,
+    "aria-label": "\u5173\u95ED"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "material-symbols-outlined"
+  }, "close"))), /*#__PURE__*/React.createElement("div", {
+    className: "modal-body"
+  }, /*#__PURE__*/React.createElement("p", {
+    className: "field-help"
+  }, "\u5C06\u5220\u9664\u5185\u7F6E\u89C4\u5219\u7684\u81EA\u5B9A\u4E49\u8986\u76D6\uFF0C\u6062\u590D\u51FA\u5382\u9ED8\u8BA4\uFF1B\u4F1A\u5148\u81EA\u52A8\u5907\u4EFD\u3002"), dirty ? /*#__PURE__*/React.createElement(NoticeBox, {
+    tone: "warning"
+  }, "\u5F53\u524D\u6709\u672A\u4FDD\u5B58\u7684\u4FEE\u6539\uFF0C\u6062\u590D\u9ED8\u8BA4\u540E\u4F1A\u91CD\u65B0\u52A0\u8F7D\u89C4\u5219\u5E76\u4E22\u5F03\u8FD9\u4E9B\u4FEE\u6539\u3002") : null, /*#__PURE__*/React.createElement("p", {
+    className: "field-label"
+  }, "\u6062\u590D\u8303\u56F4"), /*#__PURE__*/React.createElement("div", {
+    className: "restore-options",
+    role: "radiogroup",
+    "aria-label": "\u6062\u590D\u8303\u56F4"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: joinClasses("restore-option", mode === "current" && "is-selected")
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "radio",
+    name: "restore-scope",
+    checked: mode === "current",
+    onChange: () => onModeChange("current")
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "restore-option__copy"
+  }, /*#__PURE__*/React.createElement("strong", null, "\u4EC5\u5F53\u524D\u4F5C\u7528\u8303\u56F4"), /*#__PURE__*/React.createElement("span", null, `只删除当前作用范围（${scopeLabel}）内的内置覆盖`))), /*#__PURE__*/React.createElement("label", {
+    className: joinClasses("restore-option", mode === "all" && "is-selected", !libraryAvailable && "is-disabled")
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "radio",
+    name: "restore-scope",
+    checked: mode === "all",
+    onChange: () => {
+      if (libraryAvailable) onModeChange("all");
+    },
+    disabled: !libraryAvailable
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "restore-option__copy"
+  }, /*#__PURE__*/React.createElement("strong", null, "\u5168\u5C40 + \u5F53\u524D\u53D1\u7968\u5E93"), /*#__PURE__*/React.createElement("span", null, libraryAvailable ? "同时清理全局规则和当前发票库的内置覆盖" : "当前没有可用发票库，无法选择")))), error ? /*#__PURE__*/React.createElement(NoticeBox, {
+    tone: "error"
+  }, error) : null, issues && issues.length > 0 ? /*#__PURE__*/React.createElement(RuleIssues, {
+    issues: issues,
+    title: "\u6062\u590D\u672A\u5B8C\u6210"
+  }) : null), /*#__PURE__*/React.createElement("div", {
+    className: "modal-footer"
+  }, /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn--ghost",
+    onClick: onCancel,
+    disabled: busy
+  }, "\u53D6\u6D88"), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn--primary",
+    onClick: onConfirm,
+    disabled: busy
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "material-symbols-outlined"
+  }, busy ? "sync" : "restart_alt"), /*#__PURE__*/React.createElement("span", null, busy ? "恢复中..." : "确认恢复")))));
+}
+function RuleTypesManager({
+  builtinTypes,
+  customTypes,
+  issues,
+  busy,
+  onDeleteType
+}) {
+  return /*#__PURE__*/React.createElement("div", {
+    className: "rules-types-layout"
+  }, /*#__PURE__*/React.createElement("section", {
+    className: "surface-card"
+  }, /*#__PURE__*/React.createElement(SectionHeader, {
+    icon: "verified",
+    title: "\u5185\u7F6E\u7968\u79CD",
+    indicator: /*#__PURE__*/React.createElement(StatusPill, {
+      tone: "neutral"
+    }, `${builtinTypes.length} 个 · 只读`)
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "card-stack card-stack--compact"
+  }, /*#__PURE__*/React.createElement("p", {
+    className: "field-help"
+  }, "\u5185\u7F6E\u7968\u79CD\u6765\u81EA\u53D1\u7968\u8BC6\u522B\u7ED3\u679C\uFF0C\u4E0D\u80FD\u5220\u9664\u6216\u6539\u540D\u3002"), builtinTypes.length === 0 ? /*#__PURE__*/React.createElement("p", {
+    className: "field-help"
+  }, "\u6682\u672A\u83B7\u53D6\u5230\u5185\u7F6E\u7968\u79CD\u3002") : /*#__PURE__*/React.createElement("div", {
+    className: "rules-type-list"
+  }, builtinTypes.map(name => /*#__PURE__*/React.createElement("span", {
+    key: name,
+    className: "rule-type-chip"
+  }, name))))), /*#__PURE__*/React.createElement("section", {
+    className: "surface-card"
+  }, /*#__PURE__*/React.createElement(SectionHeader, {
+    icon: "category",
+    title: "\u81EA\u5B9A\u4E49\u7968\u79CD",
+    indicator: /*#__PURE__*/React.createElement(StatusPill, {
+      tone: "info"
+    }, `${customTypes.length} 个`)
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "card-stack card-stack--compact"
+  }, /*#__PURE__*/React.createElement("p", {
+    className: "field-help"
+  }, RULE_CUSTOM_TYPE_HELP), /*#__PURE__*/React.createElement("p", {
+    className: "field-help"
+  }, "\u81EA\u5B9A\u4E49\u7968\u79CD\u662F\u89C4\u5219\u7684\u76EE\u6807\u7968\u79CD\uFF1B\u5728\u89C4\u5219\u7F16\u8F91\u5668\u4E2D\u70B9\u300C\u65B0\u5EFA\u7968\u79CD\u300D\u5373\u53EF\u6DFB\u52A0\u3002"), issues && issues.length > 0 ? /*#__PURE__*/React.createElement(RuleIssues, {
+    issues: issues,
+    title: "\u7968\u79CD\u64CD\u4F5C\u672A\u5B8C\u6210"
+  }) : null, customTypes.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "rules-empty-state"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "material-symbols-outlined"
+  }, "category"), /*#__PURE__*/React.createElement("p", null, "\u8FD8\u6CA1\u6709\u81EA\u5B9A\u4E49\u7968\u79CD\uFF0C\u53EF\u5728\u89C4\u5219\u7F16\u8F91\u5668\u4E2D\u65B0\u5EFA\u3002")) : /*#__PURE__*/React.createElement("div", {
+    className: "rules-type-rows"
+  }, customTypes.map(name => /*#__PURE__*/React.createElement("div", {
+    className: "rules-type-row",
+    key: name
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "rules-type-row__name u-truncate",
+    title: name
+  }, name), /*#__PURE__*/React.createElement(StatusPill, {
+    tone: "neutral"
+  }, "\u81EA\u5B9A\u4E49"), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "rule-icon-button rule-icon-button--danger",
+    title: "\u5220\u9664\u7968\u79CD",
+    "aria-label": `删除票种 ${name}`,
+    disabled: busy,
+    onClick: () => onDeleteType(name)
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "material-symbols-outlined"
+  }, "delete"))))))));
+}
 function AnalysisPage({
   onOpenDisclaimer
 }) {
@@ -1975,6 +3355,17 @@ function AnalysisPage({
   const totalResultCount = successCount + pendingCount;
   const statusText = buildResultStatusText(successCount, manualCheckCount, retentionCount, processingErrorCount);
   const groupedVisible = groupedErrors.filter(group => Number(group.count || group.items.length || 0) > 0);
+  const classificationBreakdown = summary && summary.classification_breakdown || organizeSummary && organizeSummary.classification_counts || {};
+  const classificationSources = summary && summary.classification_source_breakdown || organizeSummary && organizeSummary.classification_source_counts || {};
+  const unclassifiedCount = Number(summary && summary.unclassified_count || organizeSummary && organizeSummary.unclassified_count || 0);
+  const classificationEntries = Object.keys(classificationBreakdown).map(name => ({
+    name: String(name || ""),
+    count: Number(classificationBreakdown[name] || 0)
+  })).filter(item => item.name && item.count > 0).sort((left, right) => right.count - left.count);
+  const classificationSourceEntries = Object.keys(classificationSources).map(source => ({
+    source: String(source || ""),
+    count: Number(classificationSources[source] || 0)
+  })).filter(item => item.source && item.count > 0).sort((left, right) => right.count - left.count);
   const isFetchResult = resultTaskMode === "fetch";
   const isLocalResult = resultTaskMode === "local";
   const localInPlace = isLocalResult && !!organizeSummary.in_place;
@@ -2071,7 +3462,6 @@ function AnalysisPage({
   return /*#__PURE__*/React.createElement(AppShell, {
     active: "analysis",
     onOpenDisclaimer: onOpenDisclaimer,
-    contentScrollable: false,
     footerLeft: /*#__PURE__*/React.createElement("button", {
       type: "button",
       className: "btn btn--ghost",
@@ -2138,13 +3528,37 @@ function AnalysisPage({
     className: "cards-grid"
   }, summaryCards.map(card => /*#__PURE__*/React.createElement(ResultSummaryCard, _extends({
     key: card.key
-  }, card)))), quotaExhausted && quotaMessage ? /*#__PURE__*/React.createElement(NoticeBox, {
+  }, card)))), classificationEntries.length > 0 || classificationSourceEntries.length > 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "classification-summary"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "classification-summary__head"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "material-symbols-outlined"
+  }, "category"), /*#__PURE__*/React.createElement("span", null, UI_COPY.pages.analysis.classificationTitle)), classificationEntries.length > 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "group-strip group-strip--inline"
+  }, classificationEntries.slice(0, 12).map(item => /*#__PURE__*/React.createElement("span", {
+    key: item.name,
+    className: "group-chip"
+  }, /*#__PURE__*/React.createElement("span", null, item.name), /*#__PURE__*/React.createElement("span", {
+    className: "u-tabular"
+  }, item.count))), classificationEntries.length > 12 ? /*#__PURE__*/React.createElement("span", {
+    className: "group-chip group-chip--info"
+  }, "\u5176\u4ED6 ", classificationEntries.length - 12, " \u7C7B") : null) : null, classificationSourceEntries.length > 0 ? /*#__PURE__*/React.createElement("p", {
+    className: "field-help"
+  }, "\u5F52\u7C7B\u6765\u6E90\uFF1A", classificationSourceEntries.map(item => `${classificationSourceLabel(item.source)} ${item.count}`).join(" · ")) : null) : null, quotaExhausted && quotaMessage ? /*#__PURE__*/React.createElement(NoticeBox, {
     tone: "warning"
   }, quotaMessage) : null, processingErrorCount > 0 ? /*#__PURE__*/React.createElement(NoticeBox, {
     tone: "warning"
   }, "\u68C0\u6D4B\u5230 ", processingErrorCount, " \u6761\u771F\u5B9E\u5F02\u5E38\uFF0C\u8BF7\u901A\u8FC7\u201C\u5BFC\u51FA\u7ED3\u679C\u660E\u7EC6\u201D\u7EE7\u7EED\u6392\u67E5\u3002") : null)), loadingError ? /*#__PURE__*/React.createElement(NoticeBox, {
     tone: "error"
-  }, loadingError) : null, manualCheckCount > 0 ? /*#__PURE__*/React.createElement(ResultActionBanner, {
+  }, loadingError) : null, unclassifiedCount > 0 ? /*#__PURE__*/React.createElement(ResultActionBanner, {
+    icon: "rule",
+    eyebrow: "\u5F52\u7C7B\u63D0\u793A",
+    title: `检测到 ${unclassifiedCount} 张发票未归类`,
+    text: "\u8FD9\u4E9B\u53D1\u7968\u6CA1\u6709\u547D\u4E2D\u4EFB\u4F55\u5DF2\u542F\u7528\u7C7B\u76EE\uFF0C\u6574\u7406\u540E\u4F1A\u8FDB\u5165\u5F85\u4EBA\u5DE5\u590D\u6838\u3002\u8865\u5145\u5F52\u7C7B\u89C4\u5219\u540E\u91CD\u65B0\u6574\u7406\u5373\u53EF\u81EA\u52A8\u5F52\u6863\u3002",
+    buttonLabel: "\u7BA1\u7406\u5F52\u7C7B\u89C4\u5219",
+    onClick: () => navigate("/rules")
+  }) : null, manualCheckCount > 0 ? /*#__PURE__*/React.createElement(ResultActionBanner, {
     icon: "folder_open",
     eyebrow: UI_COPY.pages.analysis.reviewTitle,
     title: `检测到 ${manualCheckCount} 条待人工复核记录`,
@@ -2172,6 +3586,1207 @@ function AnalysisPage({
     disabled: !outputBanner.openPath
   })));
 }
+function RulesPage({
+  onOpenDisclaimer
+}) {
+  const [rulesData, setRulesData] = useState(null);
+  const [libraryDir, setLibraryDir] = useState("");
+  const [scope, setScope] = useState("global");
+  const [scopeDrafts, setScopeDrafts] = useState({
+    global: buildUserRuleDraft(null, "global", []),
+    library: buildUserRuleDraft(null, "library", [])
+  });
+  const [dirtyScopes, setDirtyScopes] = useState({
+    global: false,
+    library: false
+  });
+  const [activePanel, setActivePanel] = useState("rules");
+  const [typesState, setTypesState] = useState({
+    documentTypes: [],
+    customTypes: [],
+    builtinTypes: []
+  });
+  const [typeIssues, setTypeIssues] = useState([]);
+  const [editor, setEditor] = useState(null);
+  const [builtinEditor, setBuiltinEditor] = useState(null);
+  const [restoreDialog, setRestoreDialog] = useState(null);
+  const [restoreMode, setRestoreMode] = useState("current");
+  const [restoreBusy, setRestoreBusy] = useState(false);
+  const [restoreError, setRestoreError] = useState("");
+  const [restoreIssues, setRestoreIssues] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [busyAction, setBusyAction] = useState("");
+  const [actionState, setActionState] = useState({
+    tone: "info",
+    message: ""
+  });
+  const [saveIssues, setSaveIssues] = useState([]);
+  const [testFields, setTestFields] = useState({
+    seller: "",
+    seller_tin: "",
+    item: "",
+    type: "",
+    amount: ""
+  });
+  const [testState, setTestState] = useState({
+    status: "idle",
+    result: null,
+    issues: [],
+    message: ""
+  });
+  const builtinCategoryIds = useMemo(() => rulesData && Array.isArray(rulesData.builtin_category_ids) ? rulesData.builtin_category_ids.map(item => String(item)) : [], [rulesData]);
+  const builtinIdSet = useMemo(() => new Set(builtinCategoryIds), [builtinCategoryIds]);
+  const documentTypes = typesState.documentTypes;
+  const builtinTypes = typesState.builtinTypes;
+  const draft = scopeDrafts[scope] || buildUserRuleDraft(null, scope, builtinCategoryIds, documentTypes);
+  const dirty = !!dirtyScopes[scope];
+  const libraryAvailable = !!(rulesData && rulesData.library_available);
+  const effectiveCategories = rulesData && Array.isArray(rulesData.effective_categories) ? rulesData.effective_categories : [];
+  const ruleRows = useMemo(() => draft.categories.map((entry, index) => Object.assign({}, entry, {
+    index,
+    previewFolder: ruleEntryPreviewFolder(entry)
+  })), [draft]);
+  const missingTargetCount = useMemo(() => draft.categories.filter(entry => !String(entry && entry.target_type || "").trim()).length, [draft]);
+  const missingBuiltinTargetCount = useMemo(() => (draft.builtinOverrides || []).filter(entry => !String(entry && entry.target_type || "").trim()).length, [draft]);
+  const persistedOverrideScopes = useMemo(() => {
+    const map = {};
+    ["global", "library"].forEach(scopeName => {
+      const scopeData = rulesData && rulesData[scopeName];
+      const categories = scopeData && Array.isArray(scopeData.categories) ? scopeData.categories : [];
+      categories.forEach(item => {
+        const id = String(item && item.id || "");
+        if (!id || !builtinIdSet.has(id)) return;
+        if (!map[id]) map[id] = [];
+        if (map[id].indexOf(scopeName) < 0) map[id].push(scopeName);
+      });
+    });
+    return map;
+  }, [rulesData, builtinIdSet]);
+  const builtinRows = useMemo(() => {
+    const draftById = new Map();
+    (draft.builtinOverrides || []).forEach(entry => {
+      if (entry.id) draftById.set(String(entry.id), entry);
+    });
+    const rows = [];
+    const seen = new Set();
+    effectiveCategories.forEach(item => {
+      const id = String(item && item.id || "");
+      if (!id || !builtinIdSet.has(id) || seen.has(id)) return;
+      seen.add(id);
+      const override = draftById.get(id);
+      const persistedScopes = persistedOverrideScopes[id] || [];
+      const base = override || {
+        id,
+        target_type: String(item.target_type || ""),
+        keywords: (Array.isArray(item.keywords) ? item.keywords : []).map(value => String(value)),
+        amount_range: normalizeRuleAmountRange(item.amount_range),
+        enabled: item.enabled !== false
+      };
+      const candidateTarget = String(override && override.target_type || item.target_type || item.archive_folder || "").trim();
+      const targetType = isValidRuleTargetType(candidateTarget, documentTypes) ? candidateTarget : "";
+      const amountRange = override ? override.amount_range : normalizeRuleAmountRange(item.amount_range);
+      rows.push({
+        id,
+        defaultLabel: String(item.name || item.archive_folder || id),
+        target_type: targetType,
+        keywords: base.keywords || [],
+        amount_range: amountRange,
+        enabled: override ? override.enabled : item.enabled !== false,
+        previewFolder: buildRuleFolderName(targetType, amountRange),
+        modified: !!override || persistedScopes.length > 0,
+        overrideScopes: persistedScopes
+      });
+    });
+    (draft.builtinOverrides || []).forEach(entry => {
+      const id = String(entry.id || "");
+      if (!id || seen.has(id)) return;
+      seen.add(id);
+      const targetType = isValidRuleTargetType(entry.target_type, documentTypes) ? entry.target_type : "";
+      rows.push({
+        id,
+        defaultLabel: targetType || id,
+        target_type: targetType,
+        keywords: entry.keywords || [],
+        amount_range: entry.amount_range || [],
+        enabled: entry.enabled !== false,
+        previewFolder: buildRuleFolderName(targetType, entry.amount_range),
+        modified: true,
+        overrideScopes: persistedOverrideScopes[id] || []
+      });
+    });
+    return rows;
+  }, [effectiveCategories, draft, builtinIdSet, persistedOverrideScopes, documentTypes]);
+  const categoryNameById = useMemo(() => {
+    const entries = effectiveCategories.map(item => ({
+      id: item.id,
+      name: item.name || item.archive_folder
+    }));
+    ruleRows.forEach(row => entries.push({
+      id: row.id,
+      name: row.previewFolder || row.name
+    }));
+    builtinRows.forEach(row => entries.push({
+      id: row.id,
+      name: row.previewFolder || row.target_type || row.id
+    }));
+    return buildRuleCategoryNameMap(entries);
+  }, [effectiveCategories, ruleRows, builtinRows]);
+  const targetTypeById = useMemo(() => {
+    const map = {};
+    effectiveCategories.forEach(item => {
+      const id = String(item && item.id || "");
+      if (id) map[id] = String(item.target_type || "");
+    });
+    ruleRows.forEach(row => {
+      const id = String(row.id || "");
+      if (id) map[id] = String(row.target_type || "");
+    });
+    builtinRows.forEach(row => {
+      const id = String(row.id || "");
+      if (id) map[id] = String(row.target_type || "");
+    });
+    return map;
+  }, [effectiveCategories, ruleRows, builtinRows]);
+  const loadIssues = useMemo(() => normalizeRuleIssues(rulesData && rulesData.issues), [rulesData]);
+  const loadWarnings = (rulesData && Array.isArray(rulesData.warnings) ? rulesData.warnings : []).map(item => String(item && (item.text || item.message) || "").trim()).filter(Boolean);
+  const unclassifiedInvoices = rulesData && Array.isArray(rulesData.unclassified_invoices) ? rulesData.unclassified_invoices : [];
+  const scopeRulesDir = scope === "library" ? rulesData && rulesData.library_rules_dir || "" : rulesData && rulesData.global_rules_dir || "";
+  const directoryText = safeText(scopeRulesDir, "尚未创建");
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const data = await callApi("load_classification_rules", "");
+        if (!active) return;
+        applyRulesData(data);
+      } catch (error) {
+        if (active) setLoadError(error.message || "归类规则加载失败，请稍后重试。");
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+  useEffect(() => {
+    if (scope === "library" && rulesData && !rulesData.library_available) setScope("global");
+  }, [scope, rulesData]);
+  function applyRulesData(data) {
+    const payload = data || {};
+    const customTypes = Array.isArray(payload.custom_types) ? payload.custom_types.map(item => String(item)) : [];
+    const documentTypes = Array.isArray(payload.document_types) ? payload.document_types.map(item => String(item)) : [];
+    const builtinTypes = Array.isArray(payload.builtin_types) ? payload.builtin_types.map(item => String(item)) : documentTypes.filter(item => customTypes.indexOf(item) < 0);
+    const loadedBuiltinIds = Array.isArray(payload.builtin_category_ids) ? payload.builtin_category_ids.map(item => String(item)) : [];
+    setTypesState({
+      documentTypes,
+      customTypes,
+      builtinTypes
+    });
+    setTypeIssues([]);
+    setRulesData(payload);
+    setLibraryDir(String(payload.library_dir || ""));
+    setScopeDrafts({
+      global: buildUserRuleDraft(payload.global, "global", loadedBuiltinIds, documentTypes),
+      library: buildUserRuleDraft(payload.library, "library", loadedBuiltinIds, documentTypes)
+    });
+    setDirtyScopes({
+      global: false,
+      library: false
+    });
+    setEditor(null);
+    setBuiltinEditor(null);
+    setRestoreDialog(null);
+    setRestoreError("");
+    setRestoreIssues([]);
+    setSaveIssues([]);
+    setLoadError(payload.success === false ? payload.message || "归类规则配置有误，请按提示修正。" : "");
+  }
+  function applyTypeSnapshot(result, fallbackName, options) {
+    const remove = !!(options && options.remove);
+    const snapshot = result || {};
+    setTypesState(current => {
+      let documentTypes = Array.isArray(snapshot.document_types) ? snapshot.document_types.map(item => String(item)) : current.documentTypes;
+      let customTypes = Array.isArray(snapshot.custom_types) ? snapshot.custom_types.map(item => String(item)) : current.customTypes;
+      const builtinTypes = Array.isArray(snapshot.builtin_types) ? snapshot.builtin_types.map(item => String(item)) : current.builtinTypes;
+      if (fallbackName && !Array.isArray(snapshot.document_types)) {
+        if (remove) {
+          documentTypes = documentTypes.filter(item => item !== fallbackName);
+          customTypes = customTypes.filter(item => item !== fallbackName);
+        } else {
+          if (documentTypes.indexOf(fallbackName) < 0) documentTypes = documentTypes.concat([fallbackName]);
+          if (customTypes.indexOf(fallbackName) < 0) customTypes = customTypes.concat([fallbackName]);
+        }
+      }
+      return {
+        documentTypes,
+        customTypes,
+        builtinTypes
+      };
+    });
+  }
+  async function reloadRules(options) {
+    const silent = !!(options && options.silent);
+    if (!silent) setBusyAction("reload");
+    setLoadError("");
+    try {
+      const data = await callApi("load_classification_rules", libraryDir);
+      applyRulesData(data);
+      if (!silent) setActionState({
+        tone: "info",
+        message: ""
+      });
+    } catch (error) {
+      setLoadError(error.message || "归类规则加载失败，请稍后重试。");
+    } finally {
+      setBusyAction("");
+    }
+  }
+  function commitDraft(nextDraft, message, tone) {
+    setScopeDrafts(current => Object.assign({}, current, {
+      [scope]: nextDraft
+    }));
+    setDirtyScopes(current => Object.assign({}, current, {
+      [scope]: true
+    }));
+    setSaveIssues([]);
+    setActionState(message ? {
+      tone: tone || "success",
+      message
+    } : {
+      tone: "info",
+      message: ""
+    });
+    setTestState(current => current.status === "idle" ? current : {
+      status: "idle",
+      result: null,
+      issues: [],
+      message: ""
+    });
+  }
+  function handleScopeChange(nextScope) {
+    if (nextScope === "library" && !libraryAvailable) return;
+    setScope(nextScope);
+    setEditor(null);
+    setBuiltinEditor(null);
+    setSaveIssues([]);
+    setActionState({
+      tone: "info",
+      message: ""
+    });
+    setTestState({
+      status: "idle",
+      result: null,
+      issues: [],
+      message: ""
+    });
+  }
+  function handlePanelChange(nextPanel) {
+    setActivePanel(nextPanel);
+    setEditor(null);
+    setBuiltinEditor(null);
+    setActionState({
+      tone: "info",
+      message: ""
+    });
+    setTypeIssues([]);
+  }
+  function handleAddRule() {
+    const currentDraft = scopeDrafts[scope] || buildUserRuleDraft(null, scope, builtinCategoryIds, documentTypes);
+    const form = emptyUserRuleEditor();
+    form.id = nextRuleCategoryId(currentDraft.categories.concat(effectiveCategories));
+    setEditor(form);
+    setSaveIssues([]);
+    setActionState({
+      tone: "info",
+      message: ""
+    });
+  }
+  function handleEditRule(index) {
+    const currentDraft = scopeDrafts[scope] || buildUserRuleDraft(null, scope, builtinCategoryIds, documentTypes);
+    const entry = currentDraft.categories[index];
+    if (!entry) return;
+    setEditor(userRuleEditorFromEntry(entry));
+    setSaveIssues([]);
+    setActionState({
+      tone: "info",
+      message: ""
+    });
+  }
+  function handleDeleteRule(index) {
+    const currentDraft = scopeDrafts[scope] || buildUserRuleDraft(null, scope, builtinCategoryIds, documentTypes);
+    const entry = currentDraft.categories[index];
+    if (!entry) return;
+    const categories = currentDraft.categories.filter((item, itemIndex) => itemIndex !== index);
+    if (editor && String(editor.originalId) === String(entry.id)) setEditor(null);
+    commitDraft(Object.assign({}, currentDraft, {
+      categories
+    }), `已删除规则「${ruleEntryPreviewFolder(entry) || entry.mainKeyword || "未命名规则"}」，保存后生效。`, "info");
+  }
+  function handleMoveRule(index, direction) {
+    const currentDraft = scopeDrafts[scope] || buildUserRuleDraft(null, scope, builtinCategoryIds, documentTypes);
+    const categories = currentDraft.categories.slice();
+    const targetIndex = index + direction;
+    if (index < 0 || targetIndex < 0 || targetIndex >= categories.length) return;
+    const moving = categories[index];
+    categories[index] = categories[targetIndex];
+    categories[targetIndex] = moving;
+    commitDraft(Object.assign({}, currentDraft, {
+      categories
+    }), "已调整规则顺序，保存后生效。", "info");
+  }
+  function handleToggleRule(index) {
+    const currentDraft = scopeDrafts[scope] || buildUserRuleDraft(null, scope, builtinCategoryIds, documentTypes);
+    const categories = currentDraft.categories.slice();
+    const current = categories[index];
+    if (!current) return;
+    categories[index] = Object.assign({}, current, {
+      enabled: current.enabled === false
+    });
+    const nextEnabled = categories[index].enabled !== false;
+    commitDraft(Object.assign({}, currentDraft, {
+      categories
+    }), nextEnabled ? "已启用该规则，保存后生效。" : "已停用该规则，保存后生效。", "info");
+  }
+  function handleEditorChange(patch) {
+    setEditor(current => current ? Object.assign({}, current, patch, {
+      error: ""
+    }) : current);
+  }
+  function handleEditorCommit() {
+    if (!editor) return;
+    const targetType = String(editor.targetType || "").trim();
+    const keyword = String(editor.keyword || "").trim();
+    const amountMin = parseRuleAmount(editor.amountMin);
+    const amountMax = parseRuleAmount(editor.amountMax);
+    const errors = [];
+    if (!targetType) {
+      errors.push("请选择目标票种。");
+    } else if (documentTypes.length > 0 && documentTypes.indexOf(targetType) < 0) {
+      errors.push("目标票种已失效，请重新选择。");
+    }
+    if (!keyword) errors.push("请填写关键词。");
+    if (String(editor.amountMin || "").trim() && amountMin === null) errors.push("金额下限必须是数字。");
+    if (String(editor.amountMax || "").trim() && amountMax === null) errors.push("金额上限必须是数字。");
+    if (amountMin !== null && amountMax !== null && amountMin > amountMax) errors.push("金额下限不能大于金额上限。");
+    if (errors.length > 0) {
+      setEditor(Object.assign({}, editor, {
+        error: errors[0]
+      }));
+      return;
+    }
+    const currentDraft = scopeDrafts[scope] || buildUserRuleDraft(null, scope, builtinCategoryIds, documentTypes);
+    const id = editor.mode === "edit" ? editor.originalId : editor.id || nextRuleCategoryId(currentDraft.categories.concat(effectiveCategories));
+    const extraKeywords = (Array.isArray(editor.legacyExtraKeywords) ? editor.legacyExtraKeywords : []).map(item => String(item).trim()).filter(item => item && item !== keyword);
+    const amountRange = buildRuleAmountRange(editor.amountMin, editor.amountMax);
+    const entry = {
+      id: String(id || "").trim(),
+      name: editor.name || buildRuleFolderName(targetType, amountRange) || keyword,
+      target_type: targetType,
+      keywords: [keyword].concat(extraKeywords),
+      mainKeyword: keyword,
+      legacyExtraKeywords: extraKeywords,
+      amount_range: amountRange,
+      enabled: editor.enabled !== false,
+      match: editor.legacyMatch || "",
+      exclude_keywords: (Array.isArray(editor.legacyExcludeKeywords) ? editor.legacyExcludeKeywords : []).slice()
+    };
+    let categories = currentDraft.categories.slice();
+    if (editor.mode === "edit") {
+      const index = categories.findIndex(item => String(item.id) === String(editor.originalId));
+      if (index >= 0) categories[index] = entry;else categories.push(entry);
+    } else {
+      categories.push(entry);
+    }
+    commitDraft(Object.assign({}, currentDraft, {
+      categories
+    }), editor.mode === "new" ? "已添加规则，保存后生效。" : "已更新规则，保存后生效。", "success");
+    setEditor(null);
+  }
+  function upsertBuiltinOverride(entry, message) {
+    const currentDraft = scopeDrafts[scope] || buildUserRuleDraft(null, scope, builtinCategoryIds, documentTypes);
+    const overrides = (currentDraft.builtinOverrides || []).slice();
+    const index = overrides.findIndex(item => String(item.id) === String(entry.id));
+    if (index >= 0) overrides[index] = entry;else overrides.push(entry);
+    commitDraft(Object.assign({}, currentDraft, {
+      builtinOverrides: overrides
+    }), message, "info");
+  }
+  function handleEditBuiltinRule(row) {
+    if (!row) return;
+    const range = normalizeRuleAmountRange(row.amount_range);
+    setBuiltinEditor({
+      id: String(row.id || ""),
+      label: String(row.defaultLabel || row.target_type || row.id || ""),
+      error: "",
+      targetType: String(row.target_type || ""),
+      keywordsText: (Array.isArray(row.keywords) ? row.keywords : []).join("，"),
+      amountMin: range.length > 0 ? ruleAmountInputValue(range[0]) : "",
+      amountMax: range.length > 1 ? ruleAmountInputValue(range[1]) : "",
+      enabled: row.enabled !== false
+    });
+    setActionState({
+      tone: "info",
+      message: ""
+    });
+  }
+  function handleBuiltinEditorChange(patch) {
+    setBuiltinEditor(current => current ? Object.assign({}, current, patch, {
+      error: ""
+    }) : current);
+  }
+  function handleBuiltinEditorCommit() {
+    if (!builtinEditor) return;
+    const targetType = String(builtinEditor.targetType || "").trim();
+    const amountMin = parseRuleAmount(builtinEditor.amountMin);
+    const amountMax = parseRuleAmount(builtinEditor.amountMax);
+    const errors = [];
+    if (!targetType) {
+      errors.push("请选择目标票种。");
+    } else if (documentTypes.length > 0 && documentTypes.indexOf(targetType) < 0) {
+      errors.push("目标票种已失效，请重新选择。");
+    }
+    if (String(builtinEditor.amountMin || "").trim() && amountMin === null) errors.push("金额下限必须是数字。");
+    if (String(builtinEditor.amountMax || "").trim() && amountMax === null) errors.push("金额上限必须是数字。");
+    if (amountMin !== null && amountMax !== null && amountMin > amountMax) errors.push("金额下限不能大于金额上限。");
+    if (errors.length > 0) {
+      setBuiltinEditor(Object.assign({}, builtinEditor, {
+        error: errors[0]
+      }));
+      return;
+    }
+    upsertBuiltinOverride({
+      id: builtinEditor.id,
+      target_type: targetType,
+      keywords: splitRuleKeywords(builtinEditor.keywordsText),
+      amount_range: buildRuleAmountRange(builtinEditor.amountMin, builtinEditor.amountMax),
+      enabled: builtinEditor.enabled !== false
+    }, "已更新内置规则覆盖，保存后生效。");
+    setBuiltinEditor(null);
+  }
+  function handleToggleBuiltinRule(row) {
+    if (!row) return;
+    const entry = normalizeBuiltinOverride(row, documentTypes);
+    entry.enabled = row.enabled === false;
+    upsertBuiltinOverride(entry, entry.enabled ? "已启用内置规则，保存后生效。" : "已停用内置规则，保存后生效。");
+  }
+  function openRestoreDialog(categoryId, title) {
+    let defaultMode = "current";
+    if (categoryId) {
+      const persistedScopes = persistedOverrideScopes[categoryId] || [];
+      if (persistedScopes.length > 0 && persistedScopes.indexOf(scope) < 0 && libraryAvailable) {
+        defaultMode = "all";
+      }
+    }
+    setRestoreDialog({
+      categoryId: String(categoryId || ""),
+      title
+    });
+    setRestoreMode(defaultMode);
+    setRestoreError("");
+    setRestoreIssues([]);
+  }
+  function handleRestoreBuiltinRule(row) {
+    if (!row) return;
+    openRestoreDialog(row.id, `恢复「${row.defaultLabel || row.previewFolder || row.id}」的默认设置`);
+  }
+  function handleRestoreAllBuiltin() {
+    openRestoreDialog("", "恢复全部内置默认规则");
+  }
+  async function handleConfirmRestoreBuiltin() {
+    if (!restoreDialog || restoreBusy) return;
+    setRestoreBusy(true);
+    setRestoreError("");
+    setRestoreIssues([]);
+    try {
+      // scope stays the current editing scope; scope_mode expands it to
+      // global + current library for the "全部" option.
+      const result = await callApi("reset_builtin_classification_rules", {
+        scope,
+        library_dir: libraryDir,
+        scope_mode: restoreMode,
+        category_id: restoreDialog.categoryId || ""
+      });
+      if (!result || result.success !== true) {
+        setRestoreError(result && result.message || "恢复默认失败，请稍后重试。");
+        setRestoreIssues(normalizeRuleIssues(result && result.issues));
+        return;
+      }
+      setRestoreDialog(null);
+      setActionState({
+        tone: "success",
+        message: result.message || "已恢复内置规则默认设置。"
+      });
+      await reloadRules({
+        silent: true
+      });
+    } catch (error) {
+      setRestoreError(error.message || "恢复默认失败，请稍后重试。");
+    } finally {
+      setRestoreBusy(false);
+    }
+  }
+  async function handleCreateType(name) {
+    try {
+      const result = await callApi("create_classification_type", {
+        name
+      });
+      if (!result || result.success !== true) {
+        applyTypeSnapshot(result, name);
+        return {
+          success: false,
+          message: result && result.message || "新建票种失败，请稍后重试。",
+          issues: normalizeRuleIssues(result && result.issues)
+        };
+      }
+      applyTypeSnapshot(result, name);
+      const createdName = String(name || "").trim();
+      setTypeIssues([]);
+      setActionState({
+        tone: "success",
+        message: result && result.message || `已新建票种「${createdName}」。`
+      });
+      return {
+        success: true,
+        name: createdName,
+        message: result && result.message || ""
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message || "新建票种失败，请稍后重试。",
+        issues: []
+      };
+    }
+  }
+  async function handleDeleteType(name) {
+    if (busyAction) return;
+    setBusyAction("type");
+    try {
+      const result = await callApi("delete_classification_type", {
+        name,
+        library_dir: libraryDir
+      });
+      if (!result || result.success !== true) {
+        applyTypeSnapshot(result, name);
+        setTypeIssues(normalizeRuleIssues(result && result.issues));
+        setActionState({
+          tone: "error",
+          message: result && result.message || `删除票种「${name}」失败，请检查是否有规则正在使用它。`
+        });
+        return;
+      }
+      applyTypeSnapshot(result, name, {
+        remove: true
+      });
+      setTypeIssues([]);
+      if (editor && String(editor.targetType || "") === name) {
+        setEditor(Object.assign({}, editor, {
+          targetType: ""
+        }));
+      }
+      setActionState({
+        tone: "success",
+        message: result && result.message || `已删除票种「${name}」。`
+      });
+    } catch (error) {
+      setTypeIssues([]);
+      setActionState({
+        tone: "error",
+        message: error.message || `删除票种「${name}」失败，请稍后重试。`
+      });
+    } finally {
+      setBusyAction("");
+    }
+  }
+  function handlePrefillFromInvoice(row) {
+    const invoice = row || {};
+    const merchant = String(invoice.merchant || "").trim();
+    const amount = parseRuleAmount(invoice.amount);
+    const currentDraft = scopeDrafts[scope] || buildUserRuleDraft(null, scope, builtinCategoryIds, documentTypes);
+    const form = emptyUserRuleEditor();
+    form.id = nextRuleCategoryId(currentDraft.categories.concat(effectiveCategories));
+    form.keyword = merchant;
+    form.amountMin = amount === null ? "" : String(amount);
+    form.amountMax = amount === null ? "" : String(amount);
+    setEditor(form);
+    setSaveIssues([]);
+    setActionState({
+      tone: "info",
+      message: "已按这张发票预填关键词和金额，请选择目标票种后添加到列表。"
+    });
+  }
+  function handleAddRuleTerm(term) {
+    const currentDraft = scopeDrafts[scope] || buildUserRuleDraft(null, scope, builtinCategoryIds, documentTypes);
+    const entry = cloneRuleTerm(Object.assign({}, term, {
+      source_layer: scope
+    }), scope);
+    commitDraft(Object.assign({}, currentDraft, {
+      terms: currentDraft.terms.concat([entry])
+    }), "已加入销售方词典，保存后生效。", "success");
+  }
+  function handleDeleteRuleTerm(index) {
+    const currentDraft = scopeDrafts[scope] || buildUserRuleDraft(null, scope, builtinCategoryIds, documentTypes);
+    const terms = currentDraft.terms.filter((item, itemIndex) => itemIndex !== index);
+    commitDraft(Object.assign({}, currentDraft, {
+      terms
+    }), "已从销售方词典移除，保存后生效。", "info");
+  }
+  async function handleSaveRules() {
+    if (saving) return;
+    if (missingTargetCount > 0 || missingBuiltinTargetCount > 0) {
+      const parts = [];
+      if (missingTargetCount > 0) parts.push(`${missingTargetCount} 条自定义规则`);
+      if (missingBuiltinTargetCount > 0) parts.push(`${missingBuiltinTargetCount} 条内置规则修改`);
+      setActionState({
+        tone: "error",
+        message: `还有 ${parts.join("、")}没有选择目标票种，请逐条编辑补选后再保存。`
+      });
+      return;
+    }
+    setSaving(true);
+    setSaveIssues([]);
+    try {
+      const result = await callApi("save_classification_rules", {
+        library_dir: libraryDir,
+        scope,
+        fallback: draft.fallback || "",
+        categories: draft.categories.map(toSaveUserRule).concat((draft.builtinOverrides || []).map(toSaveBuiltinOverride)),
+        terms: draft.terms.map(toSaveRuleTerm)
+      });
+      if (!result || result.success !== true) {
+        setSaveIssues(normalizeRuleIssues(result && result.issues));
+        setActionState({
+          tone: "error",
+          message: result && result.message || "规则保存失败，请检查目标票种、关键词与金额范围。"
+        });
+        return;
+      }
+      setDirtyScopes(current => Object.assign({}, current, {
+        [scope]: false
+      }));
+      setActionState({
+        tone: "success",
+        message: result.message || "规则已保存，下一次整理生效。"
+      });
+      await reloadRules({
+        silent: true
+      });
+    } catch (error) {
+      setActionState({
+        tone: "error",
+        message: error.message || "规则保存失败，请稍后重试。"
+      });
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function handleResetScope() {
+    if (busyAction) return;
+    const scopeName = ruleScopeLabel(scope);
+    if (!window.confirm(`恢复默认会覆盖「${scopeName}」当前的自定义规则与销售方词典，并自动备份现有规则文件。是否继续？`)) return;
+    setBusyAction("reset");
+    try {
+      const result = await callApi("reset_classification_rules", scope, libraryDir);
+      if (!result || result.success !== true) {
+        setActionState({
+          tone: "error",
+          message: result && result.message || "恢复默认失败，请稍后重试。"
+        });
+        return;
+      }
+      setActionState({
+        tone: "success",
+        message: result.message || "已恢复默认规则。"
+      });
+      await reloadRules({
+        silent: true
+      });
+    } catch (error) {
+      setActionState({
+        tone: "error",
+        message: error.message || "恢复默认失败，请稍后重试。"
+      });
+    } finally {
+      setBusyAction("");
+    }
+  }
+  async function handleOpenRulesFolder() {
+    if (busyAction) return;
+    setBusyAction("folder");
+    try {
+      const result = await callApi("open_rules_folder", scope, libraryDir);
+      const opened = !!(result && result.success);
+      setActionState({
+        tone: opened ? "success" : "error",
+        message: result && result.message || (opened ? "已打开规则目录。" : "打开规则目录失败。")
+      });
+    } catch (error) {
+      setActionState({
+        tone: "error",
+        message: error.message || "打开规则目录失败。"
+      });
+    } finally {
+      setBusyAction("");
+    }
+  }
+  async function handleTestRules() {
+    setTestState({
+      status: "testing",
+      result: null,
+      issues: [],
+      message: ""
+    });
+    try {
+      const result = await callApi("test_classification_rules", {
+        library_dir: libraryDir,
+        scope,
+        draft: {
+          categories: draft.categories.map(toSaveUserRule),
+          terms: draft.terms.map(toSaveRuleTerm),
+          fallback: draft.fallback || ""
+        },
+        fields: {
+          seller: String(testFields.seller || "").trim(),
+          seller_tin: String(testFields.seller_tin || "").trim(),
+          item: String(testFields.item || "").trim(),
+          type: String(testFields.type || "").trim(),
+          amount: String(testFields.amount || "").trim()
+        }
+      });
+      if (!result || result.success !== true) {
+        setTestState({
+          status: "error",
+          result: null,
+          issues: normalizeRuleIssues(result && result.issues),
+          message: result && result.message || "规则测试失败，请检查输入内容。"
+        });
+        return;
+      }
+      setTestState({
+        status: "success",
+        result: result.result || null,
+        issues: [],
+        message: ""
+      });
+    } catch (error) {
+      setTestState({
+        status: "error",
+        result: null,
+        issues: [],
+        message: error.message || "规则测试失败，请稍后重试。"
+      });
+    }
+  }
+  function updateTestField(field, value) {
+    setTestFields(current => Object.assign({}, current, {
+      [field]: value
+    }));
+  }
+  return /*#__PURE__*/React.createElement(AppShell, {
+    active: "rules",
+    onOpenDisclaimer: onOpenDisclaimer,
+    footerLeft: /*#__PURE__*/React.createElement("div", {
+      className: "footer-cluster"
+    }, /*#__PURE__*/React.createElement("button", {
+      type: "button",
+      className: "btn btn--ghost btn--sm",
+      onClick: () => reloadRules(),
+      disabled: busyAction === "reload"
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "material-symbols-outlined"
+    }, busyAction === "reload" ? "sync" : "refresh"), /*#__PURE__*/React.createElement("span", null, busyAction === "reload" ? "加载中..." : "重新加载")), /*#__PURE__*/React.createElement("button", {
+      type: "button",
+      className: "btn btn--ghost btn--sm",
+      onClick: handleOpenRulesFolder,
+      disabled: busyAction === "folder"
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "material-symbols-outlined"
+    }, "folder_open"), /*#__PURE__*/React.createElement("span", null, "\u6253\u5F00\u89C4\u5219\u76EE\u5F55")), /*#__PURE__*/React.createElement("button", {
+      type: "button",
+      className: "btn btn--ghost btn--sm",
+      onClick: handleResetScope,
+      disabled: busyAction === "reset"
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "material-symbols-outlined"
+    }, "restart_alt"), /*#__PURE__*/React.createElement("span", null, busyAction === "reset" ? "恢复中..." : "恢复默认"))),
+    footerRight: /*#__PURE__*/React.createElement("button", {
+      type: "button",
+      className: "btn btn--primary",
+      onClick: handleSaveRules,
+      disabled: saving || loading || missingTargetCount > 0 || missingBuiltinTargetCount > 0
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "material-symbols-outlined"
+    }, saving ? "sync" : "save"), /*#__PURE__*/React.createElement("span", null, saving ? "保存中..." : "保存规则"))
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "page-wrap page-wrap--rules"
+  }, /*#__PURE__*/React.createElement(PageHeader, {
+    title: UI_COPY.pages.rules.title,
+    description: UI_COPY.pages.rules.description,
+    badge: /*#__PURE__*/React.createElement(StatusPill, {
+      tone: dirty ? "warning" : "success",
+      icon: dirty ? "edit" : "task_alt"
+    }, dirty ? "有未保存修改" : "规则已加载")
+  }), loading && !rulesData ? /*#__PURE__*/React.createElement(NoticeBox, {
+    tone: "info"
+  }, "\u6B63\u5728\u52A0\u8F7D\u5F52\u7C7B\u89C4\u5219...") : null, loadError ? /*#__PURE__*/React.createElement(NoticeBox, {
+    tone: "error"
+  }, loadError) : null, actionState.message ? /*#__PURE__*/React.createElement(NoticeBox, {
+    tone: actionState.tone
+  }, actionState.message) : null, loadIssues.length > 0 ? /*#__PURE__*/React.createElement(RuleIssues, {
+    issues: loadIssues,
+    title: "\u89C4\u5219\u6587\u4EF6\u5B58\u5728\u95EE\u9898"
+  }) : null, loadWarnings.length > 0 ? /*#__PURE__*/React.createElement(RuleIssues, {
+    issues: loadWarnings,
+    title: "\u89C4\u5219\u6587\u4EF6\u63D0\u793A",
+    tone: "warning"
+  }) : null, saveIssues.length > 0 ? /*#__PURE__*/React.createElement(RuleIssues, {
+    issues: saveIssues,
+    title: "\u89C4\u5219\u6821\u9A8C\u672A\u901A\u8FC7\uFF0C\u8BF7\u4FEE\u6B63\u540E\u518D\u6B21\u4FDD\u5B58"
+  }) : null, /*#__PURE__*/React.createElement("section", {
+    className: "surface-card"
+  }, /*#__PURE__*/React.createElement(SectionHeader, {
+    icon: "layers",
+    title: "\u89C4\u5219\u4F5C\u7528\u8303\u56F4",
+    indicator: /*#__PURE__*/React.createElement(StatusPill, {
+      tone: dirty ? "warning" : "neutral"
+    }, `${draft.categories.length} 条自定义规则`)
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "card-stack card-stack--compact"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "rules-scope-tabs",
+    role: "group",
+    "aria-label": "\u89C4\u5219\u4F5C\u7528\u8303\u56F4"
+  }, RULE_SCOPE_OPTIONS.map(option => {
+    const optionDisabled = option.value === "library" && !libraryAvailable;
+    return /*#__PURE__*/React.createElement("button", {
+      key: option.value,
+      type: "button",
+      className: joinClasses("quick-chip", scope === option.value && "is-active"),
+      "aria-pressed": scope === option.value,
+      disabled: optionDisabled,
+      onClick: () => handleScopeChange(option.value)
+    }, option.label);
+  })), /*#__PURE__*/React.createElement("p", {
+    className: "field-help"
+  }, ruleScopeDescription(scope)), /*#__PURE__*/React.createElement("p", {
+    className: "field-help field-help--subtle u-mono u-truncate",
+    title: directoryText
+  }, "\u89C4\u5219\u6587\u4EF6\uFF1A", directoryText), /*#__PURE__*/React.createElement("p", {
+    className: "field-help"
+  }, "\u5728\u754C\u9762\u4FDD\u5B58\u4F1A\u91CD\u5199\u5F53\u524D\u4F5C\u7528\u8303\u56F4\u7684\u89C4\u5219\u6587\u4EF6\uFF1B\u5982\u9700\u4FDD\u7559 YAML \u6CE8\u91CA\uFF0C\u8BF7\u76F4\u63A5\u7F16\u8F91\u89C4\u5219\u6587\u4EF6\u3002"), !libraryAvailable ? /*#__PURE__*/React.createElement("p", {
+    className: "field-help"
+  }, "\u6682\u672A\u8BC6\u522B\u5230\u5F53\u524D\u53D1\u7968\u5E93\uFF1A\u5148\u5B8C\u6210\u4E00\u6B21\u672C\u5730\u6574\u7406\u6216\u9009\u62E9\u8F93\u51FA\u76EE\u5F55\u540E\uFF0C\u624D\u80FD\u5207\u6362\u300C\u5F53\u524D\u53D1\u7968\u5E93\u300D\u5E76\u4FDD\u5B58\u5E93\u5185\u89C4\u5219\u3002") : null)), /*#__PURE__*/React.createElement("div", {
+    className: "rules-tabbar",
+    role: "tablist",
+    "aria-label": "\u5F52\u7C7B\u89C4\u5219\u5206\u533A"
+  }, RULE_PANEL_OPTIONS.map(option => /*#__PURE__*/React.createElement("button", {
+    key: option.value,
+    type: "button",
+    role: "tab",
+    "aria-selected": activePanel === option.value,
+    className: joinClasses("quick-chip", activePanel === option.value && "is-active"),
+    onClick: () => handlePanelChange(option.value)
+  }, option.label))), activePanel === "tools" ? /*#__PURE__*/React.createElement("div", {
+    className: "rules-tools-layout"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "rules-column"
+  }, /*#__PURE__*/React.createElement("section", {
+    className: "surface-card"
+  }, /*#__PURE__*/React.createElement(SectionHeader, {
+    icon: "experiment",
+    title: "\u89C4\u5219\u6D4B\u8BD5",
+    indicator: /*#__PURE__*/React.createElement(StatusPill, {
+      tone: "info"
+    }, "\u4E0D\u5199\u5165\u89C4\u5219\u6587\u4EF6")
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "card-stack card-stack--compact"
+  }, /*#__PURE__*/React.createElement("p", {
+    className: "field-help"
+  }, "\u7528\u5F53\u524D\u7F16\u8F91\u4E2D\u7684\u89C4\u5219\u8BD5\u7B97\u4E00\u5F20\u53D1\u7968\uFF0C\u4E0D\u4F1A\u5199\u5165\u89C4\u5219\u6587\u4EF6\uFF0C\u4E5F\u4E0D\u5F71\u54CD\u5DF2\u4FDD\u5B58\u914D\u7F6E\u3002"), /*#__PURE__*/React.createElement("div", {
+    className: "rules-test-grid"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "field-block"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "field-label"
+  }, "\u9500\u552E\u65B9"), /*#__PURE__*/React.createElement("div", {
+    className: "field-shell"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "text",
+    className: "field-input",
+    placeholder: "\u5982 \u67D0\u67D0\u9910\u996E\u7BA1\u7406\u6709\u9650\u516C\u53F8",
+    value: testFields.seller,
+    onChange: event => updateTestField("seller", event.target.value)
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "field-block"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "field-label"
+  }, "\u9500\u552E\u65B9\u7A0E\u53F7"), /*#__PURE__*/React.createElement("div", {
+    className: "field-shell"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "text",
+    className: "field-input u-mono",
+    placeholder: "\u53EF\u9009",
+    value: testFields.seller_tin,
+    onChange: event => updateTestField("seller_tin", event.target.value)
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "field-block"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "field-label"
+  }, "\u53D1\u7968\u660E\u7EC6"), /*#__PURE__*/React.createElement("div", {
+    className: "field-shell"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "text",
+    className: "field-input",
+    placeholder: "\u5982 \u9910\u996E\u670D\u52A1",
+    value: testFields.item,
+    onChange: event => updateTestField("item", event.target.value)
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "field-block"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "field-label"
+  }, "\u7968\u79CD"), /*#__PURE__*/React.createElement(DarkSelect, {
+    value: testFields.type,
+    options: [{
+      value: "",
+      label: "不限票种"
+    }].concat(documentTypes.map(type => ({
+      value: type,
+      label: type
+    }))),
+    onChange: value => updateTestField("type", value),
+    ariaLabel: "\u6D4B\u8BD5\u7968\u79CD"
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "field-block"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "field-label"
+  }, "\u91D1\u989D"), /*#__PURE__*/React.createElement("div", {
+    className: "field-shell"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "text",
+    inputMode: "decimal",
+    className: "field-input u-tabular",
+    placeholder: "\u5982 128.00",
+    value: testFields.amount,
+    onChange: event => updateTestField("amount", event.target.value)
+  })))), /*#__PURE__*/React.createElement("div", {
+    className: "footer-cluster"
+  }, /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn--secondary btn--sm",
+    onClick: handleTestRules,
+    disabled: testState.status === "testing"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "material-symbols-outlined"
+  }, testState.status === "testing" ? "sync" : "play_arrow"), /*#__PURE__*/React.createElement("span", null, testState.status === "testing" ? "测试中..." : "测试归类结果")), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn--ghost btn--sm",
+    onClick: () => setTestState({
+      status: "idle",
+      result: null,
+      issues: [],
+      message: ""
+    })
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "material-symbols-outlined"
+  }, "clear_all"), /*#__PURE__*/React.createElement("span", null, "\u6E05\u7A7A\u7ED3\u679C"))), testState.message ? /*#__PURE__*/React.createElement(NoticeBox, {
+    tone: testState.status === "error" ? "error" : "info"
+  }, testState.message) : null, testState.issues.length > 0 ? /*#__PURE__*/React.createElement(RuleIssues, {
+    issues: testState.issues,
+    title: "\u6D4B\u8BD5\u6821\u9A8C\u672A\u901A\u8FC7"
+  }) : null, /*#__PURE__*/React.createElement(RuleTestResult, {
+    result: testState.result,
+    categoryNameById: categoryNameById,
+    targetTypeById: targetTypeById
+  })))), /*#__PURE__*/React.createElement("div", {
+    className: "rules-column"
+  }, /*#__PURE__*/React.createElement("section", {
+    className: "surface-card"
+  }, /*#__PURE__*/React.createElement(SectionHeader, {
+    icon: "menu_book",
+    title: "\u9500\u552E\u65B9\u8BCD\u5178",
+    indicator: /*#__PURE__*/React.createElement(StatusPill, {
+      tone: "info"
+    }, `${draft.terms.length} 条`)
+  }), /*#__PURE__*/React.createElement(RuleDictionarySection, {
+    terms: draft.terms,
+    categoryOptions: ruleRows,
+    scope: scope,
+    onAddTerm: handleAddRuleTerm,
+    onDeleteTerm: handleDeleteRuleTerm
+  })))) : activePanel === "types" ? /*#__PURE__*/React.createElement(RuleTypesManager, {
+    builtinTypes: typesState.builtinTypes,
+    customTypes: typesState.customTypes,
+    issues: typeIssues,
+    busy: busyAction === "type",
+    onDeleteType: handleDeleteType
+  }) : /*#__PURE__*/React.createElement("div", {
+    className: "rules-panel"
+  }, /*#__PURE__*/React.createElement(NoticeBox, {
+    tone: "info"
+  }, RULE_ORDER_HELP), missingTargetCount > 0 ? /*#__PURE__*/React.createElement(NoticeBox, {
+    tone: "warning"
+  }, "\u6709 ", missingTargetCount, " \u6761\u5386\u53F2\u89C4\u5219\u8FD8\u6CA1\u6709\u9009\u62E9\u76EE\u6807\u7968\u79CD\uFF0C\u8BF7\u9010\u6761\u7F16\u8F91\u8865\u9009\u540E\u518D\u4FDD\u5B58\u3002") : null, missingBuiltinTargetCount > 0 ? /*#__PURE__*/React.createElement(NoticeBox, {
+    tone: "warning"
+  }, "\u6709 ", missingBuiltinTargetCount, " \u6761\u5185\u7F6E\u89C4\u5219\u4FEE\u6539\u8FD8\u6CA1\u6709\u9009\u62E9\u76EE\u6807\u7968\u79CD\uFF0C\u8BF7\u9010\u6761\u7F16\u8F91\u8865\u9009\u540E\u518D\u4FDD\u5B58\u3002") : null, /*#__PURE__*/React.createElement(RuleUnclassifiedSection, {
+    invoices: unclassifiedInvoices,
+    onPrefill: handlePrefillFromInvoice
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "rules-layout"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "rules-column rules-column--main"
+  }, /*#__PURE__*/React.createElement("section", {
+    className: "surface-card"
+  }, /*#__PURE__*/React.createElement(SectionHeader, {
+    icon: "rule",
+    title: "\u81EA\u5B9A\u4E49\u89C4\u5219"
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "card-stack card-stack--compact"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "rules-toolbar"
+  }, /*#__PURE__*/React.createElement("p", {
+    className: "field-help"
+  }, "\u6BCF\u6761\u89C4\u5219\u7531\u76EE\u6807\u7968\u79CD\u3001\u5173\u952E\u8BCD\u548C\u91D1\u989D\u8303\u56F4\u7EC4\u6210\uFF0C\u6587\u4EF6\u5939\u6309\u300C\u76EE\u6807\u7968\u79CD + \u91D1\u989D\u8303\u56F4\u300D\u81EA\u52A8\u751F\u6210\u3002"), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn--secondary btn--sm",
+    onClick: handleAddRule
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "material-symbols-outlined"
+  }, "add"), /*#__PURE__*/React.createElement("span", null, "\u65B0\u589E\u89C4\u5219"))), ruleRows.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "rules-empty-state"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "material-symbols-outlined"
+  }, "rule"), /*#__PURE__*/React.createElement("p", null, "\u5F53\u524D\u4F5C\u7528\u8303\u56F4\u8FD8\u6CA1\u6709\u81EA\u5B9A\u4E49\u89C4\u5219\uFF0C\u70B9\u51FB\u300C\u65B0\u589E\u89C4\u5219\u300D\u521B\u5EFA\u7B2C\u4E00\u6761\u89C4\u5219\u3002")) : /*#__PURE__*/React.createElement("div", {
+    className: "rules-category-list"
+  }, ruleRows.map(row => /*#__PURE__*/React.createElement("div", {
+    key: String(row.id || row.index),
+    className: joinClasses("rule-category-row", row.enabled === false && "is-disabled")
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "rule-category-row__main"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "rule-category-row__title"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "rule-category-row__folder-icon material-symbols-outlined"
+  }, "folder"), /*#__PURE__*/React.createElement("span", {
+    className: joinClasses("rule-category-row__name", "u-truncate", !row.previewFolder && "rule-category-row__name--missing"),
+    title: row.previewFolder || "请选择目标票种"
+  }, row.previewFolder || "请选择目标票种"), row.target_type ? /*#__PURE__*/React.createElement("span", {
+    className: "rule-target-tag",
+    title: `目标票种：${row.target_type}`
+  }, row.target_type) : /*#__PURE__*/React.createElement(StatusPill, {
+    tone: "warning"
+  }, "\u7F3A\u5C11\u76EE\u6807\u7968\u79CD"), row.enabled === false ? /*#__PURE__*/React.createElement(StatusPill, {
+    tone: "warning"
+  }, "\u5DF2\u505C\u7528") : null), /*#__PURE__*/React.createElement("div", {
+    className: "rule-category-row__meta"
+  }, /*#__PURE__*/React.createElement("span", null, "\u5173\u952E\u8BCD ", /*#__PURE__*/React.createElement("strong", null, safeText(row.mainKeyword, "未填写"))), /*#__PURE__*/React.createElement("span", null, "\u91D1\u989D ", /*#__PURE__*/React.createElement("strong", null, formatRuleAmountRangeLabel(row.amount_range))), row.target_type && documentTypes.length > 0 && documentTypes.indexOf(row.target_type) < 0 ? /*#__PURE__*/React.createElement(StatusPill, {
+    tone: "error"
+  }, "\u7968\u79CD\u5DF2\u5931\u6548") : null)), /*#__PURE__*/React.createElement("div", {
+    className: "rule-category-row__actions"
+  }, /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: joinClasses("rule-icon-button", row.enabled !== false && "is-active"),
+    title: row.enabled !== false ? "停用" : "启用",
+    "aria-label": `${row.enabled !== false ? "停用" : "启用"} ${row.previewFolder || "规则"}`,
+    onClick: () => handleToggleRule(row.index)
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "material-symbols-outlined"
+  }, row.enabled !== false ? "toggle_on" : "toggle_off")), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "rule-icon-button",
+    title: "\u4E0A\u79FB",
+    "aria-label": `上移 ${row.previewFolder || "规则"}`,
+    disabled: row.index === 0,
+    onClick: () => handleMoveRule(row.index, -1)
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "material-symbols-outlined"
+  }, "arrow_upward")), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "rule-icon-button",
+    title: "\u4E0B\u79FB",
+    "aria-label": `下移 ${row.previewFolder || "规则"}`,
+    disabled: row.index === ruleRows.length - 1,
+    onClick: () => handleMoveRule(row.index, 1)
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "material-symbols-outlined"
+  }, "arrow_downward")), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "rule-icon-button",
+    title: "\u7F16\u8F91",
+    "aria-label": `编辑 ${row.previewFolder || "规则"}`,
+    onClick: () => handleEditRule(row.index)
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "material-symbols-outlined"
+  }, "edit")), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "rule-icon-button rule-icon-button--danger",
+    title: "\u5220\u9664",
+    "aria-label": `删除 ${row.previewFolder || "规则"}`,
+    onClick: () => handleDeleteRule(row.index)
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "material-symbols-outlined"
+  }, "delete"))))))))), /*#__PURE__*/React.createElement("div", {
+    className: "rules-column rules-column--side"
+  }, builtinEditor ? null : /*#__PURE__*/React.createElement("section", {
+    className: "surface-card"
+  }, /*#__PURE__*/React.createElement(SectionHeader, {
+    icon: editor && editor.mode === "edit" ? "edit_note" : "add_circle",
+    title: editor ? editor.mode === "new" ? "新增规则" : "编辑规则" : "规则编辑",
+    indicator: editor ? /*#__PURE__*/React.createElement(StatusPill, {
+      tone: "info"
+    }, ruleScopeLabel(scope)) : null
+  }), /*#__PURE__*/React.createElement(RuleEditor, {
+    editor: editor,
+    documentTypes: documentTypes,
+    onChange: handleEditorChange,
+    onCreateType: handleCreateType,
+    onCommit: handleEditorCommit,
+    onCancel: () => {
+      setEditor(null);
+      setSaveIssues([]);
+    }
+  })))), builtinEditor ? /*#__PURE__*/React.createElement("section", {
+    className: "surface-card"
+  }, /*#__PURE__*/React.createElement(SectionHeader, {
+    icon: "edit_note",
+    title: builtinEditor.label ? `编辑内置规则：${builtinEditor.label}` : "编辑内置规则",
+    indicator: /*#__PURE__*/React.createElement(StatusPill, {
+      tone: "info"
+    }, ruleScopeLabel(scope))
+  }), /*#__PURE__*/React.createElement(RuleBuiltinEditor, {
+    editor: builtinEditor,
+    documentTypes: documentTypes,
+    onChange: handleBuiltinEditorChange,
+    onCreateType: handleCreateType,
+    onCommit: handleBuiltinEditorCommit,
+    onCancel: () => setBuiltinEditor(null)
+  })) : null, /*#__PURE__*/React.createElement(RuleBuiltinSection, {
+    rows: builtinRows,
+    busy: saving || restoreBusy,
+    onEdit: handleEditBuiltinRule,
+    onToggle: handleToggleBuiltinRule,
+    onRestore: handleRestoreBuiltinRule,
+    onRestoreAll: handleRestoreAllBuiltin
+  }))), /*#__PURE__*/React.createElement(RuleRestoreDialog, {
+    dialog: restoreDialog,
+    mode: restoreMode,
+    busy: restoreBusy,
+    error: restoreError,
+    issues: restoreIssues,
+    libraryAvailable: libraryAvailable,
+    scopeLabel: ruleScopeLabel(scope),
+    dirty: dirty,
+    onModeChange: setRestoreMode,
+    onConfirm: handleConfirmRestoreBuiltin,
+    onCancel: () => {
+      setRestoreDialog(null);
+      setRestoreError("");
+      setRestoreIssues([]);
+    }
+  }));
+}
 function App() {
   const [showDisclaimer, setShowDisclaimer] = useState(false);
   return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(MemoryRouter, null, /*#__PURE__*/React.createElement(Routes, null, /*#__PURE__*/React.createElement(Route, {
@@ -2187,6 +4802,11 @@ function App() {
   }), /*#__PURE__*/React.createElement(Route, {
     path: "/analysis",
     element: /*#__PURE__*/React.createElement(AnalysisPage, {
+      onOpenDisclaimer: () => setShowDisclaimer(true)
+    })
+  }), /*#__PURE__*/React.createElement(Route, {
+    path: "/rules",
+    element: /*#__PURE__*/React.createElement(RulesPage, {
       onOpenDisclaimer: () => setShowDisclaimer(true)
     })
   }))), /*#__PURE__*/React.createElement(DisclaimerDialog, {

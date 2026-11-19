@@ -160,6 +160,7 @@ def test_toll_summary_text_is_classified_with_fields():
     assert payload["Amount"] == "76.47"
     assert payload["Purchaser"] == "广州华伟医疗设备有限公司"
     assert "粤ACP9636" in payload["Seller"]
+    assert payload["Item"] == ""
     assert result.warnings == []
     assert result.confidence >= 0.85
 
@@ -222,6 +223,7 @@ def test_qr_image_is_classified_as_invoice_qr(tmp_path: Path, monkeypatch):
     assert payload["Seller"] == "百望云"
     assert payload["Amount"] == "158.80"
     assert payload["Date"] == "2026-10-25"
+    assert payload["Item"] == ""
     recognition = payload["local_recognition"]
     assert recognition["qr_provider"] == "百望云"
     assert len(recognition["qr_payload_sha256"]) == 64

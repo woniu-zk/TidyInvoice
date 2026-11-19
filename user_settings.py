@@ -73,6 +73,23 @@ def get_runtime_data_dir():
     return runtime_dir
 
 
+def get_rules_dir():
+    """Global, user-editable classification-rules directory.
+
+    The directory is not created here: callers decide when to create it so a
+    normal read does not touch the user's settings area.
+    """
+    return os.path.join(get_settings_dir(), "rules")
+
+
+def get_library_rules_dir(library_dir):
+    """Rules directory that overrides the global rules for one invoice library."""
+    root = str(library_dir or "").strip()
+    if not root:
+        return ""
+    return os.path.join(os.path.abspath(root), "rules")
+
+
 def get_runtime_diagnostics_dir():
     diagnostics_dir = os.path.join(get_runtime_data_dir(), "diagnostics")
     os.makedirs(diagnostics_dir, exist_ok=True)

@@ -1,0 +1,201 @@
+# InvoiceFlowAI 内置分类规则（L0 默认层）
+#
+# 本文件随应用发布，用户规则按分类 id 逐字段覆盖它：
+#   内置 L0 -> 全局 rules/categories.yaml -> 发票库 rules/categories.yaml
+#          -> 全局 rules/rules.d/*.yaml -> 发票库 rules/rules.d/*.yaml
+#
+# 票种已识别时由 type_categories 决定归档目录（保持既有「票种 -> 目录」行为）；
+# 只有当票种识别为「其他」或无法识别时，下面的 keyword 规则才参与兜底匹配。
+# 因此每条关键词规则都显式声明 invoice_types: ["其他"]。
+#
+# 规则按列表顺序匹配：越晚的层级越优先，同层内越靠前的条目越优先。
+# priority 字段已废弃（旧配置仍可读取，但不再影响匹配顺序）。
+version: 1
+
+# 未命中任何规则时的兜底分类；调用方看到 source="unknown" 会转人工复核。
+fallback: other
+
+# 已识别的票种 -> 分类 id。
+# 非目标公司发票 / 个人非报销发票 由应用的安全分流逻辑处理，不在此映射；
+# 「其他」也不需要映射（它表示票种识别不确定，交给关键词兜底）。
+type_categories:
+  打车: taxi
+  行程单: taxi
+  火车票: train
+  机票: flight
+  住宿发票: hotel
+  住宿水单: hotel
+  餐饮: meal
+  过路费: toll
+  充电: charging
+  定额发票: quota
+  航班行程单: flight
+  住宿确认单: hotel
+  差旅服务费: travel_fee
+  通行费汇总单: toll_summary
+  开票二维码: qr
+
+categories:
+  # 通行费电子票据汇总单：必须排在「过路费/通行费」之前，否则会被宽泛关键词抢先。
+  - id: toll_summary
+    name: 通行费汇总单
+    archive_folder: 通行费汇总单
+    match: seller_item
+    invoice_types: ["其他"]
+    keywords:
+      - 通行费电子票据汇总单
+    description: 按票据/行程索引的通行费汇总单，本身不是单张发票
+
+  # 小票/邮件中的扫码开票入口（百望云、诺诺等二维码）。
+  - id: qr
+    name: 开票二维码
+    archive_folder: 开票二维码
+    match: seller_item
+    invoice_types: ["其他"]
+    keywords:
+      - 扫码开票
+      - 开票二维码
+      - 扫码领取
+    description: 扫码开票入口，等待后续开票
+
+  # 差旅服务费（GBT Travel Services / SCCT 发票）。
+  - id: travel_fee
+    name: 差旅服务费
+    archive_folder: 差旅服务费
+    match: seller_item
+    invoice_types: ["其他"]
+    keywords:
+      - GBT Travel
+      - 国旅运通
+      - 差旅服务
+      - SCCT
+    description: 差旅服务商开具的服务费发票
+
+  # 电动车充电：只收充电服务/充电费类证据，避免充电宝商品与办公电费误判。
+  - id: charging
+    name: 充电
+    archive_folder: 充电
+    match: seller_item
+    invoice_types: ["其他"]
+    keywords:
+      - 充电服务
+      - 充电费
+      - 充电桩
+      - 充电站
+    description: 电动车充电服务费
+
+  # 过路费/通行费（不含「通行费电子票据汇总单」，那条规则排在更前面）。
+  - id: toll
+    name: 过路费
+    archive_folder: 过路费
+    match: seller_item
+    invoice_types: ["其他"]
+    keywords:
+      - 通行费
+      - 过路费
+      - 高速费
+      - ETC
+    description: 高速公路通行费
+
+  # 机票/航空行程单。
+  - id: flight
+    name: 机票
+    archive_folder: 机票
+    match: seller_item
+    invoice_types: ["其他"]
+    keywords:
+      - 航空
+      - 机票
+      - 航班
+      - 民航
+    description: 机票及航空行程单
+
+  # 火车票/铁路电子客票。
+  - id: train
+    name: 火车票
+    archive_folder: 火车票
+    match: seller_item
+    invoice_types: ["其他"]
+    keywords:
+      - 中国铁路
+      - 铁路
+      - 高铁
+      - "12306"
+      - 火车票
+    description: 铁路电子客票
+
+  # 住宿：酒店/宾馆发票与水单/folio 账单。
+  - id: hotel
+    name: 住宿发票
+    archive_folder: 住宿发票
+    match: seller_item
+    invoice_types: ["其他"]
+    keywords:
+      - 酒店
+      - 宾馆
+      - 住宿
+      - 民宿
+      - 旅馆
+      - 客栈
+      - 水单
+      - folio
+      - 房费
+    description: 酒店住宿发票/水单
+
+  # 打车：网约车/出租车/客运服务，保持现有文本关键词。
+  - id: taxi
+    name: 打车
+    archive_folder: 打车
+    match: seller_item
+    invoice_types: ["其他"]
+    keywords:
+      - 滴滴
+      - 高德
+      - 曹操
+      - T3
+      - 出租
+      - 网约车
+      - 客运服务
+      - 运输服务
+      - 盛智
+      - 畅行
+    description: 出租车/网约车/客运服务
+
+  # 餐饮：正餐、咖啡、茶饮与外卖平台。
+  - id: meal
+    name: 餐饮
+    archive_folder: 餐饮
+    match: seller_item
+    invoice_types: ["其他"]
+    keywords:
+      - 餐饮
+      - 餐厅
+      - 饭店
+      - 咖啡
+      - 茶饮
+      - 奶茶
+      - 饮品
+      - 美团
+      - 饿了么
+      - 麦当劳
+      - 肯德基
+    description: 餐饮消费
+
+  # 定额发票。
+  - id: quota
+    name: 定额发票
+    archive_folder: 定额发票
+    match: seller_item
+    invoice_types: ["其他"]
+    keywords:
+      - 定额发票
+    description: 定额发票
+
+  # 兜底分类：没有关键词，永不参与命中；未命中时以 unknown 身份返回给人工复核。
+  - id: other
+    name: 其他
+    archive_folder: 其他
+    match: seller_item
+    invoice_types: ["其他"]
+    keywords: []
+    description: 兜底分类（未命中任何规则时转人工复核）

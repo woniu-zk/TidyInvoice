@@ -452,8 +452,15 @@ _AMOUNT_TAX_PAIR_RE = re.compile(
 )
 _AMOUNT_ONLY_RE = re.compile(r"金额[^\d]{0,10}([0-9][0-9,]*\.[0-9]{2})")
 _TAX_ONLY_RE = re.compile(r"税额[^\d]{0,10}([0-9][0-9,]*\.[0-9]{2})")
-_ITEM_STAR_RE = re.compile(r"\*([^*\n]{2,24})\*")
-_ITEM_LINE_RE = re.compile(r"货物或应税劳务、?服务名称[^\n]{0,24}\n?([^\n]{2,60})")
+_ITEM_NAME_CELL_RE = re.compile(r"\*[^*\n]{2,24}\*[^\s*]{0,40}")
+_ITEM_ROW_LABELS = (
+    "货物或应税劳务、服务名称",
+    "货物或应税劳务服务名称",
+    "货物或应税劳务名称",
+    "项目名称",
+    "货物名称",
+)
+_ITEM_ROW_COLUMN_TOKENS = ("规格型号", "单位", "数量", "单价", "金额", "税率", "税额")
 
 _TYPE_KEYWORDS: tuple[tuple[tuple[str, ...], str], ...] = (
     (("铁路电子客票", "火车票", "高铁"), "火车票"),
@@ -483,6 +490,39 @@ _UPPER_TOTAL_RE = re.compile(
     r"价税合计[^\n]{0,16}?(?:大写)?[)）]?\s*([零壹贰叁肆伍陆柒捌玖拾佰仟万亿圆元角分整正]{2,})"
 )
 _UPPER_FALLBACK_RE = re.compile(r"[（(]大写[）)]\s*([零壹贰叁肆伍陆柒捌玖拾佰仟万亿圆元角分整正]{2,})")
+
+
+def _clean_item_cell(value: str) -> str:
+    """Normalize one item-name cell: drop column padding and numeric columns."""
+    cell = str(value or "").strip()
+    if not cell:
+        return ""
+    cell = re.split(r"\s{2,}", cell, maxsplit=1)[0]
+    cell = re.split(r"\s+(?=[0-9¥￥])", cell, maxsplit=1)[0]
+    return re.sub(r"\s+", "", cell).strip()
+
+
+def _item_row_cell(text: str) -> str:
+    """Return the first item name from a 货物/项目名称 row, when one exists."""
+    lines = str(text or "").splitlines()
+    for index, line in enumerate(lines):
+        label_end = -1
+        for label in _ITEM_ROW_LABELS:
+            found = line.find(label)
+            if found >= 0:
+                label_end = found + len(label)
+                break
+        if label_end < 0:
+            continue
+        remainder = line[label_end:].strip(" \t:：")
+        if remainder and not any(token in remainder for token in _ITEM_ROW_COLUMN_TOKENS):
+            return _clean_item_cell(remainder)
+        for later_line in lines[index + 1:]:
+            candidate = _clean_item_cell(later_line)
+            if candidate:
+                return candidate
+        return ""
+    return ""
 
 
 def parse_chinese_amount(text: str) -> Decimal | None:
@@ -683,14 +723,28 @@ class _FieldExtractor:
         return amount, tax, total
 
     # -- classification -----------------------------------------------------
+    def item_names(self) -> str:
+        """Up to five unique item-name cells, e.g. ``*运输服务*客运服务费``.
+
+        Cells are taken from every ``*tax-category*goods-name`` token in the
+        text and, as a fallback source, from the 货物/项目名称 row.
+        """
+        names: list[str] = []
+        for match in _ITEM_NAME_CELL_RE.finditer(self.text):
+            name = re.sub(r"\s+", "", match.group(0)).strip()
+            if not name or name in names:
+                continue
+            names.append(name)
+            if len(names) >= 5:
+                return " | ".join(names)
+        row_name = _item_row_cell(self.text)
+        if row_name and row_name not in names:
+            names.append(row_name)
+        return " | ".join(names[:5])
+
     def item_text(self) -> str:
-        match = _ITEM_STAR_RE.search(self.text)
-        if match:
-            return match.group(1)
-        match = _ITEM_LINE_RE.search(self.text)
-        if match:
-            return match.group(1)
-        return ""
+        names = self.item_names()
+        return names.split(" | ", 1)[0] if names else ""
 
     def document_type(self) -> str:
         haystack = f"{self.item_text()} {self.text[:2500]}"
@@ -903,6 +957,7 @@ def _build_qr_invoice_payload(
         "InvoiceNumber": "",
         "Type": TYPE_QR_INVOICE,
         "category": TYPE_QR_INVOICE,
+        "Item": "",
         "Departure_Date": "",
         "Departure_City": "",
         "Destination_City": "",
@@ -1007,6 +1062,7 @@ def _parse_toll_summary(text: str, engine: str) -> RecognitionResult | None:
         "InvoiceNumber": summary_number,
         "Type": TYPE_TOLL_SUMMARY,
         "category": TYPE_TOLL_SUMMARY,
+        "Item": "",
         "Departure_Date": "",
         "Departure_City": "",
         "Destination_City": "",
@@ -1097,6 +1153,7 @@ def extract_invoice_payload(text: str, *, engine: str, confidence_cap: float = 0
         "InvoiceNumber": invoice_number,
         "Type": document_type,
         "category": document_type,
+        "Item": extractor.item_names(),
         "Departure_Date": route["Departure_Date"],
         "Departure_City": route["Departure_City"],
         "Destination_City": route["Destination_City"],
@@ -1153,11 +1210,14 @@ def _xml_payload(xml_text: str) -> RecognitionResult:
         "Date": invoice_date,
         "Purchaser": str(fields.get("purchaser") or ""),
         "Seller": str(fields.get("seller") or ""),
+        "seller_tin": str(fields.get("seller_tin") or ""),
+        "buyer_tin": str(fields.get("buyer_tin") or ""),
         "Amount": format(amount_value, "f") if amount_value is not None else "",
         "InvoiceCode": str(fields.get("invoice_code") or ""),
         "InvoiceNumber": str(fields.get("invoice_number") or ""),
         "Type": document_type,
         "category": document_type,
+        "Item": str(fields.get("item_name") or ""),
         "Departure_Date": "",
         "Departure_City": "",
         "Destination_City": "",

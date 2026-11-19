@@ -8,11 +8,12 @@ a WeChat download folder, paperwork photos) can be organized on its own.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 import filecmp
 import os
 import shutil
 import time
+from collections.abc import Iterable
 from typing import Any
 
 import fetch_handoff
@@ -92,6 +93,11 @@ class OrganizeResult:
     #: is the preview of the same re-layout for dry runs.
     layout_migrated_count: int = 0
     layout_planned_count: int = 0
+    #: Expense-classification summary for this run.
+    classification_counts: dict[str, int] = field(default_factory=dict)
+    classification_source_counts: dict[str, int] = field(default_factory=dict)
+    unclassified_count: int = 0
+    dictionary_hit_count: int = 0
     report_path: str = ""
     warnings: tuple[str, ...] = ()
     preview_rows: tuple[dict[str, Any], ...] = ()
@@ -123,6 +129,10 @@ class OrganizeResult:
             "originals_kept_count": self.originals_kept_count,
             "layout_migrated_count": self.layout_migrated_count,
             "layout_planned_count": self.layout_planned_count,
+            "classification_counts": dict(self.classification_counts),
+            "classification_source_counts": dict(self.classification_source_counts),
+            "unclassified_count": int(self.unclassified_count),
+            "dictionary_hit_count": int(self.dictionary_hit_count),
             "report_path": self.report_path,
             "warnings": list(self.warnings),
             "preview_rows": list(self.preview_rows),
@@ -163,13 +173,16 @@ def _exclude_paths(request: OrganizeRequest) -> tuple[str, ...]:
     return ()
 
 
-def scan_input(request: OrganizeRequest) -> organize_source.LocalScanResult:
+def scan_input(
+    request: OrganizeRequest,
+    extra_category_folders: Iterable[str] = (),
+) -> organize_source.LocalScanResult:
     manifest_path = request.manifest_path if os.path.isfile(request.manifest_path) else None
     scan = organize_source.scan_local_directory(
         request.input_dir,
         exclude_paths=_exclude_paths(request),
         exclude_root_child_dir_names=(
-            archive_dir_names() if request.in_place else ()
+            archive_dir_names(extra_category_folders) if request.in_place else ()
         ),
         manifest_path=manifest_path,
         recursive=request.recursive,
@@ -241,6 +254,9 @@ class LocalOrganizer:
         self._session = None
         self._extractor = None
         self._run_id = ""
+        self._rule_set = None
+        self._category_folders: tuple[str, ...] = ()
+        self._file_categories: dict[str, str] = {}
         self.scan_result: organize_source.LocalScanResult | None = None
         self.last_layout_migration: LayoutMigration | None = None
         self.last_relocation: dict[str, Any] = {
@@ -251,9 +267,35 @@ class LocalOrganizer:
         }
 
     # ----------------------------------------------------------------- stages
+    def _load_classification_rules(self) -> None:
+        """Load the rules effective for this library and its folder history."""
+        from expense_rules import load_rule_set
+
+        output_dir = self.request.resolved_output_dir
+        self._rule_set = load_rule_set(output_dir)
+        folders = {
+            str(getattr(category, "archive_folder", "") or "").strip()
+            for category in (self._rule_set.categories or ())
+        }
+        folders.discard("")
+        history_loader = getattr(self.api, "_load_archive_folder_history", None)
+        if callable(history_loader):
+            try:
+                folders.update(history_loader(output_dir))
+            except Exception:
+                pass
+        self._category_folders = tuple(sorted(folders))
+        file_loader = getattr(self.api, "_load_archive_file_categories", None)
+        if callable(file_loader):
+            try:
+                self._file_categories = dict(file_loader(output_dir))
+            except Exception:
+                self._file_categories = {}
+
     def prepare_api(self) -> None:
         """Mirror the run context the processing pipeline expects."""
         request = self.request
+        self._load_classification_rules()
         run_id = str(request.run_id or f"local-organize-{time.strftime('%Y%m%d%H%M%S')}")
         self._run_id = run_id
         output_dir = request.resolved_output_dir
@@ -290,12 +332,19 @@ class LocalOrganizer:
         # Enforce the layout this run asks for before scanning: when an earlier
         # run already organized this folder with the other layout, its archive
         # files are moved now instead of being skipped as "already organized".
+        if self._rule_set is None:
+            self._load_classification_rules()
         self.last_layout_migration = enforce_layout(
             self.request.resolved_output_dir,
             split_by_category=self.request.split_by_category,
             dry_run=self.request.dry_run,
+            extra_category_folders=self._category_folders,
+            rule_set=self._rule_set,
+            file_category_map=self._file_categories,
         )
-        self.scan_result = scan_input(self.request)
+        self.scan_result = scan_input(
+            self.request, extra_category_folders=self._category_folders
+        )
         return self.scan_result
 
     def extract(self, rows: list[dict[str, Any]]):
@@ -530,6 +579,32 @@ class LocalOrganizer:
             else 0
         )
         layout_warnings = tuple(str(item) for item in getattr(migration, "warnings", ()) or ())
+        classification_summary = {}
+        summarize = getattr(self.api, "_summarize_stats", None)
+        if callable(summarize):
+            try:
+                classification_summary = summarize() or {}
+            except Exception:
+                classification_summary = {}
+        classification_counts = dict(
+            classification_summary.get("classification_breakdown") or {}
+        )
+        classification_source_counts = dict(
+            classification_summary.get("classification_source_breakdown") or {}
+        )
+        unclassified_count = int(
+            classification_summary.get("unclassified_count", 0) or 0
+        )
+        dictionary_hit_count = int(
+            classification_summary.get("dictionary_hit_count", 0) or 0
+        )
+        warnings = list(scan.warnings)
+        warnings.extend(layout_warnings)
+        warnings.extend(str(item) for item in relocation.get("warnings", []) or [])
+        if unclassified_count > 0:
+            warnings.append(
+                f"有 {unclassified_count} 张发票未命中归类规则，已放入「待人工复核」"
+            )
         return OrganizeResult(
             request=request,
             run_id=str(self.api._current_run_id or ""),
@@ -549,10 +624,12 @@ class LocalOrganizer:
             originals_kept_count=int(relocation.get("originals_kept_count", 0) or 0),
             layout_migrated_count=layout_migrated,
             layout_planned_count=layout_planned,
+            classification_counts=classification_counts,
+            classification_source_counts=classification_source_counts,
+            unclassified_count=unclassified_count,
+            dictionary_hit_count=dictionary_hit_count,
             report_path=report_path,
-            warnings=tuple(scan.warnings)
-            + layout_warnings
-            + tuple(str(item) for item in relocation.get("warnings", []) or []),
+            warnings=tuple(warnings),
             preview_rows=preview_rows,
             duration_seconds=time.monotonic() - started,
         )

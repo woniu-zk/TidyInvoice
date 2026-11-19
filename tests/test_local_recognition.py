@@ -115,6 +115,72 @@ def test_text_payload_maps_all_core_fields():
     assert payload["local_recognition"]["confidence"] >= 0.9
 
 
+def test_payload_items_keep_full_star_cells():
+    payload = lr.extract_invoice_payload(SAMPLE_EINVOICE_TEXT, engine=lr.ENGINE_PDF_TEXT).payload
+    assert payload is not None
+    assert payload["Item"] == "*运输服务*客运服务费"
+
+
+def test_item_names_dedupes_and_caps_at_five_cells():
+    text = "\n".join(
+        [
+            "电子发票（普通发票）",
+            "*供电*电费 1 84.27",
+            "*供电*充电服务费 1 38.54",
+            "*餐饮服务*餐费 1 10.00",
+            "*餐饮服务*餐费 1 10.00",
+            "*住宿服务*住宿费 1 20.00",
+            "*运输服务*客运服务费 1 1.00",
+            "*信息服务*技术服务费 1 2.00",
+        ]
+    )
+
+    names = lr._FieldExtractor(text).item_names()
+
+    assert names == (
+        "*供电*电费 | *供电*充电服务费 | *餐饮服务*餐费 | *住宿服务*住宿费 | *运输服务*客运服务费"
+    )
+    assert lr._FieldExtractor(text).item_text() == "*供电*电费"
+
+
+def test_item_names_falls_back_to_goods_name_row():
+    text = "\n".join(
+        [
+            "电子发票（普通发票）",
+            "货物或应税劳务、服务名称",
+            "住宿服务 441.15 441.15 6% 26.47",
+            "价税合计（小写）¥467.62",
+        ]
+    )
+
+    assert lr._FieldExtractor(text).item_names() == "住宿服务"
+
+
+def test_xml_payload_includes_item_and_tax_ids(tmp_path: Path):
+    xml = tmp_path / "invoice-item.xml"
+    xml.write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        "<Invoice>"
+        "<fphm>26112000000012345678</fphm>"
+        "<kprq>2026-03-15</kprq>"
+        "<gmfmc>北京示例科技有限公司</gmfmc>"
+        "<xfmc>上海示例出行科技有限公司</xfmc>"
+        "<jshj>103.00</jshj>"
+        "<spmc>*餐饮服务*餐费</spmc>"
+        "<xfsbh>91310115MA1K9XYZ12</xfsbh>"
+        "<gfsbh>91110108MA01ABCDEF</gfsbh>"
+        "</Invoice>",
+        encoding="utf-8",
+    )
+
+    result = lr.recognize_document(xml)
+
+    assert result.payload is not None
+    assert result.payload["Item"] == "*餐饮服务*餐费"
+    assert result.payload["seller_tin"] == "91310115MA1K9XYZ12"
+    assert result.payload["buyer_tin"] == "91110108MA01ABCDEF"
+
+
 def test_text_payload_survives_ocr_spacing_noise():
     noisy = "\n".join(
         ["电子发票（普通发票）", "发 票 号 码 ： 2 6 1 1 2 0 0 0 0 0 0 0 0 1 2 3 4 5 6 7 8 9 9"]
@@ -245,6 +311,8 @@ def test_recognize_xml_uses_structured_aliases(tmp_path: Path):
     assert payload["Date"] == "2026-03-15"
     assert payload["Seller"] == "上海示例出行科技有限公司"
     assert payload["Amount"] == "103.00"
+    assert payload["seller_tin"] == ""
+    assert payload["buyer_tin"] == ""
 
 
 def test_missing_ocr_engine_fails_closed_without_network(monkeypatch, tmp_path: Path):

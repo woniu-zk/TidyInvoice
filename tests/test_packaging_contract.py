@@ -251,6 +251,33 @@ def test_resources_manifest_required_paths_and_datas_resolve():
     assert "build/windows/prune_webview2_runtime.ps1" in required
     assert "build/windows/webview2-prune-policy.json" in required
 
+    # Classification defaults must ship as data, not only as Python source.
+    assert "builtin/categories.yaml" in required
+    assert any(
+        str(item.get("source")).replace("\\", "/") == "builtin"
+        and str(item.get("target")).replace("\\", "/") == "builtin"
+        for item in manifest["datas"]
+    )
+
+
+def test_classification_rule_sources_are_packaged_for_desktop_and_plugin():
+    macos_spec = _read(ROOT / "build" / "macos" / "InvoiceFlowAI.spec")
+    assert 'ROOT / "builtin"' in macos_spec
+    assert '"builtin"' in macos_spec
+
+    plugin_prepare = _read(
+        ROOT
+        / "plugins"
+        / "dsh-invoice-downloader"
+        / "scripts"
+        / "prepare-engine.mjs"
+    )
+    assert "expense_rules/__init__.py" in plugin_prepare
+    assert "expense_rules/loader.py" in plugin_prepare
+    assert "expense_rules/engine.py" in plugin_prepare
+    assert "expense_rules/types.py" in plugin_prepare
+    assert "builtin/categories.yaml" in plugin_prepare
+
 
 def test_webview2_prune_policy_is_conservative_and_matches_runtime_manifest():
     policy = _load_prune_policy()

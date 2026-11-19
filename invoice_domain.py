@@ -201,6 +201,7 @@ class InvoiceRecord:
     invoice_number: str = ""
     document_type: DocumentType = "其他"
     category: str = "其他"
+    item_name: str = ""
     route: RouteInfo = field(default_factory=RouteInfo)
     flags: frozenset[str] = field(default_factory=frozenset)
     _legacy_payload: _FrozenLegacyValue | None = field(default=None, repr=False, compare=False)
@@ -237,6 +238,7 @@ class InvoiceRecord:
             invoice_number=str(payload.get("InvoiceNumber") or ""),
             document_type=normalize_document_type(payload.get("Type", "")),
             category=str(payload.get("category") or payload.get("Type") or "其他"),
+            item_name=str(payload.get("Item") or payload.get("item_name") or ""),
             route=RouteInfo(
                 departure_date=parse_local_date(payload.get("Departure_Date")),
                 departure_city=str(payload.get("Departure_City") or ""),
@@ -248,27 +250,32 @@ class InvoiceRecord:
 
     def to_legacy(self) -> dict[str, Any]:
         if self._legacy_payload is not None:
-            return _thaw_legacy(self._legacy_payload)
-        payload: dict[str, Any] = {
-            "is_invoice": self.is_invoice,
-            "Date": _format_date(self.invoice_date),
-            "Purchaser": self.purchaser,
-            "Seller": self.seller,
-            "Amount": _format_decimal(self.amount),
-            "InvoiceCode": self.invoice_code,
-            "InvoiceNumber": self.invoice_number,
-            "Type": self.document_type,
-            "category": self.category,
-            "Departure_Date": _format_date(self.route.departure_date),
-            "Departure_City": self.route.departure_city,
-            "Destination_City": self.route.destination_city,
-        }
-        if "itinerary" in self.flags:
-            payload["_is_itinerary"] = True
-        if "folio" in self.flags:
-            payload["_is_folio"] = True
-        if "cwt_cancellation" in self.flags:
-            payload["_cwt_cancellation"] = True
+            payload: dict[str, Any] = _thaw_legacy(self._legacy_payload)
+        else:
+            payload = {
+                "is_invoice": self.is_invoice,
+                "Date": _format_date(self.invoice_date),
+                "Purchaser": self.purchaser,
+                "Seller": self.seller,
+                "Amount": _format_decimal(self.amount),
+                "InvoiceCode": self.invoice_code,
+                "InvoiceNumber": self.invoice_number,
+                "Type": self.document_type,
+                "category": self.category,
+                "Departure_Date": _format_date(self.route.departure_date),
+                "Departure_City": self.route.departure_city,
+                "Destination_City": self.route.destination_city,
+            }
+            if "itinerary" in self.flags:
+                payload["_is_itinerary"] = True
+            if "folio" in self.flags:
+                payload["_is_folio"] = True
+            if "cwt_cancellation" in self.flags:
+                payload["_cwt_cancellation"] = True
+        # Only emit the optional Item key when there is something to say, so
+        # snapshots produced before this field existed round-trip byte-for-byte.
+        if self.item_name and payload.get("Item") != self.item_name:
+            payload["Item"] = self.item_name
         return payload
 
 

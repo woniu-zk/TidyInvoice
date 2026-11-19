@@ -72,6 +72,22 @@ def _classify_standard_einvoice_type(compact_text):
     return "其他"
 
 
+_STANDARD_EINVOICE_ITEM_CELL_RE = re.compile(r"\*[^*\n]{2,24}\*[^\s*]{0,40}")
+
+
+def _extract_standard_einvoice_item_names(text, limit=5):
+    """Return up to ``limit`` unique item-name cells, e.g. ``*运输服务*客运服务费``."""
+    names = []
+    for match in _STANDARD_EINVOICE_ITEM_CELL_RE.finditer(normalize_ocr_compat_text(text)):
+        name = re.sub(r"\s+", "", match.group(0)).strip()
+        if not name or name in names:
+            continue
+        names.append(name)
+        if len(names) >= limit:
+            break
+    return " | ".join(names)
+
+
 class ProviderOcrUnavailable(RuntimeError):
     """The selected model provider has no dedicated OCR profile."""
 
@@ -803,6 +819,7 @@ class InvoiceExtractor:
             "InvoiceNumber": invoice_number_match.group(1),
             "Type": invoice_type,
             "category": invoice_type,
+            "Item": _extract_standard_einvoice_item_names(text),
             "Departure_Date": "",
             "Departure_City": "",
             "Destination_City": "",
@@ -1022,6 +1039,7 @@ class InvoiceExtractor:
             "InvoiceNumber": invoice_number,
             "Type": invoice_type,
             "category": invoice_type,
+            "Item": _extract_standard_einvoice_item_names(text),
             "Departure_Date": "",
             "Departure_City": "",
             "Destination_City": "",
@@ -1305,11 +1323,14 @@ class InvoiceExtractor:
                     "Date": re.sub(r"\D", "", fields["invoice_date"])[:8],
                     "Purchaser": fields.get("purchaser", ""),
                     "Seller": fields["seller"],
+                    "seller_tin": fields.get("seller_tin", ""),
+                    "buyer_tin": fields.get("buyer_tin", ""),
                     "Amount": fields["amount"],
                     "InvoiceCode": fields.get("invoice_code", ""),
                     "InvoiceNumber": fields["invoice_number"],
                     "Type": document_type,
                     "category": document_type,
+                    "Item": fields.get("item_name", ""),
                     "Departure_Date": "",
                     "Departure_City": "",
                     "Destination_City": "",
@@ -1488,6 +1509,7 @@ class InvoiceExtractor:
             "Date": "严格使用YYYYMMDD格式，例如20260215",
             "Purchaser": "购买方抬头全称。如果票面只有个人姓名或无公司名，请据实提取姓名或填'个人'。",
             "Seller": "开出该票据的商户或机构名称。遵循商家名称净化规则。如果是火车票/高铁票，固定填'中国铁路'；机票填对应航空公司；滴滴填'滴滴出行'。",
+            "Item": "项目/商品名称，多个用 | 分隔；无则空字符串",
             "Amount": "遵循金额强约束规则提取的数字，保留两位小数。如145.00或-145.00，无金额则返回0.00",
             "InvoiceCode": "发票代码(如有则提供，否则返回空字符串\"\")",
             "InvoiceNumber": "发票号码(如有则提供，否则返回空字符串\"\")",

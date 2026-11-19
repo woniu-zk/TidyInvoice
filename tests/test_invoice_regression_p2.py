@@ -2508,5 +2508,122 @@ class InvoiceP2RegressionTests(unittest.TestCase):
         self.assertEqual(result["p2_conclusion"]["bad_rows"][0]["reason"], "required_ride_pair_not_combined")
 
 
+class ExtractionItemFieldTests(unittest.TestCase):
+    """Item / seller_tin / buyer_tin payload additions used by classification."""
+
+    STANDARD_EINVOICE_TEXT = """电子发票（普通发票）
+发票号码：26112000000012345678
+开票日期：2026年03月15日
+购买方信息
+名称：北京示例科技有限公司
+统一社会信用代码/纳税人识别号：91110108MA01ABCDEF
+销售方信息
+名称：上海滴滴出行科技有限公司
+统一社会信用代码/纳税人识别号：91310115MA1K9XYZ12
+项目名称 规格型号 单位 数量 单价 金额 税率/征收率 税额
+*运输服务*客运服务费 1 100.00 100.00 3% 3.00
+合计 ¥100.00 ¥3.00
+价税合计（大写）壹佰零叁元整 （小写）¥103.00
+备注：
+"""
+
+    #: v1 expects the seller/buyer names followed by bare tax-id lines.
+    V1_EINVOICE_TEXT = """电子发票（普通发票）
+发票号码：26112000000012345678
+开票日期：2026年03月15日
+北京示例科技有限公司
+91110108MA01ABCDEF
+上海滴滴出行科技有限公司
+91310115MA1K9XYZ12
+*运输服务*客运服务费
+1 100.00 100.00 3% 3.00
+价税合计（小写）¥103.00
+"""
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name)
+        self.extractor = InvoiceExtractor(
+            api_key="", output_dir=str(self.root / "extracted")
+        )
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def _write_dummy_pdf(self):
+        pdf = self.root / "standard.pdf"
+        pdf.write_bytes(b"%PDF-1.4\n")
+        return pdf
+
+    def test_standard_einvoice_v1_payload_includes_full_item_cells(self):
+        from unittest.mock import patch
+
+        pdf = self._write_dummy_pdf()
+        with patch.object(
+            self.extractor,
+            "_extract_embedded_pdf_text",
+            return_value=self.V1_EINVOICE_TEXT,
+        ):
+            result = self.extractor._try_extract_standard_china_einvoice_from_pdf_text(
+                str(pdf)
+            )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["Item"], "*运输服务*客运服务费")
+
+    def test_standard_einvoice_v2_payload_includes_full_item_cells(self):
+        from unittest.mock import patch
+
+        pdf = self._write_dummy_pdf()
+        with patch.object(
+            self.extractor,
+            "_extract_embedded_pdf_text",
+            return_value=self.STANDARD_EINVOICE_TEXT,
+        ):
+            result = self.extractor._try_extract_standard_china_einvoice_from_pdf_text_v2(
+                str(pdf)
+            )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["Item"], "*运输服务*客运服务费")
+
+    def test_direct_invoice_xml_probe_includes_item_and_tax_ids(self):
+        xml_path = self.root / "invoice-with-tins.xml"
+        xml_path.write_text(
+            """<EInvoice>
+  <SellerName>济南历下小螺号海鲜店</SellerName>
+  <BuyerName>辉瑞投资有限公司</BuyerName>
+  <TotalTax-includedAmount>482.00</TotalTax-includedAmount>
+  <InvoiceNumber>26372000002439975871</InvoiceNumber>
+  <IssueTime>2026-05-25</IssueTime>
+  <ItemName>*餐饮服务*餐费</ItemName>
+  <xfsbh>91370102MA3M12345X</xfsbh>
+  <gfsbh>91310000710920127H</gfsbh>
+</EInvoice>""",
+            encoding="utf-8",
+        )
+
+        probe = self.extractor.probe_local_only(str(xml_path))
+
+        self.assertEqual(probe.status, "resolved")
+        self.assertEqual(probe.result["Item"], "*餐饮服务*餐费")
+        self.assertEqual(probe.result["seller_tin"], "91370102MA3M12345X")
+        self.assertEqual(probe.result["buyer_tin"], "91310000710920127H")
+
+    def test_parse_direct_invoice_xml_fields_extracts_seller_and_buyer_tins(self):
+        from provider_direct_invoice import parse_direct_invoice_xml_fields
+
+        fields = parse_direct_invoice_xml_fields(
+            "<Invoice><xfsbh>91370102MA3M12345X</xfsbh>"
+            "<gfsh>91310000710920127H</gfsh></Invoice>".encode("utf-8")
+        )
+        self.assertEqual(fields["seller_tin"], "91370102MA3M12345X")
+        self.assertEqual(fields["buyer_tin"], "91310000710920127H")
+        # Existing payloads without tax-id nodes keep their old shape.
+        self.assertEqual(
+            parse_direct_invoice_xml_fields(b"<Invoice/>").get("seller_tin", ""), ""
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -18,6 +18,10 @@ const required = [
   'runtime/engine/MANIFEST.json',
   'runtime/engine/src/invoice_engine/app_api.py',
   'runtime/engine/src/invoice_engine/local_recognition.py',
+  'runtime/engine/src/invoice_engine/expense_rules/__init__.py',
+  'runtime/engine/src/invoice_engine/expense_rules/engine.py',
+  'runtime/engine/src/invoice_engine/expense_rules/types.py',
+  'runtime/engine/src/invoice_engine/builtin/categories.yaml',
   'engine-adapter/dsh_runner.py',
   'engine-adapter/dsh_scan.py',
   'engine-adapter/ipc/protocol.py',
@@ -35,6 +39,7 @@ assert.equal(typeof manifest.sourceSha, 'string')
 assert.match(manifest.sourceSha, /^[0-9a-f]{40}$/)
 assert.equal(manifest.sourceRepository, 'https://github.com/EthanYoQ/Invoice-Downloader')
 assert.ok(Array.isArray(manifest.sourceFiles))
+assert.deepEqual((manifest.dataFiles || []).sort(), ['builtin/categories.yaml'])
 
 function collectPythonFiles(root, prefix = '') {
   return readdirSync(root, { withFileTypes: true }).flatMap(entry => {

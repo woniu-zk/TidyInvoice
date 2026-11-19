@@ -16,6 +16,7 @@ for required_path in (IDENTITY_PATH, ICON_PATH):
 
 datas = [
     (str(ROOT / "templates"), "templates"),
+    (str(ROOT / "builtin"), "builtin"),
     (str(IDENTITY_PATH), "build_meta"),
 ]
 

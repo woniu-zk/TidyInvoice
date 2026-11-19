@@ -87,6 +87,14 @@
     "provider_direct_invoice.py",
     "frontend_run_context.py",
     "user_settings.py",
+    "expense_rules/__init__.py",
+    "expense_rules/model.py",
+    "expense_rules/loader.py",
+    "expense_rules/engine.py",
+    "expense_rules/store.py",
+    "expense_rules/cli.py",
+    "expense_rules/types.py",
+    "builtin/categories.yaml",
     "build/windows/app.manifest",
     "build/windows/installer/InvoiceFlowAI.iss",
     "build/windows/prune_webview2_runtime.ps1",
@@ -100,6 +108,11 @@
     {
       "source": "templates",
       "target": "templates",
+      "optional": false
+    },
+    {
+      "source": "builtin",
+      "target": "builtin",
       "optional": false
     },
     {

@@ -18,6 +18,7 @@ did not produce (user documents, custom subfolders, ``整理前发票/``,
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 import functools
 import os
@@ -62,14 +63,21 @@ IN_PLACE_TOOL_DIR_NAMES = frozenset(
         "待人工复核",
         "人工复核",
         ".local-staging",
+        # User/global classification rules live inside the invoice library and
+        # must never be rescanned as invoice input.
+        "rules",
     }
 )
 
 _TRAIN_TYPE = "火车票"
 
 
-def category_folder_names() -> frozenset[str]:
-    """Folder names the category layout can create, straight from the registry."""
+def category_folder_names(extra: Iterable[str] = ()) -> frozenset[str]:
+    """Folder names the category layout can create.
+
+    ``extra`` carries user-configured archive folders; the default set stays
+    exactly the document-type registry so existing callers are unchanged.
+    """
     from document_types import DOCUMENT_TYPES
 
     folders = {
@@ -77,13 +85,18 @@ def category_folder_names() -> frozenset[str]:
         for entry in DOCUMENT_TYPES.values()
     }
     folders.discard("")
+    folders.update(
+        str(name or "").strip()
+        for name in extra
+        if str(name or "").strip()
+    )
     folders.difference_update(IN_PLACE_TOOL_DIR_NAMES)
     return frozenset(folders)
 
 
-def archive_dir_names() -> frozenset[str]:
+def archive_dir_names(extra: Iterable[str] = ()) -> frozenset[str]:
     """Per-category archive folders plus the organizer's own tool buckets."""
-    return frozenset(category_folder_names()) | IN_PLACE_TOOL_DIR_NAMES
+    return frozenset(category_folder_names(extra=extra)) | IN_PLACE_TOOL_DIR_NAMES
 
 
 @functools.lru_cache(maxsize=1)
@@ -111,10 +124,10 @@ def _standard_name_re() -> re.Pattern[str]:
     alternation = "|".join(re.escape(token) for token in display_types)
     suffixes = "|".join(re.escape(suffix.lstrip(".")) for suffix in ARCHIVE_SUFFIXES)
     return re.compile(
-        r"^\d{4}[^_]*_"
+        r"^(?P<date>\d{4}[^_]*)_"
         rf"(?P<type>{alternation})_"
         r"(?P<amount>[-\d.]+)_"
-        rf".+\.(?:{suffixes})$",
+        rf"(?P<seller>.+)\.(?:{suffixes})$",
         re.IGNORECASE,
     )
 
@@ -133,7 +146,8 @@ def _paired_name_re() -> re.Pattern[str]:
     """Paired archive renames produced by ``archive_pairing.build_*_pair_renames``."""
     suffixes = "|".join(re.escape(suffix.lstrip(".")) for suffix in ARCHIVE_SUFFIXES)
     return re.compile(
-        rf"^\d{{4,8}}-[^-]+-\d{{2}}-(?:发票|行程单|水单)_[-\d.]+元\.(?:{suffixes})$",
+        rf"^(?P<date>\d{{4,8}})-(?P<seller>[^-]+)-\d{{2}}-"
+        rf"(?P<role>发票|行程单|水单)_(?P<amount>[-\d.]+)元\.(?:{suffixes})$",
         re.IGNORECASE,
     )
 
@@ -170,16 +184,85 @@ def _organized_output_name_re() -> re.Pattern[str]:
     )
 
 
-def organized_output_category(name: str) -> str | None:
+def _display_type_document_type(display_type: str) -> str:
+    """Map a file-name display type back to a registered document type."""
+    from document_types import DOCUMENT_TYPES, normalize_document_type
+
+    value = str(display_type or "").strip()
+    if value in DOCUMENT_TYPES:
+        return value
+    if value.endswith("行程单") and value[:-3] in DOCUMENT_TYPES:
+        return value[:-3]
+    return normalize_document_type(value)
+
+
+def archive_name_fields(name: str) -> dict[str, str] | None:
+    """Best-effort invoice fields recoverable from an organizer output name."""
+    text = str(name or "").strip()
+    if not text or os.path.basename(text) != text:
+        return None
+    standard = _standard_name_re().match(text)
+    if standard is not None:
+        return {
+            "type": _display_type_document_type(standard.group("type")),
+            "seller": standard.group("seller"),
+            "item": "",
+            "amount": standard.group("amount"),
+            "purchaser": "",
+        }
+    if _train_name_re().match(text):
+        return {
+            "type": _TRAIN_TYPE,
+            "seller": "中国铁路",
+            "item": "",
+            "amount": "",
+            "purchaser": "",
+        }
+    paired = _paired_name_re().match(text)
+    if paired is not None:
+        role = paired.group("role")
+        return {
+            "type": "住宿水单" if role == "水单" else "",
+            "seller": paired.group("seller"),
+            "item": "",
+            "amount": paired.group("amount"),
+            "purchaser": "",
+        }
+    return None
+
+
+def organized_output_category(
+    name: str, rule_set: object | None = None
+) -> str | None:
     """Return the category folder for an organizer-produced archive name.
 
     ``name`` is a plain file name (no directories). ``None`` means the name was
     not produced by the organizer, or its category cannot be derived from the
     name alone (a paired archive rename whose platform/role gives no category).
+    When ``rule_set`` is supplied, keyword/amount/type rules are re-evaluated
+    against fields recoverable from the name; unknown classifications fall back
+    to the built-in type folder so a layout switch never dumps files into review.
     """
     text = str(name or "").strip()
     if not text or os.path.basename(text) != text:
         return None
+    if rule_set is not None:
+        fields = archive_name_fields(text)
+        if fields is not None:
+            try:
+                from expense_rules import classify
+
+                result = classify(fields, rule_set)
+                folder = str(getattr(result, "archive_folder", "") or "").strip()
+                if (
+                    str(getattr(result, "source", "") or "") != "unknown"
+                    and folder
+                    and folder not in IN_PLACE_TOOL_DIR_NAMES
+                    and os.path.basename(folder) == folder
+                ):
+                    return folder
+            except Exception:
+                pass
     standard = _standard_name_re().match(text)
     if standard is not None:
         display_type = standard.group("type")
@@ -254,14 +337,29 @@ def _is_inside_root(path: str, root: str) -> bool:
         return False
 
 
-def _plan_category_layout(root: str) -> list[tuple[str, str]]:
+def _plan_category_layout(
+    root: str,
+    rule_set: object | None = None,
+    file_category_map: dict[str, str] | None = None,
+) -> list[tuple[str, str]]:
     """Archive files sitting in the root that belong in a category folder."""
     planned: list[tuple[str, str]] = []
+    declared = dict(file_category_map or {})
+    from expense_rules import is_safe_folder_name
+
     for name in sorted(os.listdir(root)):
         source = os.path.join(root, name)
         if _is_linklike(source) or not os.path.isfile(source):
             continue
-        category = organized_output_category(name)
+        category = str(declared.get(name) or "").strip()
+        if category and (
+            not is_safe_folder_name(category)
+            or category in IN_PLACE_TOOL_DIR_NAMES
+            or os.path.basename(category) != category
+        ):
+            category = ""
+        if not category:
+            category = organized_output_category(name, rule_set=rule_set)
         if not category:
             continue
         target_dir = os.path.join(root, category)
@@ -277,10 +375,14 @@ def _plan_category_layout(root: str) -> list[tuple[str, str]]:
     return planned
 
 
-def _plan_flat_layout(root: str) -> list[tuple[str, str]]:
+def _plan_flat_layout(
+    root: str, extra_category_folders: Iterable[str] = ()
+) -> list[tuple[str, str]]:
     """Archive files inside category folders that belong in the root."""
     planned: list[tuple[str, str]] = []
-    for folder in sorted(category_folder_names()):
+    for folder in sorted(
+        category_folder_names(extra=extra_category_folders)
+    ):
         category_dir = os.path.join(root, folder)
         if _is_linklike(category_dir) or not os.path.isdir(category_dir):
             continue
@@ -307,9 +409,13 @@ def _move_unique(source: str, target: str) -> str:
     return candidate
 
 
-def _prune_empty_category_dirs(root: str) -> None:
+def _prune_empty_category_dirs(
+    root: str, extra_category_folders: Iterable[str] = ()
+) -> None:
     """Remove known category folders that the flat layout left empty."""
-    for folder in sorted(category_folder_names()):
+    for folder in sorted(
+        category_folder_names(extra=extra_category_folders)
+    ):
         candidate = os.path.join(root, folder)
         if _is_linklike(candidate) or not os.path.isdir(candidate):
             continue
@@ -325,6 +431,9 @@ def enforce_layout(
     *,
     split_by_category: bool,
     dry_run: bool = False,
+    extra_category_folders: Iterable[str] = (),
+    rule_set: object | None = None,
+    file_category_map: dict[str, str] | None = None,
 ) -> LayoutMigration:
     """Move the organizer's own archive files to the requested layout.
 
@@ -341,9 +450,11 @@ def enforce_layout(
 
     try:
         planned = (
-            _plan_category_layout(root)
+            _plan_category_layout(
+                root, rule_set=rule_set, file_category_map=file_category_map
+            )
             if split_by_category
-            else _plan_flat_layout(root)
+            else _plan_flat_layout(root, extra_category_folders)
         )
     except OSError:
         return LayoutMigration(layout=layout, dry_run=bool(dry_run))
@@ -371,7 +482,7 @@ def enforce_layout(
         moved.append((source, final_path))
 
     if not split_by_category:
-        _prune_empty_category_dirs(root)
+        _prune_empty_category_dirs(root, extra_category_folders)
 
     return LayoutMigration(
         layout=layout,

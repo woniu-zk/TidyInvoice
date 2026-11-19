@@ -24,6 +24,13 @@ const engineSourceFiles = [
   'email_body_receipts.py',
   'email_channel.py',
   'email_fetcher.py',
+  'expense_rules/__init__.py',
+  'expense_rules/model.py',
+  'expense_rules/loader.py',
+  'expense_rules/engine.py',
+  'expense_rules/store.py',
+  'expense_rules/cli.py',
+  'expense_rules/types.py',
   'extraction_pipeline.py',
   'frontend_run_context.py',
   'glm_runtime.py',
@@ -73,11 +80,24 @@ if (!existsSync(join(sourceRoot, 'app_api.py'))) {
 if (!existsSync(join(sourceRoot, 'local_recognition.py'))) {
   throw new Error(`local recognition engine is unavailable at ${sourceRoot}`)
 }
+for (const required of [
+  'expense_rules/__init__.py',
+  'builtin/categories.yaml',
+]) {
+  if (!existsSync(join(sourceRoot, required))) {
+    throw new Error(`classification rules source is unavailable at ${sourceRoot}/${required}`)
+  }
+}
 
 rmSync(engineRoot, { recursive: true, force: true })
 mkdirSync(join(engineRoot, 'src', 'invoice_engine'), { recursive: true })
 
 for (const file of engineSourceFiles) {
+  copyFile(join(sourceRoot, file), join(engineRoot, 'src', 'invoice_engine', file))
+}
+
+const engineDataFiles = ['builtin/categories.yaml']
+for (const file of engineDataFiles) {
   copyFile(join(sourceRoot, file), join(engineRoot, 'src', 'invoice_engine', file))
 }
 
@@ -96,5 +116,6 @@ writeFileSync(
     generatedBy: '@ethanyoq/dsh-invoice-downloader',
     generatedAt: new Date().toISOString(),
     sourceFiles: [...engineSourceFiles, 'ipc/protocol.py'].sort(),
+    dataFiles: engineDataFiles,
   }, null, 2)}\n`,
 )
