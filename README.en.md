@@ -55,7 +55,7 @@ Open **Invoice Downloader** from the right-side entry, choose an output director
 | 🧾 | **Automatic invoice/document pairing** | Hotel invoice/folio and ride invoice/itinerary pairs are archived with adjacent names |
 | 🪟 | **Quiet background processing** | URL workers, Node, and Chromium run without repeatedly opening console windows |
 | 🗂️ | **Natural language classification rules** | Supports custom rules like "Didi rides over 100 yuan go into the high-amount category" |
-| 📂 | **Local folder organizing** | Works without any mailbox: one-click offline organizing of phone exports, WeChat/Alipay download folders, and photographed receipts; archives in place and keeps originals under `raw/` |
+| 📂 | **Local folder organizing** | Works without any mailbox: one-click offline organizing of phone exports, WeChat/Alipay download folders, and photographed receipts; archives in place and keeps originals verbatim under `整理前发票/` |
 | 📥 | **Fetch to inbox only** | Saves attachments plus a source manifest into `inbox/` without parsing or renaming, ready for your own tools or a later organizing step |
 | 📊 | **One-click Excel report** | Automatically generates `summary_report.xlsx`, covering invoice lists and amount summaries |
 
@@ -140,7 +140,7 @@ flowchart TD
 - Fetch-only and local organizing hand off through `inbox/` + `manifest.jsonl`; the organizer keeps the mail source information (mailbox, subject, sender, received time) in the archive record.
 - Local folder organizing works in the **selected invoice folder itself** by default; the output folder defaults to the same path (and can still be changed):
   - classified copies go to category folders such as `打车/` and `住宿发票/`;
-  - **originals are moved to `raw/YYYY/MM/` for safekeeping** and are never deleted;
+  - **originals are kept in `整理前发票/` exactly as they were**: same file name, same bytes, and the same sub-folder path — no renaming, no month sub-folders, never deleted;
   - duplicate files go to `duplicates/`;
   - the Excel report is written into the organizing folder, and unreadable files stay where they are.
 - Re-running on the same folder is **idempotent**: already organized files are not archived or recognized again.

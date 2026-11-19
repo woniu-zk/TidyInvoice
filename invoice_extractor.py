@@ -12,7 +12,13 @@ import unicodedata
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 import fitz  # PyMuPDF
-from document_types import MANUAL_REVIEW_FOLDER, get_document_type_names, normalize_document_type
+from document_types import (
+    CHARGING_SERVICE_TOKENS,
+    DINING_BEVERAGE_TOKENS,
+    MANUAL_REVIEW_FOLDER,
+    get_document_type_names,
+    normalize_document_type,
+)
 from email_body_receipts import CANONICAL_MARKER
 from glm_runtime import (
     DEEPSEEK_PROVIDER,
@@ -44,6 +50,27 @@ OCR_COMPAT_TRANSLATION = str.maketrans({
 
 def normalize_ocr_compat_text(value):
     return unicodedata.normalize("NFKC", str(value or "")).translate(OCR_COMPAT_TRANSLATION)
+
+
+#: 标准电子发票「项目名称」→ 归档类型。v1/v2 两个 PDF 文本快路径共用这一份，
+#: 避免两处标记表各写一套后漂移；住宿证据排在餐饮之前（与离线识别引擎一致），
+#: 酒店票里同时出现餐饮明细时归属住宿。
+_STANDARD_EINVOICE_TYPE_MARKERS = (
+    ("住宿发票", ("*住宿服务*", "住宿服务", "房费", "住宿费")),
+    ("餐饮", ("*餐饮服务*", "餐费", "餐饮服务") + DINING_BEVERAGE_TOKENS),
+    ("打车", ("*运输服务*", "客运服务费", "旅客运输服务", "滴滴")),
+    ("过路费", ("通行费", "过路费")),
+    ("充电", CHARGING_SERVICE_TOKENS),
+)
+
+
+def _classify_standard_einvoice_type(compact_text):
+    """Return the archive type implied by a standard e-invoice item table."""
+    for doc_type, markers in _STANDARD_EINVOICE_TYPE_MARKERS:
+        if any(marker in compact_text for marker in markers):
+            return doc_type
+    return "其他"
+
 
 class ProviderOcrUnavailable(RuntimeError):
     """The selected model provider has no dedicated OCR profile."""
@@ -733,17 +760,7 @@ class InvoiceExtractor:
             return None
 
         compact_text = re.sub(r"\s+", "", text)
-        item_markers = {
-            "餐饮": ["*餐饮服务*", "餐费", "餐饮服务"],
-            "住宿发票": ["*住宿服务*", "住宿服务", "房费", "住宿费"],
-            "打车": ["*运输服务*", "客运服务费", "旅客运输服务", "滴滴"],
-            "过路费": ["通行费", "过路费"],
-        }
-        invoice_type = "其他"
-        for candidate_type, markers in item_markers.items():
-            if any(marker in compact_text for marker in markers):
-                invoice_type = candidate_type
-                break
+        invoice_type = _classify_standard_einvoice_type(compact_text)
 
         tail_text = text[date_match.end():]
         pair_pattern = re.compile(r"([A-Za-z0-9\u4e00-\u9fff（）()·\-]{2,})\s*\n\s*([0-9A-Z]{10,24})")
@@ -951,17 +968,7 @@ class InvoiceExtractor:
             return None
 
         compact_text = re.sub(r"\s+", "", text)
-        item_markers = {
-            "\u9910\u996e": ["*\u9910\u996e\u670d\u52a1*", "\u9910\u8d39", "\u9910\u996e\u670d\u52a1"],
-            "\u4f4f\u5bbf\u53d1\u7968": ["*\u4f4f\u5bbf\u670d\u52a1*", "\u4f4f\u5bbf\u670d\u52a1", "\u623f\u8d39", "\u4f4f\u5bbf\u8d39"],
-            "\u6253\u8f66": ["*\u8fd0\u8f93\u670d\u52a1*", "\u5ba2\u8fd0\u670d\u52a1\u8d39", "\u65c5\u5ba2\u8fd0\u8f93\u670d\u52a1", "\u6ef4\u6ef4"],
-            "\u8fc7\u8def\u8d39": ["\u901a\u884c\u8d39", "\u8fc7\u8def\u8d39"],
-        }
-        invoice_type = "\u5176\u4ed6"
-        for candidate_type, markers in item_markers.items():
-            if any(marker in compact_text for marker in markers):
-                invoice_type = candidate_type
-                break
+        invoice_type = _classify_standard_einvoice_type(compact_text)
 
         tail_lines = compact_lines[date_line_index + 1:] if date_line_index >= 0 else compact_lines
         parties = (
@@ -1484,7 +1491,7 @@ class InvoiceExtractor:
             "Amount": "遵循金额强约束规则提取的数字，保留两位小数。如145.00或-145.00，无金额则返回0.00",
             "InvoiceCode": "发票代码(如有则提供，否则返回空字符串\"\")",
             "InvoiceNumber": "发票号码(如有则提供，否则返回空字符串\"\")",
-            "Type": "必须从 {TYPE_CHOICES} 中选择。注意：带税务局监制章的选'住宿发票'；酒店打印的消费明细/宾客账单选'住宿水单'。",
+            "Type": "必须从 {TYPE_CHOICES} 中选择。注意：带税务局监制章的选'住宿发票'；酒店打印的消费明细/宾客账单选'住宿水单'；项目明细为茶饮/饮品/奶茶的选'餐饮'；明细含充电服务费或充电费的选'充电'。",
             "category": "结合整体信息的归档分类短词，如'打车'、'火车票'、'餐饮'等",
             "Departure_Date": "仅当 Type 为火车票时提供，格式如同Date，其他为空",
             "Departure_City": "仅当 Type 为火车票时提供。遵循火车票字段兜底规则，模糊则填'未知'",
@@ -1976,7 +1983,7 @@ class InvoiceExtractor:
             and _has_positive_amount(invoice_info.get("Amount"))
         )
 
-    def _plan_archive_target(self, pdf_path, invoice_info, custom_rules=None):
+    def _plan_archive_target(self, pdf_path, invoice_info, custom_rules=None, flat_layout=False):
         """Pure routing/naming decision shared by the apply and the preview path.
 
         The returned plan never touches the filesystem. ``status`` is either
@@ -2052,6 +2059,11 @@ class InvoiceExtractor:
                     target_folder = folder_name
                     break
 
+        # Flat layout: archive directly into the output root. The category is
+        # still part of the file name, so no information is lost.
+        if flat_layout:
+            target_folder = ""
+
         return {
             **plan,
             "target_folder": target_folder,
@@ -2059,17 +2071,19 @@ class InvoiceExtractor:
             "candidate_filename": new_filename,
         }
 
-    def preview_archive_target(self, pdf_path, invoice_info, custom_rules=None):
+    def preview_archive_target(self, pdf_path, invoice_info, custom_rules=None, flat_layout=False):
         """Return the planned archive destination without writing anything.
 
         Used by the local-organize dry-run/预览 mode. Collisions are resolved
         deterministically (``_2``, ``_3`` ...) because a preview must be stable
         and must never reserve or create real files.
         """
-        plan = self._plan_archive_target(pdf_path, invoice_info, custom_rules)
-        folder = plan["target_folder"] or "其他"
+        plan = self._plan_archive_target(
+            pdf_path, invoice_info, custom_rules, flat_layout=flat_layout
+        )
+        folder = "" if flat_layout else (plan["target_folder"] or "其他")
         base_name = plan["candidate_filename"] or os.path.basename(pdf_path)
-        final_dir = os.path.join(self.output_dir, folder)
+        final_dir = os.path.join(self.output_dir, folder) if folder else self.output_dir
         reserved = getattr(self, "_preview_reserved_paths", None)
         if reserved is None:
             reserved = set()
@@ -2091,7 +2105,7 @@ class InvoiceExtractor:
             "manual_prefix": plan.get("manual_prefix"),
         }
 
-    def route_and_rename_file(self, pdf_path, invoice_info, custom_rules=None):
+    def route_and_rename_file(self, pdf_path, invoice_info, custom_rules=None, flat_layout=False):
         """3.4 Apply the routing plan: rename/copy or rescue to Manual_Check"""
         import uuid
 
@@ -2107,7 +2121,9 @@ class InvoiceExtractor:
             "used_manual_check": False,
         }
         self.last_route_trace = copy.deepcopy(route_trace)
-        plan = self._plan_archive_target(pdf_path, invoice_info, custom_rules)
+        plan = self._plan_archive_target(
+            pdf_path, invoice_info, custom_rules, flat_layout=flat_layout
+        )
 
         if plan["status"] == "manual_check":
             reason_prefix = plan.get("manual_prefix") or "NeedsReview"
@@ -2158,7 +2174,12 @@ class InvoiceExtractor:
                 self.last_route_trace = copy.deepcopy(route_trace)
                 return False, str(e)
 
-        final_dir = os.path.join(self.output_dir, plan["target_folder"])
+        target_folder = plan["target_folder"] or ""
+        final_dir = (
+            os.path.join(self.output_dir, target_folder)
+            if target_folder
+            else self.output_dir
+        )
         os.makedirs(final_dir, exist_ok=True)
         route_trace["target_folder"] = plan["target_folder"]
         route_trace["display_type"] = plan["display_type"]

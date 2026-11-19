@@ -31,7 +31,11 @@ from pathlib import Path
 from typing import Any, Sequence
 from xml.etree import ElementTree as ET
 
-from document_types import normalize_document_type
+from document_types import (
+    CHARGING_SERVICE_TOKENS,
+    DINING_BEVERAGE_TOKENS,
+    normalize_document_type,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -456,9 +460,10 @@ _TYPE_KEYWORDS: tuple[tuple[tuple[str, ...], str], ...] = (
     (("航空运输电子客票行程单", "行程单", "机票", "航班"), "机票"),
     (("出租汽车", "网约车", "滴滴", "高德", "打车"), "打车"),
     (("住宿", "酒店", "宾馆", "旅馆"), "住宿发票"),
-    (("餐饮", "餐费", "餐厅", "饭店"), "餐饮"),
+    (("餐饮", "餐费", "餐厅", "饭店") + DINING_BEVERAGE_TOKENS, "餐饮"),
     (("通行费", "过路费", "高速费"), "过路费"),
     (("定额发票", "定额"), "定额发票"),
+    (CHARGING_SERVICE_TOKENS, "充电"),
 )
 
 _DEPARTURE_PATTERNS = {

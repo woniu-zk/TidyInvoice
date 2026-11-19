@@ -17,6 +17,23 @@ from document_types import (
 )
 from invoice_extractor import InvoiceExtractor
 
+CHARGING_INVOICE_TEXT = """电子发票（普通发票）
+发票号码：26442000012806743906
+开票日期：2026年11月07日
+购买方信息
+名称：广州华伟医疗设备有限公司
+统一社会信用代码/纳税人识别号：91440113MAE19LB505
+销售方信息
+名称：广州市泷泽电子科技有限公司
+统一社会信用代码/纳税人识别号：914401015961809535
+项目名称 规格型号 单位 数量 单价 金额 税率/征收率 税额
+*供电*电费 1 134.27 134.27 13% 17.46
+*供电*充电服务费 1 38.54 38.54 13% 5.01
+合计 ¥172.81 ¥22.47
+价税合计（大写）壹佰玖拾伍圆贰角捌分 （小写）¥195.28
+备注：
+"""
+
 TOLL_SUMMARY_TEXT = """收费公路通行费电子票据汇总单
 （按票据索引）
 汇总单号:
@@ -70,6 +87,65 @@ def test_document_type_registry_supports_new_categories():
     assert normalize_document_type("扫码开票") == "开票二维码"
     assert get_archive_folder("通行费汇总单") == "通行费汇总单"
     assert get_archive_folder("开票二维码") == "开票二维码"
+
+
+def test_charging_document_type_registry_and_text_aliases():
+    assert DOCUMENT_TYPES["充电"]["archive_folder"] == "充电"
+    # 充电票的购买方校验与其他类目一致，不做豁免（个人充电票仍会被分流）。
+    assert is_exempt_type("充电") is False
+    assert get_archive_folder("充电") == "充电"
+    assert normalize_document_type("充电服务费") == "充电"
+    assert normalize_document_type("充电桩服务费") == "充电"
+    assert normalize_document_type("茶饮") == "餐饮"
+    assert normalize_document_type("饮品店") == "餐饮"
+    # 纯电费不是充电，办公电费票不能被吞进充电类目。
+    assert normalize_document_type("电费") == "其他"
+
+
+def test_charging_invoice_text_is_classified_and_archived(tmp_path: Path):
+    result = lr.extract_invoice_payload(CHARGING_INVOICE_TEXT, engine=lr.ENGINE_PDF_TEXT)
+
+    payload = result.payload
+    assert payload is not None
+    assert payload["Type"] == "充电"
+    assert payload["category"] == "充电"
+    assert payload["Date"] == "2026-11-07"
+    assert payload["Amount"] == "195.28"
+    assert payload["Seller"] == "广州市泷泽电子科技有限公司"
+
+    fitz = pytest.importorskip("fitz")
+    pdf = tmp_path / "charging-invoice.pdf"
+    document = fitz.open()
+    page = document.new_page()
+    for index, line in enumerate(CHARGING_INVOICE_TEXT.splitlines()):
+        page.insert_text((40, 60 + index * 20), line, fontname="china-s", fontsize=10)
+    document.save(str(pdf))
+    document.close()
+
+    extractor = InvoiceExtractor(api_key="", output_dir=str(tmp_path / "out"))
+    success, final_path = extractor.route_and_rename_file(str(pdf), payload)
+
+    assert success is True
+    assert Path(final_path).parent.name == "充电"
+    assert "充电" in Path(final_path).name
+    assert "195.28" in Path(final_path).name
+
+
+def test_pure_electricity_invoice_stays_other():
+    text = (
+        CHARGING_INVOICE_TEXT.replace("*供电*充电服务费 1 38.54 38.54 13% 5.01\n", "")
+        .replace("合计 ¥172.81 ¥22.47", "合计 ¥134.27 ¥17.46")
+        .replace("壹佰玖拾伍圆贰角捌分", "壹佰伍拾壹圆柒角叁分")
+        .replace("（小写）¥195.28", "（小写）¥151.73")
+    )
+
+    payload = lr.extract_invoice_payload(text, engine=lr.ENGINE_PDF_TEXT).payload
+
+    assert payload is not None
+    assert payload["Amount"] == "151.73"
+    assert payload["Type"] == "其他"
+    # 类型不是「其他」时才会拿到这条置信度加成，确保负例没有被顺带加分。
+    assert "upper_amount_mismatch" not in payload["local_recognition"]["warnings"]
 
 
 def test_toll_summary_text_is_classified_with_fields():

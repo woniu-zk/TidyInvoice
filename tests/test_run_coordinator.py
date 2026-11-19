@@ -60,6 +60,7 @@ def test_run_request_is_frozen_and_contains_no_secret_fields(tmp_path: Path):
         "fetch_only",
         "input_dir",
         "dry_run",
+        "split_by_category",
     }
     serialized = repr(request) + repr(asdict(request))
     assert "auth_code" not in serialized

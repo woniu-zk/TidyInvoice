@@ -41,7 +41,9 @@ const DEFAULT_SETTINGS = {
   task_mode: "mail",
   local_input_dir: "",
   // Empty means "same folder as local_input_dir" (in-place organizing).
-  local_output_dir: ""
+  local_output_dir: "",
+  // Keep the per-category archive folders (餐饮/充电/...).
+  local_split_by_category: true
 };
 const DEFAULT_RUN_SETTINGS = {
   ...lastDaysRange(30),
@@ -103,12 +105,22 @@ const APP_VISIBLE_COPY = {
     localApply: {
       eyebrow: "整理结果",
       title: "本地整理完成",
-      text: "已按分类与命名规则归档本地发票；原件已移入 raw 文件夹保留，重复文件已移入 duplicates 文件夹。"
+      text: "已按分类与命名规则归档本地发票；原件已原样保留在「整理前发票」文件夹（文件名不变），重复文件已移入 duplicates 文件夹。"
     },
     localApplyCustom: {
       eyebrow: "整理结果",
       title: "本地整理完成",
       text: "已按分类与命名规则归档本地发票；原始文件保留在发票文件夹，未移动。"
+    },
+    localApplyFlat: {
+      eyebrow: "整理结果",
+      title: "本地整理完成",
+      text: "已按命名规则整理本地发票（未建分类子目录）；原件已原样保留在「整理前发票」文件夹（文件名不变），重复文件已移入 duplicates 文件夹。"
+    },
+    localApplyCustomFlat: {
+      eyebrow: "整理结果",
+      title: "本地整理完成",
+      text: "已按命名规则整理本地发票（未建分类子目录）；原始文件保留在发票文件夹，未移动。"
     }
   }
 };
@@ -391,6 +403,7 @@ function buildPersistPayload(settings, runSettings, runContext) {
   payload.task_mode = normalizeTaskMode(payload.task_mode);
   payload.local_input_dir = String(payload.local_input_dir || "").trim();
   payload.local_output_dir = String(payload.local_output_dir || "").trim();
+  payload.local_split_by_category = payload.local_split_by_category !== false;
   return payload;
 }
 async function loadShellState() {
@@ -408,7 +421,8 @@ async function loadShellState() {
     remember_settings: sessionSettings.remember_settings === undefined ? storedPayload.remember_settings !== false : sessionSettings.remember_settings !== false,
     task_mode: normalizeTaskMode(preferNonEmpty(sessionSettings.task_mode, storedPayload.task_mode, "mail")),
     local_input_dir: preferNonEmpty(sessionSettings.local_input_dir, storedPayload.local_input_dir),
-    local_output_dir: preferNonEmpty(sessionSettings.local_output_dir, storedPayload.local_output_dir)
+    local_output_dir: preferNonEmpty(sessionSettings.local_output_dir, storedPayload.local_output_dir),
+    local_split_by_category: sessionSettings.local_split_by_category === undefined ? storedPayload.local_split_by_category !== false : sessionSettings.local_split_by_category !== false
   };
   const runSettings = {
     date_from: preferNonEmpty(sessionRunSettings.date_from, storedPayload.date_from, DEFAULT_RUN_SETTINGS.date_from),
@@ -444,7 +458,8 @@ async function persistUserSettings(settings, runSettings, runContext) {
     remember_settings: payload.remember_settings !== false,
     task_mode: normalizeTaskMode(payload.task_mode),
     local_input_dir: payload.local_input_dir || "",
-    local_output_dir: payload.local_output_dir || ""
+    local_output_dir: payload.local_output_dir || "",
+    local_split_by_category: payload.local_split_by_category !== false
   });
   writeSessionValue(SESSION_RUN_SETTINGS_KEY, {
     date_from: payload.date_from || "",
@@ -1044,6 +1059,7 @@ function SettingsPage({
   const isLocalMode = taskMode === "local";
   const localInputDir = String(settings.local_input_dir || "").trim();
   const localOutputDir = String(settings.local_output_dir || "").trim();
+  const localSplitByCategory = settings.local_split_by_category !== false;
   const activeTaskMode = TASK_MODE_OPTIONS.find(option => option.value === taskMode) || TASK_MODE_OPTIONS[0];
   const emailParts = splitEmailAddress(settings.email);
   const dateError = validateDateRange(runSettings.date_from, runSettings.date_to);
@@ -1156,7 +1172,7 @@ function SettingsPage({
       setStarting(true);
       try {
         await persistUserSettings(settings, runSettings, runContext);
-        const result = await callApi("start_local_organize", inputDir, outputDir);
+        const result = await callApi("start_local_organize", inputDir, outputDir, false, localSplitByCategory);
         if (!result || !result.success) {
           setPageError(result && result.message ? result.message : "任务启动失败。");
           return;
@@ -1302,9 +1318,27 @@ function SettingsPage({
     onClick: handleChooseInputDirectory
   }, /*#__PURE__*/React.createElement("span", {
     className: "material-symbols-outlined"
-  }, "folder_open"), /*#__PURE__*/React.createElement("span", null, "\u9009\u62E9\u6587\u4EF6\u5939"))), /*#__PURE__*/React.createElement("p", {
+  }, "folder_open"), /*#__PURE__*/React.createElement("span", null, "\u9009\u62E9\u6587\u4EF6\u5939"))), /*#__PURE__*/React.createElement("label", {
+    className: "toggle-row"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    checked: localSplitByCategory,
+    onChange: event => updateSetting("local_split_by_category", event.target.checked),
+    disabled: controlledRun
+  }), /*#__PURE__*/React.createElement("span", null, "\u6309\u5206\u7C7B\u5206\u76EE\u5F55")), /*#__PURE__*/React.createElement("p", {
     className: "field-help"
-  }, "\u70B9\u51FB\u300C\u5F00\u59CB\u6574\u7406\u300D\u540E\uFF0C\u53D1\u7968\u4F1A\u5728\u8BE5\u6587\u4EF6\u5939\u5185\u81EA\u52A8\u5206\u7C7B\u5F52\u6863\uFF1B\u539F\u4EF6\u79FB\u5165 raw \u6587\u4EF6\u5939\u4FDD\u7559\u3002"))) : /*#__PURE__*/React.createElement("section", {
+  }, localSplitByCategory ? "按发票类型建立 餐饮/充电 等子目录归档；原件按原文件名原样保留在「整理前发票」文件夹（不改名、不分月份），重复件与待人工复核单独存放。" : "不建分类子目录：整理后的发票直接放在该文件夹里，文件名仍带类型；原件按原文件名原样保留在「整理前发票」文件夹（不改名、不分月份），重复件与待人工复核单独存放。"), /*#__PURE__*/React.createElement("div", {
+    className: "footer-cluster"
+  }, /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn--primary btn--sm",
+    onClick: handleStart,
+    disabled: !canStart || starting
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "material-symbols-outlined"
+  }, starting ? "sync" : "play_arrow"), /*#__PURE__*/React.createElement("span", null, starting ? "启动中..." : "整理进目录"))), /*#__PURE__*/React.createElement("p", {
+    className: "field-help"
+  }, "\u70B9\u51FB\u300C\u6574\u7406\u8FDB\u76EE\u5F55\u300D\u6216\u5E95\u90E8\u300C\u5F00\u59CB\u6574\u7406\u300D\u540E\uFF0C\u53D1\u7968\u4F1A\u5728\u8BE5\u6587\u4EF6\u5939\u5185\u6309\u5F53\u524D\u9009\u9879\u79BB\u7EBF\u8BC6\u522B\u5E76\u5F52\u6863\uFF1B\u539F\u4EF6\u6309\u539F\u6587\u4EF6\u540D\u539F\u6837\u4FDD\u7559\u5728\u300C\u6574\u7406\u524D\u53D1\u7968\u300D\u6587\u4EF6\u5939\uFF08\u4E0D\u6539\u540D\u3001\u4E0D\u5206\u6708\u4EFD\uFF09\u3002"))) : /*#__PURE__*/React.createElement("section", {
     className: "surface-card"
   }, /*#__PURE__*/React.createElement(SectionHeader, {
     icon: "mail",
@@ -1420,7 +1454,7 @@ function SettingsPage({
     className: "material-symbols-outlined"
   }, "undo"), /*#__PURE__*/React.createElement("span", null, "\u6062\u590D\u9ED8\u8BA4\uFF08\u53D1\u7968\u6587\u4EF6\u5939\uFF09")) : null), /*#__PURE__*/React.createElement("p", {
     className: "field-help"
-  }, controlledRun ? "当前为受控前端复跑，本轮输出目录由诊断上下文锁定。" : isLocalMode ? "默认与发票文件夹相同：分类文件、raw 原件与结果明细都会写入该文件夹；改为其他目录时仅复制归档副本，原件保留在发票文件夹。" : isFetchMode ? "邮箱附件会保存到该目录下的 inbox 文件夹，并生成清单文件。" : "系统会在此目录下按发票类型保存归档文件，并生成待人工复核目录。")))), /*#__PURE__*/React.createElement("div", {
+  }, controlledRun ? "当前为受控前端复跑，本轮输出目录由诊断上下文锁定。" : isLocalMode ? localSplitByCategory ? "默认与发票文件夹相同：分类文件、「整理前发票」中的原件与结果明细都会写入该文件夹；改为其他目录时仅复制归档副本，原件留在发票文件夹不动。" : "默认与发票文件夹相同：整理后的文件、「整理前发票」中的原件与结果明细都会写入该文件夹；改为其他目录时仅复制归档副本，原件留在发票文件夹不动。" : isFetchMode ? "邮箱附件会保存到该目录下的 inbox 文件夹，并生成清单文件。" : "系统会在此目录下按发票类型保存归档文件，并生成待人工复核目录。")))), /*#__PURE__*/React.createElement("div", {
     className: "settings-column"
   }, /*#__PURE__*/React.createElement("section", {
     className: "surface-card"
@@ -1944,12 +1978,13 @@ function AnalysisPage({
   const isFetchResult = resultTaskMode === "fetch";
   const isLocalResult = resultTaskMode === "local";
   const localInPlace = isLocalResult && !!organizeSummary.in_place;
+  const localSplitByCategory = organizeSummary.split_by_category !== false;
   const resultHeadline = isFetchResult ? "本次提取完成" : isLocalResult ? "本次整理完成" : UI_COPY.pages.analysis.resultTitle;
   const fetchAttachments = Number(fetchSummary.attachments || 0);
   const fetchTodoCount = Number(fetchSummary.todos || 0);
   const fetchInboxDir = fetchSummary.inbox_dir || "";
   const fetchManifestPath = fetchSummary.manifest_path || "";
-  const bannerCopy = isFetchResult ? APP_VISIBLE_COPY.resultBanners.fetch : isLocalResult ? localInPlace ? APP_VISIBLE_COPY.resultBanners.localApply : APP_VISIBLE_COPY.resultBanners.localApplyCustom : null;
+  const bannerCopy = isFetchResult ? APP_VISIBLE_COPY.resultBanners.fetch : isLocalResult ? localInPlace ? localSplitByCategory ? APP_VISIBLE_COPY.resultBanners.localApply : APP_VISIBLE_COPY.resultBanners.localApplyFlat : localSplitByCategory ? APP_VISIBLE_COPY.resultBanners.localApplyCustom : APP_VISIBLE_COPY.resultBanners.localApplyCustomFlat : null;
   const completionBanner = bannerCopy ? {
     eyebrow: bannerCopy.eyebrow,
     title: bannerCopy.title,
@@ -1963,7 +1998,7 @@ function AnalysisPage({
     icon: "folder",
     eyebrow: isLocalResult && localInPlace ? "发票文件夹" : "输出目录",
     title: outputPath ? isFetchResult ? "提取结果已写入输出目录" : localInPlace ? "归档结果已写入发票文件夹" : isLocalResult ? "归档结果已写入输出目录" : "归档结果与暂存记录已写入输出目录" : "当前还没有可打开的输出目录",
-    text: outputPath ? isFetchResult ? "inbox 文件夹与 manifest.jsonl 位于该目录下，可从这里继续查看。" : localInPlace ? "分类文件、raw 原件、重复件与导出明细都可以从这里继续查看。" : isLocalResult ? "归档副本与导出明细已写入该目录；原始文件保留在发票文件夹。" : "成功归档文件、暂存记录和导出结果都可以从这里继续查看。" : "待本轮生成结果后，可从这里直接打开输出目录。",
+    text: outputPath ? isFetchResult ? "inbox 文件夹与 manifest.jsonl 位于该目录下，可从这里继续查看。" : localInPlace ? localSplitByCategory ? "分类文件、「整理前发票」中的原件、重复件与导出明细都可以从这里继续查看。" : "整理后的文件、「整理前发票」中的原件、重复件与导出明细都可以从这里继续查看。" : isLocalResult ? "归档副本与导出明细已写入该目录；原始文件保留在发票文件夹。" : "成功归档文件、暂存记录和导出结果都可以从这里继续查看。" : "待本轮生成结果后，可从这里直接打开输出目录。",
     pathText: outputPath || "",
     buttonLabel: "打开输出目录",
     openPath: outputPath || parentFolder(manualCheckPath)

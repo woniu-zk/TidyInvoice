@@ -2540,6 +2540,8 @@ class InvoiceAppAPI:
             "local_input_dir": "",
             # Empty means "same folder as local_input_dir" (in-place organizing).
             "local_output_dir": "",
+            # Keep per-category archive folders (False = flat into the root).
+            "local_split_by_category": True,
         }
 
     @staticmethod
@@ -3045,7 +3047,7 @@ class InvoiceAppAPI:
 
         The mailbox is never connected and no mail configuration is read.
         """
-        from local_organize import LocalOrganizer, OrganizeRequest, export_summary, scan_input
+        from local_organize import LocalOrganizer, OrganizeRequest, export_summary
         from organize_source import rows_from_documents
 
         organize_request = OrganizeRequest(
@@ -3054,6 +3056,7 @@ class InvoiceAppAPI:
             rules_text=str(getattr(request, "rules_text", "") or ""),
             dry_run=bool(getattr(request, "dry_run", False)),
             run_id=str(request.run_id or ""),
+            split_by_category=bool(getattr(request, "split_by_category", True)),
         )
         resources = {"scan": None, "organizer": None}
 
@@ -3069,8 +3072,38 @@ class InvoiceAppAPI:
             self._append_log(
                 "运行", f"正在扫描本地文件夹：{request.input_dir}", "text-blue-400"
             )
-            scan_result = scan_input(organize_request)
+            organizer = LocalOrganizer(self, organize_request)
+            resources["organizer"] = organizer
+            scan_result = organizer.scan()
             resources["scan"] = scan_result
+            migration = getattr(organizer, "last_layout_migration", None)
+            layout_migrated = int(getattr(migration, "moved_count", 0) or 0)
+            layout_planned = int(getattr(migration, "planned_count", 0) or 0)
+            layout_label = (
+                "按分类分目录"
+                if organize_request.split_by_category
+                else "不建分类子目录"
+            )
+            if layout_migrated:
+                self._append_log(
+                    "信息",
+                    (
+                        f"已按「{layout_label}」设置调整已归档文件位置："
+                        f"{layout_migrated} 个。"
+                    ),
+                    "text-emerald-400",
+                )
+            elif layout_planned:
+                self._append_log(
+                    "信息",
+                    (
+                        f"预览：将按「{layout_label}」设置调整已归档文件位置："
+                        f"{layout_planned} 个。"
+                    ),
+                    "text-blue-400",
+                )
+            for warning in list(getattr(migration, "warnings", ()) or ())[:5]:
+                self._append_log("提示", str(warning), "text-amber-500")
             self.stats["emails"] = scan_result.file_count
             self._append_log(
                 "信息",
@@ -3100,8 +3133,10 @@ class InvoiceAppAPI:
             return rows
 
         def extract(rows, _request):
-            organizer = LocalOrganizer(self, organize_request)
-            resources["organizer"] = organizer
+            organizer = resources.get("organizer")
+            if organizer is None:
+                organizer = LocalOrganizer(self, organize_request)
+                resources["organizer"] = organizer
             return organizer.extract(list(rows))
 
         def archive(outcomes, _request):
@@ -3117,7 +3152,7 @@ class InvoiceAppAPI:
             if raw_moved:
                 self._append_log(
                     "信息",
-                    f"原件已移入 raw 文件夹保留：{raw_moved} 个。",
+                    f"原件已原样移入「整理前发票」文件夹保留（文件名不变）：{raw_moved} 个。",
                     "text-emerald-400",
                 )
             if duplicates_moved:
@@ -3133,9 +3168,11 @@ class InvoiceAppAPI:
         def report_callback(_context, run_result):
             scan_result = resources.get("scan")
             report = getattr(run_result, "archive_report", None)
+            organizer = resources.get("organizer")
             relocation = dict(
-                getattr(resources.get("organizer"), "last_relocation", {}) or {}
+                getattr(organizer, "last_relocation", {}) or {}
             )
+            migration = getattr(organizer, "last_layout_migration", None)
             if scan_result is not None:
                 self._last_organize_result = {
                     "input_dir": str(request.input_dir or ""),
@@ -3143,6 +3180,9 @@ class InvoiceAppAPI:
                     "dry_run": bool(getattr(request, "dry_run", False)),
                     "in_place": os.path.abspath(str(request.input_dir or ""))
                     == os.path.abspath(str(request.save_path or "")),
+                    "split_by_category": bool(
+                        getattr(request, "split_by_category", True)
+                    ),
                     "scanned_files": int(getattr(scan_result, "file_count", 0) or 0),
                     "duplicate_files": int(
                         getattr(scan_result, "skipped_duplicates", 0) or 0
@@ -3171,6 +3211,21 @@ class InvoiceAppAPI:
                     ),
                     "originals_kept_count": int(
                         relocation.get("originals_kept_count", 0) or 0
+                    ),
+                    # Migration/relocation notes are product-facing messages; keep
+                    # them visible to API consumers instead of only in the log.
+                    "warnings": [
+                        *[str(item) for item in relocation.get("warnings", []) or []],
+                        *[str(item) for item in getattr(migration, "warnings", ()) or ()],
+                        *[str(item) for item in getattr(scan_result, "warnings", ()) or ()],
+                    ][:20],
+                    "layout_migrated_count": int(
+                        getattr(migration, "moved_count", 0) or 0
+                    ),
+                    "layout_planned_count": (
+                        int(getattr(migration, "planned_count", 0) or 0)
+                        if bool(getattr(request, "dry_run", False))
+                        else 0
                     ),
                 }
             if not bool(getattr(request, "dry_run", False)):
@@ -3323,6 +3378,7 @@ class InvoiceAppAPI:
         _owned_extractor=None,
         _prepare_remote_images=True,
         _dry_run=False,
+        _flat_layout=False,
     ):
         from app_archive_adapter import AppArchiveAdapter
         from archive_service import ArchiveService
@@ -3428,6 +3484,7 @@ class InvoiceAppAPI:
             trace_store=trace_store,
             pairing_finalizer=_pairing_finalizer,
             dry_run=dry_run,
+            flat_layout=bool(_flat_layout),
         )
         archive_service = ArchiveService(
             normalizer=adapter.normalize,
@@ -4676,8 +4733,12 @@ class InvoiceAppAPI:
             secrets=secrets,
         )
 
-    def start_local_organize(self, input_dir, save_path="", dry_run=False):
-        """Feature ②: organize a local folder automatically (in place by default)."""
+    def start_local_organize(self, input_dir, save_path="", dry_run=False, split_by_category=True):
+        """Feature ②: organize a local folder automatically (in place by default).
+
+        ``split_by_category`` keeps the per-category archive folders; ``False``
+        archives every processed invoice flat into the output root.
+        """
         if (
             not self._run_lifecycle.can_begin
             or self._is_running
@@ -4703,9 +4764,11 @@ class InvoiceAppAPI:
         if str(save_text).startswith(("\\\\", "//")):
             return {"success": False, "message": "不支持网络共享路径"}
 
-        return self._admit_local_organize(input_text, save_text, bool(dry_run))
+        return self._admit_local_organize(
+            input_text, save_text, bool(dry_run), bool(split_by_category)
+        )
 
-    def _admit_local_organize(self, input_dir, save_path, dry_run):
+    def _admit_local_organize(self, input_dir, save_path, dry_run, split_by_category=True):
         with self._admission_lock:
             worker_active = bool(self._worker_thread and self._worker_thread.is_alive())
             active_handle = self._active_run_handle
@@ -4788,6 +4851,7 @@ class InvoiceAppAPI:
                         "task_mode": "local",
                         "local_input_dir": input_dir,
                         "local_output_dir": local_output_dir,
+                        "local_split_by_category": bool(split_by_category),
                         "company": active_company,
                     }
                 )
@@ -4814,6 +4878,7 @@ class InvoiceAppAPI:
                     source_mode="local",
                     input_dir=input_dir,
                     dry_run=bool(dry_run),
+                    split_by_category=bool(split_by_category),
                 )
                 self._active_task_mode = "local"
                 self._last_fetch_summary = {}
@@ -4844,6 +4909,7 @@ class InvoiceAppAPI:
                     "input_dir": input_dir,
                     "output_dir": str(request.save_path),
                     "dry_run": bool(dry_run),
+                    "split_by_category": bool(split_by_category),
                 },
             )
             thread = threading.Thread(

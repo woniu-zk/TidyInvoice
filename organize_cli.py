@@ -69,9 +69,23 @@ def _print_organize_human(result) -> None:
     )
     if result.raw_moved_count or result.duplicates_moved_count:
         print(
-            "归位: 原件 → raw/ %d 个 · 重复件 → duplicates/ %d 个"
+            "归位: 原件 → 整理前发票/（原样保留） %d 个 · 重复件 → duplicates/ %d 个"
             % (result.raw_moved_count, result.duplicates_moved_count)
         )
+    if result.layout_migrated_count or result.layout_planned_count:
+        layout_label = (
+            "按分类分目录" if request.split_by_category else "不建分类子目录"
+        )
+        if result.layout_migrated_count:
+            print(
+                "布局调整: 已按「%s」设置移动已归档文件 %d 个"
+                % (layout_label, result.layout_migrated_count)
+            )
+        else:
+            print(
+                "布局调整: 预览将按「%s」设置移动已归档文件 %d 个"
+                % (layout_label, result.layout_planned_count)
+            )
     if result.preview_rows:
         print("-" * 70)
         print(f"{'原文件':<28}{'→ 分类/新文件名':<40}")
@@ -109,7 +123,10 @@ def _build_parser() -> argparse.ArgumentParser:
     organize.add_argument(
         "--apply",
         action="store_true",
-        help="真正执行整理（默认仅预览；同目录整理时原件移入 raw/、重复件移入 duplicates/）",
+        help=(
+            "真正执行整理（默认仅预览；同目录整理时原件按原文件名原样移入 "
+            "「整理前发票」文件夹、重复件移入 duplicates/）"
+        ),
     )
     organize.add_argument("--rules", default="", help="可选的自定义分类规则文本文件")
     organize.add_argument(

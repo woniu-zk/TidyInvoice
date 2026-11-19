@@ -8,7 +8,8 @@ a WeChat download folder, paperwork photos) can be organized on its own.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+import filecmp
 import os
 import shutil
 import time
@@ -16,13 +17,13 @@ from typing import Any
 
 import fetch_handoff
 import organize_source
-
-
-#: Root-level folders that the in-place organizer treats as its own output
-#: (classified archive, preserved originals, duplicates, review buckets). They
-#: are pruned from the scan when input and output are the same folder.
-IN_PLACE_TOOL_DIR_NAMES = frozenset(
-    {"raw", "duplicates", "_audit_retention", "待人工复核", "人工复核", ".local-staging"}
+from organize_layout import (
+    LEGACY_ORIGINALS_DIR_NAME,
+    ORIGINALS_DIR_NAME,
+    LayoutMigration,
+    archive_dir_names,
+    enforce_layout,
+    organized_output_name_re,
 )
 
 
@@ -31,22 +32,6 @@ def is_filesystem_root(path: str | os.PathLike[str]) -> bool:
     resolved = os.path.abspath(str(path or ""))
     _drive, rest = os.path.splitdrive(resolved)
     return not rest.replace("/", "").replace("\\", "").strip()
-
-
-def archive_dir_names() -> frozenset[str]:
-    """Folder names produced by a normal archive run (plus tool-owned buckets).
-
-    Imported lazily so this module still has no invoice-parsing dependency at
-    import time; ``document_types`` is a pure classification registry.
-    """
-    from document_types import DOCUMENT_TYPES
-
-    names = set(IN_PLACE_TOOL_DIR_NAMES)
-    for entry in DOCUMENT_TYPES.values():
-        folder = str(entry.get("archive_folder") or "").strip()
-        if folder:
-            names.add(folder)
-    return frozenset(names)
 
 
 @dataclass(frozen=True)
@@ -58,6 +43,11 @@ class OrganizeRequest:
     run_id: str = ""
     recursive: bool = True
     source_label: str = "本地文件夹整理"
+    #: True keeps the per-category archive folders (餐饮/, 充电/, ...). False
+    #: archives every processed invoice flat into the output root; the file name
+    #: still carries the category, and the originals/duplicates/review buckets
+    #: are kept. Either way a re-run skips files an earlier run already produced.
+    split_by_category: bool = True
 
     @property
     def resolved_output_dir(self) -> str:
@@ -97,6 +87,11 @@ class OrganizeResult:
     raw_moved_count: int = 0
     duplicates_moved_count: int = 0
     originals_kept_count: int = 0
+    #: Archived invoices moved to match the requested directory layout (e.g. a
+    #: flat archive switched to the per-category folders). ``layout_planned_count``
+    #: is the preview of the same re-layout for dry runs.
+    layout_migrated_count: int = 0
+    layout_planned_count: int = 0
     report_path: str = ""
     warnings: tuple[str, ...] = ()
     preview_rows: tuple[dict[str, Any], ...] = ()
@@ -113,6 +108,7 @@ class OrganizeResult:
             "output_dir": self.request.resolved_output_dir,
             "dry_run": self.dry_run,
             "in_place": self.request.in_place,
+            "split_by_category": bool(self.request.split_by_category),
             "scanned_files": self.scanned_files,
             "duplicate_files": self.duplicate_files,
             "unsupported_files": self.unsupported_files,
@@ -125,6 +121,8 @@ class OrganizeResult:
             "raw_moved_count": self.raw_moved_count,
             "duplicates_moved_count": self.duplicates_moved_count,
             "originals_kept_count": self.originals_kept_count,
+            "layout_migrated_count": self.layout_migrated_count,
+            "layout_planned_count": self.layout_planned_count,
             "report_path": self.report_path,
             "warnings": list(self.warnings),
             "preview_rows": list(self.preview_rows),
@@ -167,7 +165,7 @@ def _exclude_paths(request: OrganizeRequest) -> tuple[str, ...]:
 
 def scan_input(request: OrganizeRequest) -> organize_source.LocalScanResult:
     manifest_path = request.manifest_path if os.path.isfile(request.manifest_path) else None
-    return organize_source.scan_local_directory(
+    scan = organize_source.scan_local_directory(
         request.input_dir,
         exclude_paths=_exclude_paths(request),
         exclude_root_child_dir_names=(
@@ -176,6 +174,36 @@ def scan_input(request: OrganizeRequest) -> organize_source.LocalScanResult:
         manifest_path=manifest_path,
         recursive=request.recursive,
     )
+    if request.in_place:
+        scan = _drop_organized_outputs(scan)
+    return scan
+
+
+def _drop_organized_outputs(
+    scan: organize_source.LocalScanResult,
+) -> organize_source.LocalScanResult:
+    """Skip root-level files a previous in-place run already organized.
+
+    This applies to both layouts: a flat run leaves its output in the folder
+    root, and re-processing those files would only move them into
+    ``duplicates/``. Only root-level names are considered, so a user child
+    folder that merely reuses an archived name is still scanned normally.
+    """
+    pattern = organized_output_name_re()
+    kept = []
+    skipped = 0
+    for document in scan.documents:
+        name = os.path.basename(document.path)
+        if "/" not in document.rel_path and pattern.match(name):
+            skipped += 1
+            continue
+        kept.append(document)
+    if not skipped:
+        return scan
+    warnings = tuple(scan.warnings) + (
+        f"已跳过上次整理生成的文件 {skipped} 个（不重复整理）",
+    )
+    return replace(scan, documents=tuple(kept), warnings=warnings)
 
 
 def candidate_rows(
@@ -212,7 +240,9 @@ class LocalOrganizer:
         self.request = request
         self._session = None
         self._extractor = None
+        self._run_id = ""
         self.scan_result: organize_source.LocalScanResult | None = None
+        self.last_layout_migration: LayoutMigration | None = None
         self.last_relocation: dict[str, Any] = {
             "raw_moved_count": 0,
             "duplicates_moved_count": 0,
@@ -225,6 +255,7 @@ class LocalOrganizer:
         """Mirror the run context the processing pipeline expects."""
         request = self.request
         run_id = str(request.run_id or f"local-organize-{time.strftime('%Y%m%d%H%M%S')}")
+        self._run_id = run_id
         output_dir = request.resolved_output_dir
         os.makedirs(output_dir, exist_ok=True)
         self.api._run_context = {
@@ -256,6 +287,14 @@ class LocalOrganizer:
         return ""
 
     def scan(self) -> organize_source.LocalScanResult:
+        # Enforce the layout this run asks for before scanning: when an earlier
+        # run already organized this folder with the other layout, its archive
+        # files are moved now instead of being skipped as "already organized".
+        self.last_layout_migration = enforce_layout(
+            self.request.resolved_output_dir,
+            split_by_category=self.request.split_by_category,
+            dry_run=self.request.dry_run,
+        )
         self.scan_result = scan_input(self.request)
         return self.scan_result
 
@@ -273,6 +312,7 @@ class LocalOrganizer:
             _owned_extractor=self._extractor,
             _prepare_remote_images=False,
             _dry_run=self.request.dry_run,
+            _flat_layout=not self.request.split_by_category,
         )
         return self._session.extract()
 
@@ -285,20 +325,50 @@ class LocalOrganizer:
         return report
 
     # ------------------------------------------------------- in-place cleanup
+    def _migrate_legacy_originals(self, root: str, raw_root: str) -> list[str]:
+        """Rename an older ``raw/`` originals bucket to ``整理前发票/``.
+
+        Older builds saved processed originals under ``<input>/raw/``. The bucket
+        is renamed now so the folder the user sees carries the product name; the
+        files inside are not moved, renamed, or rewritten. When the current
+        bucket already exists the legacy one is left where it is (it stays a
+        tool-owned folder) instead of merging two buckets.
+        """
+        legacy = os.path.join(root, LEGACY_ORIGINALS_DIR_NAME)
+        if os.path.islink(legacy) or not os.path.isdir(legacy):
+            return []
+        if os.path.exists(raw_root):
+            return [
+                "检测到旧版「raw」文件夹；因「整理前发票」已存在，未自动改名合并"
+            ]
+        try:
+            os.rename(legacy, raw_root)
+        except OSError as exc:
+            return [f"旧版「raw」文件夹未能改名为「整理前发票」：{type(exc).__name__}"]
+        return ["旧版「raw」文件夹已改名为「整理前发票」（内部文件保持原样）"]
+
     def _relocate_originals(self, report) -> None:
         """Move processed originals out of the folder root (in-place mode only).
 
-        - archived / manual_review / retained: keep the original bytes under
-          ``<input>/raw/YYYY/MM/`` (the classified copy already exists elsewhere)
+        - archived / manual_review / retained: the original file itself goes to
+          ``<input>/整理前发票/`` **as the user had it** — same file name, same
+          bytes, and the same relative path when it came from a sub-folder.
+          There is no renaming and no ``YYYY/MM`` bucketing; a later run that
+          would hit the same path never renames either, it keeps the file name
+          and stores the later copy under ``整理前发票/<run_id>/``.
         - duplicate: move to ``<input>/duplicates/`` so a re-run stays clean
         - unresolved: leave untouched for the user to inspect
+
+        A legacy ``raw/`` bucket from older builds is renamed to the current
+        bucket name first (best-effort; its content is not altered).
 
         Every move is best-effort: a failure keeps the original where it is and
         never fails the run.
         """
         root = os.path.abspath(self.request.input_dir)
-        raw_root = os.path.join(root, "raw")
+        raw_root = os.path.join(root, ORIGINALS_DIR_NAME)
         duplicates_root = os.path.join(root, "duplicates")
+        run_id = self._run_id or "run"
         tool_dirs = archive_dir_names()
         counts = {
             "raw_moved_count": 0,
@@ -306,6 +376,7 @@ class LocalOrganizer:
             "originals_kept_count": 0,
             "warnings": [],
         }
+        counts["warnings"].extend(self._migrate_legacy_originals(root, raw_root))
 
         for archived in getattr(report, "outcomes", ()) or ():
             outcome = getattr(archived, "outcome", None)
@@ -333,22 +404,69 @@ class LocalOrganizer:
                     "manual_review",
                     "retained",
                 }:
-                    mtime = os.path.getmtime(source_abs)
-                    year = time.strftime("%Y", time.localtime(mtime))
-                    month = time.strftime("%m", time.localtime(mtime))
-                    target_dir = os.path.join(raw_root, year, month)
-                    target = self._move_unique(source_abs, target_dir, os.path.basename(source_abs))
-                    if target:
+                    target, conflicted = self._verbatim_raw_target(
+                        source_abs, root, raw_root, run_id
+                    )
+                    if target is None:
+                        # 整理前发票/ already holds a byte-identical original:
+                        # this copy is redundant, keep it with the duplicates.
+                        target = self._move_unique(
+                            source_abs, duplicates_root, os.path.basename(source_abs)
+                        )
+                        if target:
+                            counts["duplicates_moved_count"] += 1
+                    else:
+                        os.makedirs(os.path.dirname(target), exist_ok=True)
+                        shutil.move(source_abs, target)
                         counts["raw_moved_count"] += 1
+                        if conflicted:
+                            counts["warnings"].append(
+                                "整理前发票中已有同名但内容不同的原件，为不改名已单独保存："
+                                f"{os.path.relpath(target, raw_root)}"
+                            )
                 else:
                     counts["originals_kept_count"] += 1
             except OSError as exc:
                 counts["originals_kept_count"] += 1
                 counts["warnings"].append(
-                    f"原文件未能移入 raw/，已保留原位：{os.path.basename(source_abs)}（{type(exc).__name__}）"
+                    "原文件未能原样移入「整理前发票」，已保留原位："
+                    f"{os.path.basename(source_abs)}（{type(exc).__name__}）"
                 )
 
         self.last_relocation = counts
+
+    def _verbatim_raw_target(
+        self, source: str, root: str, raw_root: str, run_id: str
+    ) -> tuple[str | None, bool]:
+        """Pick a ``整理前发票/`` destination that never modifies the name.
+
+        The original keeps its file name and, when it came from a sub-folder,
+        its relative path. Returns ``(None, False)`` when the bucket already
+        holds a byte-identical copy (the caller then treats the file as a
+        duplicate). A genuine same-name conflict from a later run is stored
+        under a run-scoped folder instead of being renamed; the second return
+        value reports that fallback so the run can explain itself.
+        """
+        relative = os.path.relpath(os.path.abspath(source), os.path.abspath(root))
+        target = os.path.join(raw_root, relative)
+        if not os.path.exists(target):
+            return target, False
+        try:
+            identical = os.path.isfile(target) and filecmp.cmp(
+                source, target, shallow=False
+            )
+        except OSError:
+            identical = False
+        if identical:
+            return None, False
+        # Never rename: the later original goes into its own run folder.
+        run_dir = os.path.join(raw_root, str(run_id or "run"))
+        target = os.path.join(run_dir, relative)
+        index = 2
+        while os.path.exists(target):
+            target = os.path.join(f"{run_dir}_{index}", relative)
+            index += 1
+        return target, True
 
     @staticmethod
     def _is_inside(path: str, root: str) -> bool:
@@ -402,6 +520,16 @@ class LocalOrganizer:
             )
         )
         relocation = dict(getattr(self, "last_relocation", {}) or {})
+        migration = self.last_layout_migration
+        layout_migrated = int(getattr(migration, "moved_count", 0) or 0)
+        # ``layout_planned_count`` is a preview value: an applied run reports the
+        # moves it performed through ``layout_migrated_count`` instead.
+        layout_planned = (
+            int(getattr(migration, "planned_count", 0) or 0)
+            if request.dry_run
+            else 0
+        )
+        layout_warnings = tuple(str(item) for item in getattr(migration, "warnings", ()) or ())
         return OrganizeResult(
             request=request,
             run_id=str(self.api._current_run_id or ""),
@@ -419,8 +547,11 @@ class LocalOrganizer:
                 relocation.get("duplicates_moved_count", 0) or 0
             ),
             originals_kept_count=int(relocation.get("originals_kept_count", 0) or 0),
+            layout_migrated_count=layout_migrated,
+            layout_planned_count=layout_planned,
             report_path=report_path,
             warnings=tuple(scan.warnings)
+            + layout_warnings
             + tuple(str(item) for item in relocation.get("warnings", []) or []),
             preview_rows=preview_rows,
             duration_seconds=time.monotonic() - started,

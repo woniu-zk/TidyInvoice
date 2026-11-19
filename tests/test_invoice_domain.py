@@ -392,6 +392,11 @@ class CanonicalRuleParityTests(unittest.TestCase):
             "滴滴行程报销单": "行程单",
             "高德打车": "打车",
             "差旅服务费发票": "差旅服务费",
+            "茶饮": "餐饮",
+            "饮品店": "餐饮",
+            "充电服务费": "充电",
+            "充电桩收费": "充电",
+            "电费": "其他",
             "完全未知": "其他",
         }
         for raw, expected in fixtures.items():

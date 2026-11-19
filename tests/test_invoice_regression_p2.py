@@ -1272,6 +1272,315 @@ class InvoiceP2RegressionTests(unittest.TestCase):
         self.assertEqual(result["Seller"], "杭州滴滴出行科技有限公司")
         self.assertEqual(result["Type"], "打车")
 
+    def test_standard_einvoice_parser_classifies_tea_drink_shop_as_catering(self):
+        pdf = self.root / "tea_drink_invoice.pdf"
+        write_text_pdf(
+            pdf,
+            "\n".join(
+                [
+                    "电子发票（普通发票）",
+                    "发票号码：",
+                    "开票日期：",
+                    "购",
+                    "买",
+                    "方",
+                    "信",
+                    "息",
+                    "统一社会信用代码/纳税人识别号：",
+                    "销",
+                    "售",
+                    "方",
+                    "信",
+                    "息",
+                    "统一社会信用代码/纳税人识别号：",
+                    "名称：",
+                    "名称：",
+                    "项目名称",
+                    "规格型号",
+                    "单 位",
+                    "数 量",
+                    "单 价",
+                    "金 额",
+                    "税率/征收率",
+                    "税 额",
+                    "合",
+                    "计",
+                    "价税合计（大写）",
+                    "（小写）",
+                    "备",
+                    "注",
+                    "开票人：",
+                    "26324000000409839571",
+                    "2026年10月15日",
+                    "广州华伟医疗设备有限公司",
+                    "91440113MAE19LB505",
+                    "江北新区啵啵先萃茶饮店（个体工商户）",
+                    "92320191MAEHPUME0C",
+                    "¥98.32",
+                    "¥0.98",
+                    "玖拾玖圆叁角整",
+                    "¥99.30",
+                    "周海波",
+                    "*软饮料*茶饮料",
+                    "1%",
+                    "98.32",
+                    "0.98",
+                ]
+            ),
+        )
+
+        result = self.extractor._try_extract_standard_china_einvoice_from_pdf_text_v2(str(pdf))
+
+        self.assertIsNotNone(result)
+        self.assertIn("啵啵先萃茶饮店", result["Seller"])
+        self.assertEqual(result["Amount"], "99.30")
+        self.assertEqual(result["Type"], "餐饮")
+
+    def test_standard_einvoice_parser_classifies_beverage_shop_as_catering(self):
+        pdf = self.root / "beverage_shop_invoice.pdf"
+        write_text_pdf(
+            pdf,
+            "\n".join(
+                [
+                    "合",
+                    "计",
+                    "价税合计（大写）",
+                    "（小写）",
+                    "备",
+                    "注",
+                    "开票人：",
+                    "电子发票（普通发票）",
+                    "发票号码：",
+                    "开票日期：",
+                    "购",
+                    "买",
+                    "方",
+                    "信",
+                    "息",
+                    "统一社会信用代码/纳税人识别号：",
+                    "销",
+                    "售",
+                    "方",
+                    "信",
+                    "息",
+                    "统一社会信用代码/纳税人识别号：",
+                    "名称：",
+                    "名称：",
+                    "项目名称",
+                    "规格型号",
+                    "单 位",
+                    "数 量",
+                    "单 价",
+                    "金 额",
+                    "税率/征收率",
+                    "税 额",
+                    "26442000011891007556",
+                    "2026年10月18日",
+                    "广州华伟医疗设备有限公司",
+                    "91440113MAE19LB505",
+                    "广州市番禺区石碁灿暖饮品店（个体工商户）",
+                    "92440113MADRHMYC28",
+                    "¥218.30",
+                    "¥13.10",
+                    "贰佰叁拾壹圆肆角整",
+                    "¥231.40",
+                    "陈铭瑜",
+                    "*生产生活服务*抹茶系列",
+                    "双杯随心配套餐",
+                    "6%",
+                    "39.62",
+                    "1",
+                    "2.38",
+                    "39.62",
+                    "*生产生活服务*原叶鲜奶",
+                    "茶10选2（双大杯）",
+                    "6%",
+                    "39.62",
+                    "1",
+                    "2.38",
+                    "39.62",
+                    "*生产生活服务*包装费",
+                    "6%",
+                    "8.49",
+                    "1",
+                    "0.51",
+                    "8.49",
+                ]
+            ),
+        )
+
+        result = self.extractor._try_extract_standard_china_einvoice_from_pdf_text_v2(str(pdf))
+
+        self.assertIsNotNone(result)
+        self.assertIn("灿暖饮品店", result["Seller"])
+        self.assertEqual(result["Amount"], "231.40")
+        self.assertEqual(result["Type"], "餐饮")
+
+    def test_standard_einvoice_parser_classifies_charging_service_as_charging(self):
+        pdf = self.root / "charging_invoice.pdf"
+        write_text_pdf(
+            pdf,
+            "\n".join(
+                [
+                    "电子发票（普通发票）",
+                    "发票号码：",
+                    "开票日期：",
+                    "购",
+                    "买",
+                    "方",
+                    "信",
+                    "息",
+                    "统一社会信用代码/纳税人识别号：",
+                    "销",
+                    "售",
+                    "方",
+                    "信",
+                    "息",
+                    "统一社会信用代码/纳税人识别号：",
+                    "名称：",
+                    "名称：",
+                    "项目名称",
+                    "规格型号",
+                    "单 位",
+                    "数 量",
+                    "单 价",
+                    "金 额",
+                    "税率/征收率",
+                    "税 额",
+                    "合",
+                    "计",
+                    "价税合计（大写）",
+                    "（小写）",
+                    "备",
+                    "注",
+                    "开票人：",
+                    "26442000012806743906",
+                    "2026年11月07日",
+                    "广州华伟医疗设备有限公司",
+                    "91440113MAE19LB505",
+                    "广州市泷泽电子科技有限公司",
+                    "914401015961809535",
+                    "¥195.28",
+                    "¥25.39",
+                    "贰佰贰拾圆陆角柒分",
+                    "¥220.67",
+                    "麦永钜",
+                    "*供电*电费",
+                    "13%",
+                    "151.73",
+                    "19.73",
+                    "*供电*充电服务费",
+                    "13%",
+                    "43.55",
+                    "5.66",
+                ]
+            ),
+        )
+
+        result = self.extractor._try_extract_standard_china_einvoice_from_pdf_text_v2(str(pdf))
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["Seller"], "广州市泷泽电子科技有限公司")
+        self.assertEqual(result["Amount"], "220.67")
+        self.assertEqual(result["Type"], "充电")
+
+    def test_standard_einvoice_parser_keeps_electricity_only_invoice_as_other(self):
+        pdf = self.root / "electricity_only_invoice.pdf"
+        write_text_pdf(
+            pdf,
+            "\n".join(
+                [
+                    "电子发票（普通发票）",
+                    "发票号码：",
+                    "开票日期：",
+                    "名称：",
+                    "名称：",
+                    "26442000012806738236",
+                    "2026年11月07日",
+                    "广州华伟医疗设备有限公司",
+                    "91440113MAE19LB505",
+                    "广州市泷泽电子科技有限公司",
+                    "914401015961809535",
+                    "¥151.73",
+                    "¥19.73",
+                    "壹佰柒拾壹圆肆角陆分",
+                    "¥171.46",
+                    "*供电*电费",
+                    "13%",
+                    "151.73",
+                    "19.73",
+                ]
+            ),
+        )
+
+        result = self.extractor._try_extract_standard_china_einvoice_from_pdf_text_v2(str(pdf))
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["Amount"], "171.46")
+        self.assertEqual(result["Type"], "其他")
+
+    def test_standard_einvoice_parser_prefers_lodging_over_dining(self):
+        pdf = self.root / "hotel_with_dining_invoice.pdf"
+        write_text_pdf(
+            pdf,
+            "\n".join(
+                [
+                    "电子发票（普通发票）",
+                    "发票号码：",
+                    "开票日期：",
+                    "名称：",
+                    "名称：",
+                    "26332000004952544376",
+                    "2026年06月11日",
+                    "辉瑞投资有限公司",
+                    "91310000710920127H",
+                    "杭州浙凯酒店管理有限公司",
+                    "91330114MA8GERFU78",
+                    "¥416.18",
+                    "¥24.97",
+                    "肆佰肆拾壹圆壹角伍分",
+                    "¥441.15",
+                    "*生产生活服务*住宿费",
+                    "*生产生活服务*餐饮服务",
+                ]
+            ),
+        )
+
+        result = self.extractor._try_extract_standard_china_einvoice_from_pdf_text_v2(str(pdf))
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["Amount"], "441.15")
+        self.assertEqual(result["Type"], "住宿发票")
+
+    def test_standard_einvoice_parser_v1_classifies_beverage_as_catering(self):
+        pdf = self.root / "tea_drink_invoice_v1.pdf"
+        write_text_pdf(
+            pdf,
+            "\n".join(
+                [
+                    "电子发票（普通发票）",
+                    "发票号码：26324000000409839571",
+                    "开票日期：2026年10月15日",
+                    "广州华伟医疗设备有限公司",
+                    "91440113MAE19LB505",
+                    "江北新区啵啵先萃茶饮店（个体工商户）",
+                    "92320191MAEHPUME0C",
+                    "*软饮料*茶饮料",
+                    "1%",
+                    "98.32",
+                    "0.98",
+                    "价税合计（小写）¥99.30",
+                ]
+            ),
+        )
+
+        result = self.extractor._try_extract_standard_china_einvoice_from_pdf_text(str(pdf))
+
+        self.assertIsNotNone(result)
+        self.assertIn("啵啵先萃茶饮店", result["Seller"])
+        self.assertEqual(result["Amount"], "99.30")
+        self.assertEqual(result["Type"], "餐饮")
+
     def test_hotel_folio_parser_classifies_huazhu_checkout_bill_as_exempt_folio(self):
         pdf = self.root / "folio.pdf"
         write_text_pdf(

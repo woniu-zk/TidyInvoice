@@ -214,15 +214,19 @@ def test_task_mode_ui_follows_organize_frontend_contract():
         "仅提取到 inbox",
         "本地文件夹整理",
         "开始整理",
+        "整理进目录",
+        "按分类分目录",
         "仅提取完成",
         "本地整理完成",
         "附件已保存到 inbox 文件夹，并写入 manifest.jsonl；未进行识别和归档。",
-        "已按分类与命名规则归档本地发票；原件已移入 raw 文件夹保留，重复文件已移入 duplicates 文件夹。",
+        "已按分类与命名规则归档本地发票；原件已原样保留在「整理前发票」文件夹（文件名不变），重复文件已移入 duplicates 文件夹。",
         "已按分类与命名规则归档本地发票；原始文件保留在发票文件夹，未移动。",
+        "已按命名规则整理本地发票（未建分类子目录）；原件已原样保留在「整理前发票」文件夹（文件名不变），重复文件已移入 duplicates 文件夹。",
+        "已按命名规则整理本地发票（未建分类子目录）；原始文件保留在发票文件夹，未移动。",
         "默认同发票文件夹",
         "恢复默认（发票文件夹）",
     )
-    persistence_fields = ("task_mode", "local_input_dir", "local_output_dir")
+    persistence_fields = ("task_mode", "local_input_dir", "local_output_dir", "local_split_by_category")
     for marker in mode_copy + persistence_fields:
         assert marker in source, f"task mode UI is missing {marker!r}"
         assert marker in built, f"compiled bundle is missing {marker!r}"
@@ -243,9 +247,9 @@ def test_task_mode_ui_follows_organize_frontend_contract():
         'callApi("start_fetch_only", settings.save_path, runSettings.date_from, runSettings.date_to, '
         "String(settings.email).trim(), settings.auth_code)"
     ) in source
-    # local 模式：inputDir, effectiveOutput（默认等于发票文件夹），无 dry-run 参数
+    # local 模式：inputDir, effectiveOutput（默认等于发票文件夹）, dry_run=false, 分目录选项
     assert (
-        'callApi("start_local_organize", inputDir, outputDir)'
+        'callApi("start_local_organize", inputDir, outputDir, false, localSplitByCategory)'
     ) in source
     # mail 模式：沿用原调用，rules_text 传空
     assert (
@@ -271,3 +275,20 @@ def test_settings_top_level_cards_never_flex_shrink_into_slivers():
     )
     assert ".page-wrap--settings { min-height: 100%; height: auto; justify-content: flex-start;" in normalized
     assert normalized.count("flex: 0 0 auto") >= 2
+
+
+def test_toggle_checkboxes_keep_a_visible_native_box():
+    """Regression: the global input reset stripped the native checkbox glyph.
+
+    ``input:not([type="date"]) { appearance: none }`` removed the box and tick,
+    so 「按分类分目录」/「自动记住当前配置」 rendered as invisible 18x18 hit
+    areas while the label text stayed visible.
+    """
+    html = " ".join(_read(HTML_PATH).split())
+    assert '.toggle-row input[type="checkbox"]' in html
+    rule_start = html.index('.toggle-row input[type="checkbox"]')
+    rule = html[rule_start:rule_start + 320]
+    assert "appearance: auto" in rule
+    assert "-webkit-appearance: auto" in rule
+    # The global reset stays for the text inputs; the toggle rule must override it.
+    assert 'input:not([type="date"]), select { appearance: none' in html

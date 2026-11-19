@@ -13,6 +13,14 @@ MANUAL_REVIEW_FOLDER = "待人工复核"
 NON_TARGET_COMPANY_FOLDER = "非目标公司发票"
 PERSONAL_NON_REIMBURSEMENT_FOLDER = "个人非报销发票"
 
+# 票面明细/商家名里的饮品证据（茶饮店、奶茶店等）：线下与线上快路径共用这一份，
+# 避免多处关键词表各写一套后漂移。刻意不收「饮料」「咖啡」这类更宽的词，
+# 以免酒店迷你吧、综合商超票据被误判成餐饮。
+DINING_BEVERAGE_TOKENS = ("茶饮", "饮品", "奶茶")
+# 充电费/充电服务费证据：刻意不收裸「充电」与「电费」，避免充电宝/充电线
+# 商品票和办公电费被误判成充电。
+CHARGING_SERVICE_TOKENS = ("充电服务", "充电费", "充电桩", "充电站")
+
 DOCUMENT_TYPES = {
     # 现有发票类型
     "打车":     {"exempt_from_purchaser_check": True,  "archive_folder": "打车"},
@@ -23,6 +31,8 @@ DOCUMENT_TYPES = {
     "住宿水单": {"exempt_from_purchaser_check": True,  "archive_folder": "住宿发票"},
     "餐饮":     {"exempt_from_purchaser_check": False, "archive_folder": "餐饮"},
     "过路费":   {"exempt_from_purchaser_check": True,  "archive_folder": "过路费"},
+    # 电动车充电：明细含充电服务费/充电费时归档到「充电」，购买方校验与其他类目一致
+    "充电":     {"exempt_from_purchaser_check": False, "archive_folder": "充电"},
     "定额发票": {"exempt_from_purchaser_check": True,  "archive_folder": "定额发票"},
     "其他":     {"exempt_from_purchaser_check": False, "archive_folder": "其他"},
     # 国旅运通新增
@@ -169,10 +179,14 @@ def normalize_document_type(doc_type: object) -> DocumentType:
         return "行程单"
     if "打车" in text or "滴滴" in text or "出租" in text or "高德" in text:
         return "打车"
-    if "餐饮" in text or "餐" in text:
+    if "餐饮" in text or "餐" in text or any(
+        token in text for token in DINING_BEVERAGE_TOKENS
+    ):
         return "餐饮"
     if "过路" in text or "高速" in text:
         return "过路费"
+    if any(token in text for token in CHARGING_SERVICE_TOKENS):
+        return "充电"
     if "定额" in text:
         return "定额发票"
     if "非目标" in text:

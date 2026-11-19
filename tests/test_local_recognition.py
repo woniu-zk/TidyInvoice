@@ -137,6 +137,44 @@ def test_type_detection_for_catering_and_hotel():
     assert lr.extract_invoice_payload(hotel, engine=lr.ENGINE_PDF_TEXT).payload["Type"] == "住宿发票"
 
 
+def test_type_detection_for_beverage_and_charging_details():
+    tea_drink = SAMPLE_EINVOICE_TEXT.replace(
+        "*运输服务*客运服务费", "*软饮料*茶饮料"
+    ).replace("上海滴滴出行科技有限公司", "江北新区啵啵先萃茶饮店（个体工商户）")
+    assert (
+        lr.extract_invoice_payload(tea_drink, engine=lr.ENGINE_PDF_TEXT).payload["Type"]
+        == "餐饮"
+    )
+
+    milk_tea = SAMPLE_EINVOICE_TEXT.replace(
+        "*运输服务*客运服务费", "*生产生活服务*原叶鲜奶茶10选2"
+    ).replace("上海滴滴出行科技有限公司", "广州市番禺区石碁灿暖饮品店（个体工商户）")
+    assert (
+        lr.extract_invoice_payload(milk_tea, engine=lr.ENGINE_PDF_TEXT).payload["Type"]
+        == "餐饮"
+    )
+
+    charging = SAMPLE_EINVOICE_TEXT.replace(
+        "*运输服务*客运服务费 1 100.00 100.00 3% 3.00",
+        "*供电*电费 1 84.27 84.27 13% 10.95\n*供电*充电服务费 1 38.54 38.54 13% 5.01",
+    ).replace("上海滴滴出行科技有限公司", "广州市泷泽电子科技有限公司")
+    assert (
+        lr.extract_invoice_payload(charging, engine=lr.ENGINE_PDF_TEXT).payload["Type"]
+        == "充电"
+    )
+
+    # 纯电费票不是充电票，避免办公/家用电费被并入充电类目。
+    electricity_only = SAMPLE_EINVOICE_TEXT.replace(
+        "*运输服务*客运服务费", "*供电*电费"
+    ).replace("上海滴滴出行科技有限公司", "广州市泷泽电子科技有限公司")
+    assert (
+        lr.extract_invoice_payload(
+            electricity_only, engine=lr.ENGINE_PDF_TEXT
+        ).payload["Type"]
+        == "其他"
+    )
+
+
 def test_partial_amount_row_reconciles_total():
     text = SAMPLE_EINVOICE_TEXT.replace(
         "合计 ¥100.00 ¥3.00\n价税合计（大写）壹佰零叁元整 （小写）¥103.00",

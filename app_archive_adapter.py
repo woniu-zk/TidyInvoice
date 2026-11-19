@@ -22,6 +22,7 @@ class AppArchiveAdapter:
         acceptance_service: Any | None = None,
         pairing_finalizer: Callable[[ArchiveReport, Path], None] | None = None,
         dry_run: bool = False,
+        flat_layout: bool = False,
     ) -> None:
         self.api = api
         self.extractor = extractor
@@ -29,6 +30,10 @@ class AppArchiveAdapter:
         self.business_records = business_records
         self.trace_store = trace_store
         self.dry_run = bool(dry_run)
+        # Local mode without category subfolders: invoices archive into the
+        # output root. Tool buckets (待人工复核/_audit_retention) keep their
+        # folders so unreadable or retained material stays separable.
+        self.flat_layout = bool(flat_layout)
         if acceptance_service is None:
             from document_acceptance import DocumentAcceptanceService
 
@@ -510,7 +515,10 @@ class AppArchiveAdapter:
         previewer = getattr(self.extractor, "preview_archive_target", None)
         if not callable(previewer):
             raise RuntimeError("extractor does not support archive preview")
-        preview = previewer(source_path, info_json, custom_rules=custom_rules)
+        layout_kwargs = {"flat_layout": True} if self.flat_layout else {}
+        preview = previewer(
+            source_path, info_json, custom_rules=custom_rules, **layout_kwargs
+        )
         planned = str(preview.get("planned_path") or "")
         target_folder = str(preview.get("target_folder") or "")
         if preview.get("status") == "manual_check" or MANUAL_REVIEW_FOLDER in target_folder:
@@ -773,7 +781,10 @@ class AppArchiveAdapter:
             else None
         )
         success, path = self.extractor.route_and_rename_file(
-            source_path, info_json, custom_rules=custom_rules
+            source_path,
+            info_json,
+            custom_rules=custom_rules,
+            **({"flat_layout": True} if self.flat_layout else {}),
         )
         if not success:
             retained = self.api._retain_artifact(

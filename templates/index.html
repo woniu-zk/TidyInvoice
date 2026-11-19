@@ -914,7 +914,18 @@
             font-weight: 500;
         }
 
-        .toggle-row input { width: 18px; height: 18px; accent-color: #4d89ff; }
+        /* 全局 input 重置（appearance: none）会把原生 checkbox 的方框和勾一起抹掉，
+           这里显式恢复复选框外观，保证「按分类分目录」「自动记住当前配置」可见可点。 */
+        .toggle-row input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            margin: 0;
+            accent-color: #4d89ff;
+            appearance: auto;
+            -webkit-appearance: auto;
+            cursor: pointer;
+            flex: 0 0 auto;
+        }
 
         .footer-bar {
             display: flex;

@@ -40,6 +40,10 @@ class RunRequest:
     fetch_only: bool = False
     input_dir: str = ""
     dry_run: bool = False
+    # Local organizing layout: True keeps the per-category subfolders, False
+    # archives every processed invoice flat into the output root (the file name
+    # still carries the category).
+    split_by_category: bool = True
 
 
 @dataclass(frozen=True)

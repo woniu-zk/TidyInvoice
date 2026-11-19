@@ -79,9 +79,17 @@ def _wait_for_terminal(api, timeout: float = 180.0) -> dict:
     raise AssertionError(f"run did not finish: {api.get_progress()}")
 
 
-def _start_local(api, input_dir: Path, output_dir: Path | None = None, dry_run: bool = False) -> dict:
+def _start_local(
+    api,
+    input_dir: Path,
+    output_dir: Path | None = None,
+    dry_run: bool = False,
+    split_by_category: bool = True,
+) -> dict:
     args = [str(input_dir)] if output_dir is None else [str(input_dir), str(output_dir)]
-    result = api.start_local_organize(*args, dry_run=dry_run)
+    result = api.start_local_organize(
+        *args, dry_run=dry_run, split_by_category=split_by_category
+    )
     assert result.get("success") is True, result
     snapshot = _wait_for_terminal(api)
     assert snapshot["run_state"] == "completed", snapshot
@@ -139,6 +147,8 @@ def test_local_organize_in_place_apply_relocates_and_is_idempotent(tmp_path: Pat
     summary = results["organize_summary"]
     assert summary["output_dir"] == str(inbox)
     assert summary["in_place"] is True
+    assert summary["split_by_category"] is True
+    assert api.load_user_settings()["settings"]["local_split_by_category"] is True
     assert summary["scanned_files"] == 3
     assert summary["archived_count"] >= 2
     assert summary["raw_moved_count"] >= 2
@@ -151,9 +161,13 @@ def test_local_organize_in_place_apply_relocates_and_is_idempotent(tmp_path: Pat
     ]
     assert archived, "local organize did not archive any file"
     assert any(path.parent.name == "打车" for path in archived)
-    assert any("raw" in path.parts for path in archived), archived
-    raw_files = [path for path in inbox.rglob("*") if path.is_file() and "raw" in path.parts]
-    assert raw_files, "originals were not moved into raw/"
+    assert any("整理前发票" in path.parts for path in archived), archived
+    raw_files = [
+        path
+        for path in inbox.rglob("*")
+        if path.is_file() and "整理前发票" in path.parts
+    ]
+    assert raw_files, "originals were not moved into 整理前发票/"
     assert {path.name for path in raw_files} == {"发票A.pdf", "发票B.xml"}
     duplicate_files = [
         path for path in inbox.rglob("*") if path.is_file() and "duplicates" in path.parts
@@ -196,7 +210,7 @@ def test_local_organize_in_place_dry_run_writes_nothing(tmp_path: Path):
     assert all(row.get("path") for row in rows)
     after = sorted(path.relative_to(inbox).as_posix() for path in inbox.rglob("*") if path.is_file())
     assert after == before, "dry-run must not move or create files"
-    assert not (inbox / "raw").exists()
+    assert not (inbox / "整理前发票").exists()
     assert not (inbox / "duplicates").exists()
 
 
@@ -218,7 +232,7 @@ def test_local_organize_custom_output_copies_without_relocating(tmp_path: Path):
     assert summary["in_place"] is False
     assert summary["archived_count"] >= 2
     assert summary["raw_moved_count"] == 0
-    assert not (inbox / "raw").exists()
+    assert not (inbox / "整理前发票").exists()
     assert sorted(path.name for path in _root_invoice_files(inbox)) == originals_before
     archived = [
         path
@@ -265,13 +279,15 @@ def test_local_organize_relocation_failure_keeps_original(tmp_path: Path, monkey
     def _boom(*_args, **_kwargs):
         raise OSError("simulated move failure")
 
-    monkeypatch.setattr(organizer, "_move_unique", _boom)
+    # Originals are relocated verbatim into 整理前发票/ through this resolver;
+    # making it fail must leave them in place instead of failing the run.
+    monkeypatch.setattr(organizer, "_verbatim_raw_target", _boom)
     result = organizer.run()
 
     assert result.archived_count >= 2
     assert result.raw_moved_count == 0
     assert result.originals_kept_count >= 1
-    assert any("raw" in warning for warning in result.warnings)
+    assert any("整理前发票" in warning for warning in result.warnings)
     assert _root_invoice_files(inbox), "originals must stay in place when relocation fails"
 
 
@@ -306,6 +322,137 @@ def test_preview_archive_target_is_pure_and_deterministic(tmp_path: Path):
     )
     assert unclear["status"] == "manual_check"
     assert "待人工复核" in unclear["planned_path"]
+
+
+def test_flat_layout_archive_lands_in_the_output_root(tmp_path: Path):
+    from invoice_extractor import InvoiceExtractor
+
+    output = tmp_path / "output"
+    extractor = InvoiceExtractor(api_key="", output_dir=str(output))
+    source = tmp_path / "source.pdf"
+    source.write_bytes(b"%PDF-1.4 stub")
+    payload = {
+        "is_invoice": True,
+        "Date": "2026-11-07",
+        "Seller": "广州市泷泽电子科技有限公司",
+        "Amount": "220.67",
+        "InvoiceNumber": "26442000012806743906",
+        "Type": "充电",
+    }
+
+    preview = extractor.preview_archive_target(
+        str(source), payload, flat_layout=True
+    )
+    assert preview["status"] == "archived"
+    assert preview["target_folder"] == ""
+    assert Path(preview["planned_path"]).parent == output
+    assert Path(preview["planned_path"]).name.startswith("2026-11-07_充电_220.67_")
+
+    success, final_path = extractor.route_and_rename_file(
+        str(source), payload, flat_layout=True
+    )
+    assert success is True
+    assert Path(final_path).parent == output
+    assert Path(final_path).name.startswith("2026-11-07_充电_220.67_")
+    # The category is kept in the file name only; no category subfolder is made.
+    assert not (output / "充电").exists()
+
+
+def test_local_organize_flat_layout_keeps_files_in_folder_root(tmp_path: Path):
+    from app_api import InvoiceAppAPI
+
+    inbox = tmp_path / "inbox"
+    _build_inbox(inbox)
+
+    api = InvoiceAppAPI()
+    _start_local(api, inbox, split_by_category=False)
+
+    results = api.get_results()
+    summary = results["organize_summary"]
+    assert summary["split_by_category"] is False
+    assert summary["in_place"] is True
+    assert summary["archived_count"] >= 2
+    # The layout choice is persisted with the rest of the local-mode settings.
+    assert api.load_user_settings()["settings"]["local_split_by_category"] is False
+
+    root_invoices = _root_invoice_files(inbox)
+    assert root_invoices, "flat layout must keep archived files in the folder root"
+    assert any("打车" in path.name for path in root_invoices), root_invoices
+    for category_folder in ("打车", "餐饮", "充电", "其他"):
+        assert not (inbox / category_folder).exists(), category_folder
+
+    # Originals still leave the root, duplicates still go to duplicates/.
+    raw_files = [
+        path
+        for path in inbox.rglob("*")
+        if path.is_file() and "整理前发票" in path.parts
+    ]
+    assert {path.name for path in raw_files} == {"发票A.pdf", "发票B.xml"}
+    duplicate_files = [
+        path for path in inbox.rglob("*") if path.is_file() and "duplicates" in path.parts
+    ]
+    assert {path.name for path in duplicate_files} == {"发票C.xml"}
+
+    # A second flat run recognises its own output and skips it instead of
+    # treating it as new input (which would move it into duplicates/).
+    _start_local(api, inbox, split_by_category=False)
+    second = api.get_results()["organize_summary"]
+    assert second["scanned_files"] == 0
+    assert second["archived_count"] == 0
+    assert second["raw_moved_count"] == 0
+    assert second["duplicates_moved_count"] == 0
+    assert sorted(path.name for path in _root_invoice_files(inbox)) == sorted(
+        path.name for path in root_invoices
+    )
+
+    # Switching to 按分类分目录 re-lays-out the flat run's own output: the archived
+    # files move into 打车/ instead of being skipped and left in the root forever.
+    duplicates_before = sorted(
+        path.relative_to(inbox).as_posix()
+        for path in inbox.rglob("*")
+        if path.is_file() and "duplicates" in path.parts
+    )
+    assert duplicates_before, "the flat run should have moved the duplicate aside"
+    _start_local(api, inbox, split_by_category=True)
+    third = api.get_results()["organize_summary"]
+    assert third["split_by_category"] is True
+    assert third["scanned_files"] == 0
+    assert third["duplicates_moved_count"] == 0
+    assert third["layout_migrated_count"] == 2
+    assert _root_invoice_files(inbox) == []
+    archived_under_category = [
+        path for path in (inbox / "打车").rglob("*") if path.is_file()
+    ]
+    assert sorted(path.name for path in archived_under_category) == sorted(
+        path.name for path in root_invoices
+    )
+    # The layout switch must not turn the previous archive files into duplicates.
+    duplicates_after = sorted(
+        path.relative_to(inbox).as_posix()
+        for path in inbox.rglob("*")
+        if path.is_file() and "duplicates" in path.parts
+    )
+    assert duplicates_after == duplicates_before
+
+
+def test_local_organize_flat_layout_custom_output_stays_flat(tmp_path: Path):
+    from app_api import InvoiceAppAPI
+
+    inbox = tmp_path / "inbox"
+    _build_inbox(inbox)
+    output = tmp_path / "output"
+
+    api = InvoiceAppAPI()
+    _start_local(api, inbox, output_dir=output, split_by_category=False)
+
+    summary = api.get_results()["organize_summary"]
+    assert summary["split_by_category"] is False
+    assert summary["in_place"] is False
+    assert _root_invoice_files(output), "flat archive must land in the output root"
+    for category_folder in ("打车", "餐饮", "充电", "其他"):
+        assert not (output / category_folder).exists(), category_folder
+    # Custom-output runs keep the originals where the user left them.
+    assert not (inbox / "整理前发票").exists()
 
 
 class _FakeFetcher:
@@ -525,7 +672,7 @@ def test_organize_cli_apply_organizes_in_place(tmp_path: Path, capsys):
     assert payload["archived_count"] >= 2
     assert payload["raw_moved_count"] >= 2
     assert payload["duplicates_moved_count"] >= 1
-    assert (inbox / "raw").is_dir()
+    assert (inbox / "整理前发票").is_dir()
     assert (inbox / "duplicates").is_dir()
     assert not [
         path
