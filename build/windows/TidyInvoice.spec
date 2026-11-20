@@ -27,10 +27,10 @@ def _require_module(module_name):
 
 
 datas = []
-runtime_source_override = os.environ.get("INVOICEFLOW_RUNTIME_SOURCE", "").strip()
+runtime_source_override = os.environ.get("TIDYINVOICE_RUNTIME_SOURCE", "").strip()
 webview2_config = MANIFEST.get("webview2") or {}
 webview2_mode = (
-    os.environ.get("INVOICEFLOW_WEBVIEW2_MODE")
+    os.environ.get("TIDYINVOICE_WEBVIEW2_MODE")
     or str(webview2_config.get("defaultMode") or "fixed")
 ).strip().lower()
 if webview2_mode not in (webview2_config.get("modes") or ["fixed"]):

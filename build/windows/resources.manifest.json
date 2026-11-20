@@ -1,9 +1,9 @@
 {
-  "appName": "InvoiceFlowAI",
+  "appName": "TidyInvoice",
   "entryScript": "main.py",
   "pythonVersion": "3.12",
   "platform": "windows-x64",
-  "distDir": "dist/InvoiceFlowAI",
+  "distDir": "dist/TidyInvoice",
   "workDir": "build/work/pyinstaller",
   "packagingWorkDir": "build/work/packaging",
   "version": {
@@ -11,7 +11,7 @@
     "rendered": "build/windows/version-info.generated.txt"
   },
   "icon": {
-    "exeIconPath": "build/windows/assets/invoiceflowai.ico"
+    "exeIconPath": "build/windows/assets/tidyinvoice.ico"
   },
   "chromium": {
     "envVar": "PLAYWRIGHT_BROWSERS_PATH",
@@ -34,13 +34,13 @@
     "bootstrapperTarget": "runtime"
   },
   "portable": {
-    "outputFile": "dist/InvoiceFlowAI-portable-unsigned.zip",
-    "copyRootName": "InvoiceFlowAI"
+    "outputFile": "dist/TidyInvoice-portable-unsigned.zip",
+    "copyRootName": "TidyInvoice"
   },
   "installer": {
-    "script": "build/windows/installer/InvoiceFlowAI.iss",
+    "script": "build/windows/installer/TidyInvoice.iss",
     "outputDir": "dist/installer",
-    "outputBaseName": "InvoiceFlowAI-Setup-unsigned",
+    "outputBaseName": "TidyInvoice-Setup-unsigned",
     "compilerPath": ""
   },
   "runtimeHook": "build/windows/runtime_hook_playwright.py",
@@ -76,6 +76,7 @@
   "requiredPaths": [
     "main.py",
     "app_api.py",
+    "brand_generated.py",
     "email_fetcher.py",
     "invoice_extractor.py",
     "local_organize.py",
@@ -96,12 +97,13 @@
     "expense_rules/types.py",
     "builtin/categories.yaml",
     "build/windows/app.manifest",
-    "build/windows/installer/InvoiceFlowAI.iss",
+    "build/windows/installer/TidyInvoice.iss",
     "build/windows/prune_webview2_runtime.ps1",
     "build/windows/webview2-prune-policy.json",
     "build/runtime/webview2-fixed/msedgewebview2.exe",
     "templates/index.html",
     "templates/index_app.js",
+    "templates/brand.generated.js",
     "templates/static/material-symbols-outlined.ttf"
   ],
   "datas": [
@@ -176,7 +178,7 @@
     "**/*.pyc",
     "dist/",
     "release_prep/",
-    "build/InvoiceFlowAI/",
+    "build/TidyInvoice/",
     "build/runtime/mcp-chrome.excluded/",
     "build/work/",
     "build/windows/version-info.generated.txt",

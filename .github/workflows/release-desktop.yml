@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Frozen release tag from .github/release-contracts/unified-desktop-v2026.07.29.1.json
+        description: Frozen release tag from .github/release-contracts/tidyinvoice-v0.1.0.json
         required: true
-        default: v2026.07.29.1
+        default: v0.1.0
         type: string
       webview2_mode:
         description: Windows WebView2 delivery (fixed = bundled offline runtime, evergreen = system runtime + bootstrapper)
@@ -70,7 +70,7 @@ jobs:
           import os
           from pathlib import Path
 
-          contract = json.loads(Path('.github/release-contracts/unified-desktop-v2026.07.29.1.json').read_text(encoding='utf-8'))
+          contract = json.loads(Path('.github/release-contracts/tidyinvoice-v0.1.0.json').read_text(encoding='utf-8'))
           if os.environ['RELEASE_TAG'] != contract['tag']:
               raise SystemExit(f"Dispatch tag {os.environ['RELEASE_TAG']} does not match frozen contract {contract['tag']}")
           print(f"Contract frozen for {contract['tag']} with {len(contract['assets'])} public assets.")
@@ -93,7 +93,7 @@ jobs:
         run: test "$(uname -m)" = arm64
 
       - name: Install native packaging dependencies
-        run: brew install librsvg zbar
+        run: brew install zbar
 
       - name: Install Python dependencies
         run: |
@@ -103,7 +103,7 @@ jobs:
       - name: Build unsigned DMG and verify its bundled browser runtime
         run: |
           bash build/macos/build_release.sh "$RELEASE_TAG"
-          dmg="dist/macos/arm64/InvoiceFlowAI-${RELEASE_TAG}-macos-arm64.dmg"
+          dmg="dist/macos/arm64/TidyInvoice-${RELEASE_TAG}-macos-arm64.dmg"
           test -f "$dmg"
           mount_copy="$(mktemp -d)"
           device=""
@@ -116,9 +116,9 @@ jobs:
           device="$(printf '%s\n' "$attach_output" | awk 'NR == 1 { print $1 }')"
           mount_point="$(printf '%s\n' "$attach_output" | awk -F '\t' '/\/Volumes\// { print $NF; exit }')"
           test -n "$device"
-          test -d "$mount_point/InvoiceFlowAI.app"
-          ditto "$mount_point/InvoiceFlowAI.app" "$mount_copy/InvoiceFlowAI.app"
-          INVOICEFLOWAI_PLAYWRIGHT_RUNTIME_SMOKE=1 "$mount_copy/InvoiceFlowAI.app/Contents/MacOS/InvoiceFlowAI" --help | grep --quiet -- '--run-context'
+          test -d "$mount_point/TidyInvoice.app"
+          ditto "$mount_point/TidyInvoice.app" "$mount_copy/TidyInvoice.app"
+          TIDYINVOICE_PLAYWRIGHT_RUNTIME_SMOKE=1 "$mount_copy/TidyInvoice.app/Contents/MacOS/TidyInvoice" --help | grep --quiet -- '--run-context'
           mkdir -p release-assets/macos
           cp "$dmg" "release-assets/macos/$(basename "$dmg")"
           RELEASE_SHA="$GITHUB_SHA" RELEASE_TAG="$RELEASE_TAG" python - <<'PY'
@@ -131,7 +131,7 @@ jobs:
               'platform': 'macos-arm64',
               'tag': os.environ['RELEASE_TAG'],
               'source_revision': os.environ['RELEASE_SHA'],
-              'assets': [f"InvoiceFlowAI-{os.environ['RELEASE_TAG']}-macos-arm64.dmg"],
+              'assets': [f"TidyInvoice-{os.environ['RELEASE_TAG']}-macos-arm64.dmg"],
               'acceptance': {
                   'native_arm64_runner': True,
                   'post_copy_chromium_structure': True,
@@ -207,7 +207,7 @@ jobs:
           from pathlib import Path
 
           root = Path('.')
-          contract = json.loads((root / '.github/release-contracts/unified-desktop-v2026.07.29.1.json').read_text(encoding='utf-8'))
+          contract = json.loads((root / '.github/release-contracts/tidyinvoice-v0.1.0.json').read_text(encoding='utf-8'))
           tag = os.environ['RELEASE_TAG']
           if tag != contract['tag']:
               raise SystemExit('release tag drifted after contract verification')
@@ -223,9 +223,9 @@ jobs:
           release_bundle = root / 'release-bundle'
           release_bundle.mkdir()
           binary_assets = [
-              ('qualified/macos', f'InvoiceFlowAI-{tag}-macos-arm64.dmg', 'macos-arm64'),
-              ('qualified/windows', f'InvoiceFlowAI-{tag}-windows-x64-setup.exe', 'windows-x64'),
-              ('qualified/windows', f'InvoiceFlowAI-{tag}-windows-x64-portable.zip', 'windows-x64'),
+              ('qualified/macos', f'TidyInvoice-{tag}-macos-arm64.dmg', 'macos-arm64'),
+              ('qualified/windows', f'TidyInvoice-{tag}-windows-x64-setup.exe', 'windows-x64'),
+              ('qualified/windows', f'TidyInvoice-{tag}-windows-x64-portable.zip', 'windows-x64'),
           ]
           manifest_assets = []
           for source_dir, name, platform in binary_assets:
@@ -241,7 +241,7 @@ jobs:
                   'sha256': hashlib.sha256(target.read_bytes()).hexdigest(),
               })
 
-          manifest_name = f'InvoiceFlowAI-{tag}-release-manifest.json'
+          manifest_name = f'TidyInvoice-{tag}-release-manifest.json'
           manifest_path = release_bundle / manifest_name
           manifest_path.write_text(json.dumps({
               'schema_version': 1,
@@ -252,7 +252,7 @@ jobs:
               'assets': manifest_assets,
           }, indent=2) + '\n', encoding='utf-8')
 
-          sums_name = f'InvoiceFlowAI-{tag}-SHA256SUMS.txt'
+          sums_name = f'TidyInvoice-{tag}-SHA256SUMS.txt'
           sums_path = release_bundle / sums_name
           checksum_paths = [release_bundle / asset['name'] for asset in manifest_assets] + [manifest_path]
           sums_path.write_text(''.join(
@@ -296,7 +296,7 @@ jobs:
           import os
           from pathlib import Path
 
-          contract = json.loads(Path('.github/release-contracts/unified-desktop-v2026.07.29.1.json').read_text(encoding='utf-8'))
+          contract = json.loads(Path('.github/release-contracts/tidyinvoice-v0.1.0.json').read_text(encoding='utf-8'))
           assets = [Path('release-bundle') / name for name in contract['assets']]
           missing = [str(path) for path in assets if not path.is_file() or path.stat().st_size == 0]
           if missing:
@@ -308,6 +308,7 @@ jobs:
           - macOS Apple Silicon（ARM64）DMG
           - Windows x64 安装程序与免安装 ZIP
           - SHA-256 校验清单与构建来源清单
+          - 许可证与第三方声明（含 AGPL-3.0 组件 PyMuPDF 的许可全文与源码获取方式）
 
           两套安装包均由同一次 GitHub Actions 构建并完成运行时验证。当前版本未签名；macOS 未公证，首次打开可能需要在系统安全设置中手动允许，Windows 可能显示 SmartScreen 提示。
 
@@ -318,6 +319,7 @@ jobs:
           - macOS Apple Silicon (ARM64) DMG
           - Windows x64 installer and portable ZIP
           - SHA-256 checksums and a build-provenance manifest
+          - License and third-party notices, including the AGPL-3.0 text and source offer for PyMuPDF
 
           Both installers were built by the same GitHub Actions release run and passed runtime qualification. This version is unsigned; macOS is not notarized and may require a manual first-open override, while Windows may display a SmartScreen warning.
           ''', encoding='utf-8')
@@ -326,19 +328,19 @@ jobs:
             echo "Refusing to overwrite an existing release: $RELEASE_TAG" >&2
             exit 1
           fi
-          gh release create "$RELEASE_TAG" release-bundle/* --target "$FROZEN_SHA" --draft --title "InvoiceFlowAI $RELEASE_TAG" --notes-file release-notes.md
+          gh release create "$RELEASE_TAG" release-bundle/* --target "$FROZEN_SHA" --draft --title "TidyInvoice $RELEASE_TAG" --notes-file release-notes.md
           gh release view "$RELEASE_TAG" --json isDraft,assets > uploaded-release.json
           python - <<'PY'
           import json
           from pathlib import Path
 
-          contract = json.loads(Path('.github/release-contracts/unified-desktop-v2026.07.29.1.json').read_text(encoding='utf-8'))
+          contract = json.loads(Path('.github/release-contracts/tidyinvoice-v0.1.0.json').read_text(encoding='utf-8'))
           uploaded = json.loads(Path('uploaded-release.json').read_text(encoding='utf-8'))
           names = {asset['name'] for asset in uploaded['assets']}
           if not uploaded['isDraft'] or names != set(contract['assets']) or any(asset['size'] <= 0 for asset in uploaded['assets']):
               raise SystemExit(f'uploaded release verification failed: {uploaded}')
           PY
           mkdir verification-download
-          gh release download "$RELEASE_TAG" --pattern "InvoiceFlowAI-$RELEASE_TAG-*" --dir verification-download
-          (cd verification-download && sha256sum --check "InvoiceFlowAI-$RELEASE_TAG-SHA256SUMS.txt")
+          gh release download "$RELEASE_TAG" --pattern "TidyInvoice-$RELEASE_TAG-*" --dir verification-download
+          (cd verification-download && sha256sum --check "TidyInvoice-$RELEASE_TAG-SHA256SUMS.txt")
           gh release edit "$RELEASE_TAG" --draft=false

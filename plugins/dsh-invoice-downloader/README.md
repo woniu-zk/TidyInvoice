@@ -11,7 +11,7 @@
 ```powershell
 npm ci
 npm pack
-dsh plugin --profile web add "file:$PWD/ethanyoq-dsh-invoice-downloader-0.2.0.tgz"
+dsh plugin --profile web add "file:$PWD/woniu-zk-dsh-invoice-downloader-0.2.0.tgz"
 ```
 
 启动 DSH Web，打开右侧的“发票下载”入口，先点击“安装本地引擎”，再选择保存位置并完成 IMAP 配置。运行时安装仅在本机创建 Python 虚拟环境；不会在安装包或插件设置中保存邮箱授权码，识别过程也不需要模型或 API Key。
@@ -53,7 +53,7 @@ Run local IMAP invoice download, OCR, archive, and Excel summary workflows from 
 ```sh
 npm ci
 npm pack
-dsh plugin --profile web add "file:$PWD/ethanyoq-dsh-invoice-downloader-0.2.0.tgz"
+dsh plugin --profile web add "file:$PWD/woniu-zk-dsh-invoice-downloader-0.2.0.tgz"
 ```
 
 Plugin version 0.2.0 supports DeepSeek Harness `0.2.2-rc.1` and `0.2.1-rc.5`. Run DSH Web on a loopback address with no remote trusted hosts.

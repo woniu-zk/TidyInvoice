@@ -1,4 +1,4 @@
-"""Data model shared by the InvoiceFlowAI classification-rules core.
+"""Data model shared by the classification-rules core.
 
 This module is dependency-light on purpose: it defines the immutable values,
 the configuration exception and the folder-name safety policy that the loader,

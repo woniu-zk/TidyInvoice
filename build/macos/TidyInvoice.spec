@@ -8,7 +8,7 @@ from PyInstaller.utils.hooks import collect_dynamic_libs, collect_submodules
 
 ROOT = Path(SPECPATH).resolve().parents[1]
 IDENTITY_PATH = ROOT / "build" / "macos" / "build-identity.generated.json"
-ICON_PATH = Path(os.environ["INVOICEFLOW_ICON_PATH"]).resolve()
+ICON_PATH = Path(os.environ["TIDYINVOICE_ICON_PATH"]).resolve()
 
 for required_path in (IDENTITY_PATH, ICON_PATH):
     if not required_path.exists():
@@ -56,7 +56,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="InvoiceFlowAI",
+    name="TidyInvoice",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -74,12 +74,12 @@ coll = COLLECT(
     strip=False,
     upx=False,
     upx_exclude=[],
-    name="InvoiceFlowAI",
+    name="TidyInvoice",
 )
 
 app = BUNDLE(
     coll,
-    name="InvoiceFlowAI.app",
+    name="TidyInvoice.app",
     icon=str(ICON_PATH),
-    bundle_identifier="com.ethanyoq.invoiceflowai",
+    bundle_identifier="com.github.woniu-zk.tidyinvoice",
 )

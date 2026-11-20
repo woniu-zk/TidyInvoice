@@ -1,5 +1,5 @@
 window.__ModuleLoader__.load({
-  id: '@ethanyoq/dsh-invoice-downloader',
+  id: '@woniu-zk/dsh-invoice-downloader',
   factory: require => {
     const module = { exports: {} }
     const exports = module.exports

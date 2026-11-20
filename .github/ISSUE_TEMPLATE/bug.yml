@@ -1,0 +1,130 @@
+name: Bug 报告
+description: 报告一个可复现的缺陷（请先搜索是否已有相同 issue）
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。提交前请先搜索现有 issue，确认不是重复问题。
+
+        **请不要粘贴真实授权码、邮箱地址、发票内容或未脱敏的日志/截图。** 本项目的日志会对凭据做脱敏处理，但截图与手动粘贴的内容仍可能包含个人信息。
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: 问题摘要
+      description: 用一两句话说明发生了什么
+      placeholder: 例如：扫描完成后归档目录为空，但处理中心显示成功
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: 受影响模块
+      description: 选择最接近的一个模块
+      options:
+        - 桌面端界面
+        - 邮箱扫描 / IMAP
+        - 本地识别 / OCR
+        - 链接发票恢复
+        - 分类归档 / 规则
+        - 命令行入口
+        - DeepSeek Harness 插件
+        - 文档 / 构建
+        - 其他
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: 版本或提交
+      description: 安装包版本号，或源码运行时的 git 提交短哈希
+      placeholder: 例如：安装包版本号（见 Releases 页面），或 `git rev-parse --short HEAD` 的输出
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: 操作系统
+      options:
+        - Windows 10 / 11（x64）
+        - macOS（Apple Silicon）
+        - 其他
+        - 不确定
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-mode
+    attributes:
+      label: 运行方式
+      options:
+        - 安装包
+        - 免安装版 / 源码运行（.venv + main.py）
+        - DeepSeek Harness 插件
+        - 其他
+    validations:
+      required: true
+
+  - type: input
+    id: runtime-version
+    attributes:
+      label: 运行环境（可选）
+      description: 源码运行或插件场景下填写 Python / Node 版本
+      placeholder: 例如：Python 3.12 / Node 24
+    validations:
+      required: false
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 按顺序列出可重复执行的步骤
+      placeholder: |
+        1. 打开……
+        2. 选择……
+        3. 点击……
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望结果
+      placeholder: 你期望发生什么？
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际结果
+      placeholder: 实际发生了什么？如有报错信息请粘贴脱敏后的内容。
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志与截图（已脱敏）
+      description: 请删除授权码、邮箱地址、发票内容、个人姓名与可识别的工作目录路径
+      placeholder: 粘贴脱敏后的日志或拖入截图
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已搜索现有 issue，确认这不是重复问题
+          required: true
+        - label: 我已移除授权码、邮箱地址、发票内容等敏感信息
+          required: true
+        - label: 我已按文档中的命令与配置复现问题，并确认不是环境缺失导致
+          required: false

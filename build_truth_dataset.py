@@ -19,6 +19,8 @@ from urllib.parse import unquote, urlparse
 import requests
 from bs4 import BeautifulSoup
 
+from brand_generated import BRAND_NAME
+
 
 DOC_EXTS = {".pdf", ".xml", ".ofd", ".jpg", ".jpeg", ".png"}
 ZIP_MEMBER_EXTS = DOC_EXTS | {".zip"}
@@ -379,7 +381,7 @@ def direct_download_url(url: str, output_dir: Path, *, email_id: str, index: int
         url,
         timeout=45,
         headers={
-            "User-Agent": "Mozilla/5.0 InvoiceFlowAI truth builder",
+            "User-Agent": f"Mozilla/5.0 {BRAND_NAME} truth builder",
             "Accept": "application/pdf,application/xml,text/xml,application/octet-stream,*/*",
         },
     )
@@ -1168,7 +1170,7 @@ def parse_marriott_folio_pdf(path: Path) -> dict:
             invoice_date = f"20{year:02d}-{second:02d}-{first:02d}"
         else:
             invoice_date = f"20{year:02d}-{first:02d}-{second:02d}"
-    purchaser = "亓勇" if "亓勇" in text or "YONG QI" in text.upper() else "个人"
+    purchaser = "张三" if "张三" in text or "ZHANG SAN" in text.upper() else "个人"
     if not amount:
         return {}
     return {
@@ -1204,7 +1206,7 @@ def parse_foreign_invoice_pdf(path: Path) -> dict:
             "invoice_code": "",
             "invoice_date": invoice_date,
             "seller": "IT7 Networks Inc",
-            "purchaser": "Yong Qi",
+            "purchaser": "张三",
             "amount": norm_amount(amount_match.group(1) if amount_match else ""),
             "truth_type": "非目标公司发票",
             "category": "非目标公司发票",
@@ -1421,7 +1423,7 @@ def parse_icloud_receipt_text(text: str) -> dict:
     order_number = label_value(text, "订单号")
     document_number = label_value(text, "文稿编号") or label_value(text, "文稿")
     amount = _first_money(re.findall(r"[￥¥]\s*([0-9]+(?:\.[0-9]{1,2})?)", text))
-    purchaser = "亓勇" if "亓勇" in text else "个人"
+    purchaser = "张三" if "张三" in text else "个人"
     seller = "云上艾珀（贵州）技术有限公司" if "云上艾珀" in text or "云上贵州" in text else "Apple"
     if not (invoice_date and order_number and document_number and amount):
         return {}

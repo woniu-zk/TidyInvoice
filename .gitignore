@@ -33,6 +33,7 @@ docs/superpowers/
 dist/
 build/work/
 build/runtime/
+build/licenses/
 build/windows/version-info.generated.txt
 build/windows/build-identity.generated.json
 *.log

@@ -1,0 +1,66 @@
+{
+  "$comment": "品牌单一事实源。修改后运行 `node tools/brand/generate.mjs` 并提交生成物；CI 用 `node tools/brand/generate.mjs --check` 校验一致性。不要直接编辑生成物。",
+  "schemaVersion": 1,
+  "identity": {
+    "displayName": { "zh": "整票", "en": "TidyInvoice" },
+    "slug": "tidyinvoice",
+    "pythonPackage": "tidyinvoice",
+    "tagline": { "zh": "发票整理与报销准备", "en": "Invoice organization for reimbursement" },
+    "footerStamp": "Woniu",
+    "copyrightHolder": "蜗牛",
+    "license": "Apache-2.0",
+    "year": 2026
+  },
+  "urls": {
+    "repo": "https://github.com/woniu-zk/tidyinvoice",
+    "issues": "https://github.com/woniu-zk/tidyinvoice/issues",
+    "releasesLatest": "https://github.com/woniu-zk/tidyinvoice/releases/latest",
+    "repoLabel": "GitHub 仓库"
+  },
+  "upstream": {
+    "projectName": "Invoice Downloader",
+    "brandName": "InvoiceFlowAI",
+    "author": "EthanYoQ / Yong Qi",
+    "handle": "EthanYoQ",
+    "npmScope": "ethanyoq",
+    "repoUrl": "https://github.com/EthanYoQ/Invoice-Downloader",
+    "license": "Apache-2.0"
+  },
+  "runtime": {
+    "appDirName": "TidyInvoice",
+    "legacyAppDirNames": ["InvoiceFlowAI", "InvoiceFlowAI External Test"],
+    "mutexName": "Local\\TidyInvoice.SingleInstance",
+    "tempFilePrefix": "TidyInvoice",
+    "tempDirPrefix": "tidyinvoice",
+    "nodePreloadPrefix": "tidyinvoice-hide-windows-",
+    "sessionStoragePrefix": "tidyinvoice",
+    "imapClientName": "TidyInvoice",
+    "ruleFileHeader": "# 整票",
+    "threadNameTruthAudit": "TidyInvoiceTruthAudit",
+    "threadNameWorker": "TidyInvoiceWorker",
+    "buildIdentityName": "TidyInvoice"
+  },
+  "env": {
+    "webview2Mode": "TIDYINVOICE_WEBVIEW2_MODE",
+    "runContextPath": "TIDYINVOICE_RUN_CONTEXT_PATH",
+    "playwrightSmoke": "TIDYINVOICE_PLAYWRIGHT_RUNTIME_SMOKE",
+    "candidateRevision": "TIDYINVOICE_CANDIDATE_REVISION"
+  },
+  "build": {
+    "windows": {
+      "exeName": "TidyInvoice",
+      "assemblyName": "TidyInvoice",
+      "installDir": "整票",
+      "publisher": "蜗牛",
+      "appId": "{B5054758-8A0C-48AA-A135-F4350D026A2B}"
+    },
+    "macos": {
+      "appName": "TidyInvoice",
+      "bundleId": "com.github.woniu-zk.tidyinvoice"
+    },
+    "npm": {
+      "scope": "woniu-zk",
+      "name": "dsh-invoice-downloader"
+    }
+  }
+}

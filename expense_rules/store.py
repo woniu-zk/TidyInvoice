@@ -20,6 +20,8 @@ from typing import Any
 
 import yaml
 
+from brand_generated import RULE_FILE_HEADER
+
 from .loader import (
     CATEGORIES_FILE_NAME,
     USER_TERMS_FILE_NAME,
@@ -42,7 +44,7 @@ BACKUP_DIR_NAME = ".backup"
 MAX_BACKUP_DIRS = 20
 
 _CATEGORIES_HEADER = (
-    "# InvoiceFlowAI 分类规则（{scope_label}）\n"
+    RULE_FILE_HEADER + " 分类规则（{scope_label}）\n"
     "#\n"
     "# 只写需要覆盖的字段即可：分类按 id 合并，未写的字段沿用更早的层级\n"
     "# （内置默认 -> 全局 -> 当前发票库 -> rules.d 规则包）。\n"
@@ -77,7 +79,7 @@ _CATEGORIES_HEADER = (
 )
 
 _TERMS_HEADER = (
-    "# InvoiceFlowAI 卖方字典（{scope_label}）\n"
+    RULE_FILE_HEADER + " 卖方字典（{scope_label}）\n"
     "#\n"
     "# 词条（卖方名称或卖方税号）-> 分类 id。\n"
     "# 税号按忽略空格、忽略大小写精确匹配；名称按包含匹配（越长越优先）。\n"

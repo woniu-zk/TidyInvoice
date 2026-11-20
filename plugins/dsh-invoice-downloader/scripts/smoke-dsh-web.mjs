@@ -14,7 +14,7 @@ assert.ok(cookie, 'DSH did not issue a browser cookie')
 const page = await fetch(origin, { headers: { cookie }, signal: AbortSignal.timeout(10_000) })
 assert.equal(page.status, 200)
 const html = await page.text()
-const pluginClient = '@ethanyoq/dsh-invoice-downloader/client.js'
+const pluginClient = '@woniu-zk/dsh-invoice-downloader/client.js'
 const combo = Array.from(html.matchAll(/\bhref="(plugins\/\?\?[^"]+)"/g), match => match[1])
   .find(href => href.includes(pluginClient))
 assert.ok(combo, 'The DSH page did not include the invoice client')

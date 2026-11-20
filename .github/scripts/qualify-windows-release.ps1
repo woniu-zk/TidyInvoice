@@ -23,7 +23,7 @@ $PredecessorVersion = $VersionParts -join "."
 $AssetDir = Join-Path $RepoRoot "release-assets\windows"
 $EvidencePath = Join-Path $AssetDir "windows-x64-qualification.json"
 $RunnerTemp = [System.IO.Path]::GetFullPath($env:RUNNER_TEMP)
-$TestRoot = Join-Path $RunnerTemp "invoiceflowai-release-$Version"
+$TestRoot = Join-Path $RunnerTemp "tidyinvoice-release-$Version"
 $InstallDir = Join-Path $TestRoot "installed"
 $PortableDir = Join-Path $TestRoot "portable"
 $PredecessorDir = Join-Path $TestRoot "predecessor"
@@ -51,9 +51,9 @@ function Invoke-Installer {
 
 function Invoke-PackagedRuntimeSmoke {
     param([string]$ExecutablePath)
-    $previous = $env:INVOICEFLOWAI_PLAYWRIGHT_RUNTIME_SMOKE
+    $previous = $env:TIDYINVOICE_PLAYWRIGHT_RUNTIME_SMOKE
     try {
-        $env:INVOICEFLOWAI_PLAYWRIGHT_RUNTIME_SMOKE = "1"
+        $env:TIDYINVOICE_PLAYWRIGHT_RUNTIME_SMOKE = "1"
         & $ExecutablePath --help | Out-Null
         if ($LASTEXITCODE -ne 0) {
             throw "Packaged Playwright runtime smoke failed with exit code ${LASTEXITCODE}: $ExecutablePath"
@@ -61,10 +61,10 @@ function Invoke-PackagedRuntimeSmoke {
     }
     finally {
         if ($null -eq $previous) {
-            Remove-Item Env:INVOICEFLOWAI_PLAYWRIGHT_RUNTIME_SMOKE -ErrorAction SilentlyContinue
+            Remove-Item Env:TIDYINVOICE_PLAYWRIGHT_RUNTIME_SMOKE -ErrorAction SilentlyContinue
         }
         else {
-            $env:INVOICEFLOWAI_PLAYWRIGHT_RUNTIME_SMOKE = $previous
+            $env:TIDYINVOICE_PLAYWRIGHT_RUNTIME_SMOKE = $previous
         }
     }
 }
@@ -118,34 +118,34 @@ finally {
     Pop-Location
 }
 
-$InstallerSource = Join-Path $RepoRoot "dist\installer\InvoiceFlowAI-Setup-unsigned.exe"
-$PortableSource = Join-Path $RepoRoot "dist\InvoiceFlowAI-portable-unsigned.zip"
-$PackagedExe = Join-Path $RepoRoot "dist\InvoiceFlowAI\InvoiceFlowAI.exe"
+$InstallerSource = Join-Path $RepoRoot "dist\installer\TidyInvoice-Setup-unsigned.exe"
+$PortableSource = Join-Path $RepoRoot "dist\TidyInvoice-portable-unsigned.zip"
+$PackagedExe = Join-Path $RepoRoot "dist\TidyInvoice\TidyInvoice.exe"
 Assert-File -PathValue $InstallerSource -Label "Windows installer"
 Assert-File -PathValue $PortableSource -Label "Windows portable ZIP"
 Assert-File -PathValue $PackagedExe -Label "Packaged application"
 
 Invoke-PackagedRuntimeSmoke -ExecutablePath $PackagedExe
 
-$PredecessorInstaller = Join-Path $PredecessorDir "InvoiceFlowAI-Setup-predecessor.exe"
-& $CompilerPath "/DSourceDir=$([System.IO.Path]::GetDirectoryName($PackagedExe))" "/DOutputDir=$PredecessorDir" "/DOutputBaseName=InvoiceFlowAI-Setup-predecessor" "/DAppVersion=$PredecessorVersion" (Join-Path $RepoRoot "build\windows\installer\InvoiceFlowAI.iss")
+$PredecessorInstaller = Join-Path $PredecessorDir "TidyInvoice-Setup-predecessor.exe"
+& $CompilerPath "/DSourceDir=$([System.IO.Path]::GetDirectoryName($PackagedExe))" "/DOutputDir=$PredecessorDir" "/DOutputBaseName=TidyInvoice-Setup-predecessor" "/DAppVersion=$PredecessorVersion" (Join-Path $RepoRoot "build\windows\installer\TidyInvoice.iss")
 if ($LASTEXITCODE -ne 0) {
     throw "Predecessor installer compilation failed with exit code $LASTEXITCODE."
 }
 Assert-File -PathValue $PredecessorInstaller -Label "Predecessor installer"
 Invoke-Installer -InstallerPath $PredecessorInstaller -TargetDir $InstallDir
 
-$SettingsDir = Join-Path $env:APPDATA "InvoiceFlowAI"
+$SettingsDir = Join-Path $env:APPDATA "TidyInvoice"
 $SettingsPath = Join-Path $SettingsDir "user_settings.json"
 if (Test-Path -LiteralPath $SettingsPath) {
-    throw "Hosted runner unexpectedly already contains InvoiceFlowAI user settings; refusing to overwrite them."
+    throw "Hosted runner unexpectedly already contains TidyInvoice user settings; refusing to overwrite them."
 }
 New-Item -ItemType Directory -Force -Path $SettingsDir | Out-Null
 $UpgradeMarker = "release-upgrade-$([guid]::NewGuid().ToString('N'))"
 [System.IO.File]::WriteAllText($SettingsPath, "{`"values`":{`"release_marker`":`"$UpgradeMarker`"},`"protected`":{}}", [System.Text.UTF8Encoding]::new($false))
 
 Invoke-Installer -InstallerPath $InstallerSource -TargetDir $InstallDir
-$InstalledExe = Join-Path $InstallDir "InvoiceFlowAI.exe"
+$InstalledExe = Join-Path $InstallDir "TidyInvoice.exe"
 Assert-File -PathValue $InstalledExe -Label "Installed application"
 if ((Get-Content -LiteralPath $SettingsPath -Raw) -notmatch [regex]::Escape($UpgradeMarker)) {
     throw "Installer upgrade removed user settings outside the install directory."
@@ -154,7 +154,7 @@ Invoke-PackagedRuntimeSmoke -ExecutablePath $InstalledExe
 Assert-ApplicationStarts -ExecutablePath $InstalledExe
 
 Expand-Archive -LiteralPath $PortableSource -DestinationPath $PortableDir -Force
-$PortableExe = Join-Path $PortableDir "InvoiceFlowAI\InvoiceFlowAI.exe"
+$PortableExe = Join-Path $PortableDir "TidyInvoice\TidyInvoice.exe"
 Assert-File -PathValue $PortableExe -Label "Portable application"
 Invoke-PackagedRuntimeSmoke -ExecutablePath $PortableExe
 
@@ -165,8 +165,8 @@ if ($uninstallProcess.ExitCode -ne 0 -or (Test-Path -LiteralPath $InstallDir)) {
     throw "Uninstall qualification failed."
 }
 
-$InstallerAsset = "InvoiceFlowAI-$Tag-windows-x64-setup.exe"
-$PortableAsset = "InvoiceFlowAI-$Tag-windows-x64-portable.zip"
+$InstallerAsset = "TidyInvoice-$Tag-windows-x64-setup.exe"
+$PortableAsset = "TidyInvoice-$Tag-windows-x64-portable.zip"
 Copy-Item -LiteralPath $InstallerSource -Destination (Join-Path $AssetDir $InstallerAsset) -Force
 Copy-Item -LiteralPath $PortableSource -Destination (Join-Path $AssetDir $PortableAsset) -Force
 $revision = (git -C $RepoRoot rev-parse HEAD).Trim()

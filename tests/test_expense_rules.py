@@ -1,8 +1,8 @@
-"""Unit tests for the InvoiceFlowAI classification-rules core.
+"""Unit tests for the TidyInvoice classification-rules core.
 
 Every test passes an explicit ``global_rules_dir``/``builtin_path`` (or an
 isolated ``APPDATA``) so the suite never depends on the operator's real
-``%APPDATA%/InvoiceFlowAI`` rules.
+``%APPDATA%/TidyInvoice`` rules.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ import pytest
 
 import expense_rules
 import expense_rules.cli as rules_cli
+from brand_generated import RULE_FILE_HEADER
 from document_types import DOCUMENT_TYPES, get_archive_folder
 from expense_rules import (
     CATEGORY_SOURCE_BUILTIN,
@@ -478,7 +479,7 @@ class TestLoading:
         appdata = tmp_path / "appdata"
         monkeypatch.setenv("APPDATA", str(appdata))
         rule_set = load_rule_set(builtin_path=str(BUILTIN_PATH))
-        expected = appdata / "InvoiceFlowAI" / "rules"
+        expected = appdata / "TidyInvoice" / "rules"
         assert Path(rule_set.global_rules_dir) == expected
         assert rule_set.library_dir is None
         assert rule_set.library_rules_dir is None
@@ -1249,7 +1250,7 @@ class TestCustomTypes:
         appdata = tmp_path / "appdata"
         monkeypatch.setenv("APPDATA", str(appdata))
         types = load_custom_types()
-        expected = appdata / "InvoiceFlowAI" / "rules" / CUSTOM_TYPES_FILE_NAME
+        expected = appdata / "TidyInvoice" / "rules" / CUSTOM_TYPES_FILE_NAME
         assert Path(types.path) == expected
         assert types.exists is False
 
@@ -1342,7 +1343,7 @@ class TestCustomTypes:
         path = Path(first.path)
         assert path.is_file()
         text = path.read_text(encoding="utf-8")
-        assert text.startswith("# InvoiceFlowAI")
+        assert text.startswith(RULE_FILE_HEADER)
         assert "version: 1" in text
         assert list(path.parent.glob("*.tmp")) == []
 
@@ -2394,7 +2395,7 @@ class TestSaveScope:
         terms_path = library / "rules" / "user_terms.yaml"
         assert categories_path.is_file()
         assert terms_path.is_file()
-        assert categories_path.read_text(encoding="utf-8").startswith("# InvoiceFlowAI")
+        assert categories_path.read_text(encoding="utf-8").startswith(RULE_FILE_HEADER)
         reloaded = _load(tmp_path=library.parent, library=library)
         result = classify({"type": "其他", "seller": "某某停车管理有限公司"}, reloaded)
         assert result.category_id == "parking"
@@ -2505,7 +2506,7 @@ class TestSaveScope:
             [{"id": "gift", "name": "礼品", "archive_folder": "礼品", "keywords": ["礼品"]}],
             {},
         )
-        categories_path = appdata / "InvoiceFlowAI" / "rules" / "categories.yaml"
+        categories_path = appdata / "TidyInvoice" / "rules" / "categories.yaml"
         assert categories_path.is_file()
         rule_set = load_rule_set()
         assert "gift" in rule_set.category_map
@@ -2753,7 +2754,7 @@ class TestCli:
     def test_list_shows_target_type_and_hides_invoice_gate(
         self, cli_env: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        rules_dir = cli_env / "InvoiceFlowAI" / "rules"
+        rules_dir = cli_env / "TidyInvoice" / "rules"
         _write_lines(
             rules_dir / CUSTOM_TYPES_FILE_NAME,
             ["version: 1", "types:", "  - 酒店"],
@@ -2803,7 +2804,7 @@ class TestCli:
         self, cli_env: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         _write_lines(
-            cli_env / "InvoiceFlowAI" / "rules" / "categories.yaml",
+            cli_env / "TidyInvoice" / "rules" / "categories.yaml",
             ["version: 1", "categories:", "  - id: BadId"],
         )
         assert rules_cli.main(["validate"]) == 1
@@ -2815,7 +2816,7 @@ class TestCli:
         self, cli_env: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         _write_lines(
-            cli_env / "InvoiceFlowAI" / "rules" / "categories.yaml",
+            cli_env / "TidyInvoice" / "rules" / "categories.yaml",
             ["version: 1", "categories:", "  - id: taxi", "    priority: 60"],
         )
         assert rules_cli.main(["validate"]) == 0
@@ -3016,7 +3017,7 @@ class TestCli:
     def test_types_remove_referenced_global_rule_fails(
         self, cli_env: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        rules_dir = cli_env / "InvoiceFlowAI" / "rules"
+        rules_dir = cli_env / "TidyInvoice" / "rules"
         assert rules_cli.main(["types", "add", "酒店"]) == 0
         capsys.readouterr()
         _write_lines(

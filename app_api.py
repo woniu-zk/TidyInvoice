@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from brand_generated import TEMP_DIR_PREFIX, THREAD_NAME_TRUTH_AUDIT, THREAD_NAME_WORKER
 from build_identity import load_build_identity
 from company_rules import DEFAULT_COMPANY
 from document_types import (
@@ -1655,7 +1656,7 @@ class InvoiceAppAPI:
             finally:
                 ready.set()
 
-        thread = threading.Thread(target=_runner, name="InvoiceFlowTruthAudit", daemon=True)
+        thread = threading.Thread(target=_runner, name=THREAD_NAME_TRUTH_AUDIT, daemon=True)
         job = TruthAuditJob(
             run_id=run_id,
             paths=paths,
@@ -5906,7 +5907,7 @@ class InvoiceAppAPI:
             thread = threading.Thread(
                 target=self._processing_worker,
                 args=(request, handle, dependencies),
-                name="InvoiceFlowWorker",
+                name=THREAD_NAME_WORKER,
                 daemon=True,
             )
             self._worker_thread = thread
@@ -6044,7 +6045,7 @@ class InvoiceAppAPI:
                     import tempfile
 
                     context["staging_dir"] = os.path.join(
-                        tempfile.gettempdir(), "invoiceflowai-local"
+                        tempfile.gettempdir(), f"{TEMP_DIR_PREFIX}-local"
                     )
                 self._run_context = context
                 self._current_run_id = str(context.get("run_id") or "")
@@ -6144,7 +6145,7 @@ class InvoiceAppAPI:
             thread = threading.Thread(
                 target=self._processing_worker,
                 args=(request, handle, dependencies),
-                name="InvoiceFlowWorker",
+                name=THREAD_NAME_WORKER,
                 daemon=True,
             )
             self._worker_thread = thread

@@ -1,5 +1,5 @@
-#define AppName "InvoiceFlowAI"
-#define AppPublisher "HBU Digital"
+#define AppName "TidyInvoice"
+#define AppPublisher "蜗牛"
 
 #ifndef AppVersion
   #define AppVersion "0.0.0.0"
@@ -14,15 +14,15 @@
 #endif
 
 #ifndef OutputBaseName
-  #define OutputBaseName "InvoiceFlowAI-Setup-unsigned"
+  #define OutputBaseName "TidyInvoice-Setup-unsigned"
 #endif
 
 [Setup]
-AppId={{9F7B3171-49F1-4B5D-9D7D-788DC39EBA6D}
+AppId={{B5054758-8A0C-48AA-A135-F4350D026A2B}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
-DefaultDirName={autopf}\InvoiceFlow AI
+DefaultDirName={autopf}\整票
 DefaultGroupName={#AppName}
 OutputDir={#OutputDir}
 OutputBaseFilename={#OutputBaseName}
@@ -33,7 +33,7 @@ SolidCompression=yes
 WizardStyle=modern
 DisableProgramGroupPage=yes
 PrivilegesRequired=admin
-UninstallDisplayIcon={app}\InvoiceFlowAI.exe
+UninstallDisplayIcon={app}\TidyInvoice.exe
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -45,8 +45,8 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\{#AppName}"; Filename: "{app}\InvoiceFlowAI.exe"
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\InvoiceFlowAI.exe"; Tasks: desktopicon
+Name: "{group}\{#AppName}"; Filename: "{app}\TidyInvoice.exe"
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\TidyInvoice.exe"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\InvoiceFlowAI.exe"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\TidyInvoice.exe"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent

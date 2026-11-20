@@ -18,7 +18,7 @@ os.environ.setdefault("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1")
 
 
 def _run_packaging_smoke_test():
-    if os.environ.get("INVOICEFLOWAI_PLAYWRIGHT_RUNTIME_SMOKE") != "1":
+    if os.environ.get("TIDYINVOICE_PLAYWRIGHT_RUNTIME_SMOKE") != "1":
         return
 
     from playwright.sync_api import sync_playwright

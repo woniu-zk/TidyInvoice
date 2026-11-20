@@ -1,4 +1,4 @@
-# Tool configuration for the InvoiceFlowAI Windows desktop application.
+# Tool configuration for the Windows desktop application.
 #
 # This repository is a source tree (not an installable Python distribution), so
 # there is no [build-system]/[project] table on purpose. The tables below are

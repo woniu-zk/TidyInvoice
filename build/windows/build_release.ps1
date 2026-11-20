@@ -220,7 +220,7 @@ function Render-VersionInfo {
     $content = $content.Replace("{{VERSION_TUPLE}}", $tuple)
     $content = $content.Replace("{{PRODUCT_NAME}}", $ProductName)
     $content = $content.Replace("{{FILE_DESCRIPTION}}", "$ProductName Windows desktop application")
-    $content = $content.Replace("{{COMPANY_NAME}}", "InvoiceFlowAI")
+    $content = $content.Replace("{{COMPANY_NAME}}", "TidyInvoice")
     Set-Content -Path $OutputPath -Value $content -Encoding UTF8
 }
 
@@ -251,13 +251,13 @@ function Write-BuildIdentity {
         [string]$SourceRevision
     )
 
-    $previousBuildTime = $env:INVOICEFLOW_BUILD_TIME
-    $previousSourceRevision = $env:INVOICEFLOW_BUILD_SOURCE_REVISION
-    $previousBuildLabel = $env:INVOICEFLOW_BUILD_LABEL
+    $previousBuildTime = $env:TIDYINVOICE_BUILD_TIME
+    $previousSourceRevision = $env:TIDYINVOICE_BUILD_SOURCE_REVISION
+    $previousBuildLabel = $env:TIDYINVOICE_BUILD_LABEL
     try {
-        $env:INVOICEFLOW_BUILD_TIME = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssK")
-        $env:INVOICEFLOW_BUILD_SOURCE_REVISION = $SourceRevision
-        $env:INVOICEFLOW_BUILD_LABEL = "desktop-release"
+        $env:TIDYINVOICE_BUILD_TIME = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssK")
+        $env:TIDYINVOICE_BUILD_SOURCE_REVISION = $SourceRevision
+        $env:TIDYINVOICE_BUILD_LABEL = "desktop-release"
         $script = @'
 import json
 import os
@@ -266,9 +266,9 @@ from build_identity import build_runtime_identity
 
 output_path = sys.argv[1]
 payload = build_runtime_identity(
-    build_time=os.getenv("INVOICEFLOW_BUILD_TIME"),
-    source_revision=os.getenv("INVOICEFLOW_BUILD_SOURCE_REVISION"),
-    build_label=os.getenv("INVOICEFLOW_BUILD_LABEL"),
+    build_time=os.getenv("TIDYINVOICE_BUILD_TIME"),
+    source_revision=os.getenv("TIDYINVOICE_BUILD_SOURCE_REVISION"),
+    build_label=os.getenv("TIDYINVOICE_BUILD_LABEL"),
 )
 with open(output_path, "w", encoding="utf-8") as handle:
     json.dump(payload, handle, ensure_ascii=False, indent=2)
@@ -279,9 +279,9 @@ with open(output_path, "w", encoding="utf-8") as handle:
         }
     }
     finally {
-        if ($null -ne $previousBuildTime) { $env:INVOICEFLOW_BUILD_TIME = $previousBuildTime } else { Remove-Item Env:INVOICEFLOW_BUILD_TIME -ErrorAction SilentlyContinue }
-        if ($null -ne $previousSourceRevision) { $env:INVOICEFLOW_BUILD_SOURCE_REVISION = $previousSourceRevision } else { Remove-Item Env:INVOICEFLOW_BUILD_SOURCE_REVISION -ErrorAction SilentlyContinue }
-        if ($null -ne $previousBuildLabel) { $env:INVOICEFLOW_BUILD_LABEL = $previousBuildLabel } else { Remove-Item Env:INVOICEFLOW_BUILD_LABEL -ErrorAction SilentlyContinue }
+        if ($null -ne $previousBuildTime) { $env:TIDYINVOICE_BUILD_TIME = $previousBuildTime } else { Remove-Item Env:TIDYINVOICE_BUILD_TIME -ErrorAction SilentlyContinue }
+        if ($null -ne $previousSourceRevision) { $env:TIDYINVOICE_BUILD_SOURCE_REVISION = $previousSourceRevision } else { Remove-Item Env:TIDYINVOICE_BUILD_SOURCE_REVISION -ErrorAction SilentlyContinue }
+        if ($null -ne $previousBuildLabel) { $env:TIDYINVOICE_BUILD_LABEL = $previousBuildLabel } else { Remove-Item Env:TIDYINVOICE_BUILD_LABEL -ErrorAction SilentlyContinue }
     }
 }
 
@@ -621,9 +621,9 @@ identity = json.loads(identity_path.read_text(encoding="utf-8-sig"))
 expected_manual = "\u5f85\u4eba\u5de5\u590d\u6838"
 expected_non_target = "\u975e\u76ee\u6807\u516c\u53f8\u53d1\u7968"
 required_markers = [
-    'name: "InvoiceFlowAI"',
-    'subtitle: "AI\u53d1\u7968\u7ba1\u5bb6"',
+    "const APP_BRAND =",
     "const APP_VISIBLE_COPY = {",
+    "window.__APP_BRAND__",
 ]
 
 if str(identity.get("manual_review_folder", "")) != expected_manual:
@@ -797,7 +797,7 @@ $installerOutputBaseName = [string]$manifest.installer.outputBaseName
 $versionTemplatePath = Resolve-RepoPath $manifest.version.template
 $versionOutputPath = Resolve-RepoPath $manifest.version.rendered
 $buildIdentityOutputPath = Resolve-RepoPath "build/windows/build-identity.generated.json"
-$specPath = Resolve-RepoPath "build/windows/InvoiceFlowAI.spec"
+$specPath = Resolve-RepoPath "build/windows/TidyInvoice.spec"
 $runtimeHookPath = Resolve-RepoPath $manifest.runtimeHook
 $iconPath = Resolve-ToolPath ($manifest.icon.exeIconPath)
 $sha256OutputPath = Join-Path $distDir $manifest.sha256.outputFile
@@ -899,9 +899,9 @@ if ($RunPyInstaller) {
         Invoke-FrontendPrecompile
     }
 
-    $env:INVOICEFLOW_RUNTIME_SOURCE = $chromiumStageDir
-    $previousWebView2Mode = $env:INVOICEFLOW_WEBVIEW2_MODE
-    $env:INVOICEFLOW_WEBVIEW2_MODE = $WebView2Mode
+    $env:TIDYINVOICE_RUNTIME_SOURCE = $chromiumStageDir
+    $previousWebView2Mode = $env:TIDYINVOICE_WEBVIEW2_MODE
+    $env:TIDYINVOICE_WEBVIEW2_MODE = $WebView2Mode
     try {
         $arguments = @(
             "-m",
@@ -921,12 +921,12 @@ if ($RunPyInstaller) {
         }
     }
     finally {
-        Remove-Item Env:INVOICEFLOW_RUNTIME_SOURCE -ErrorAction SilentlyContinue
+        Remove-Item Env:TIDYINVOICE_RUNTIME_SOURCE -ErrorAction SilentlyContinue
         if ($null -ne $previousWebView2Mode) {
-            $env:INVOICEFLOW_WEBVIEW2_MODE = $previousWebView2Mode
+            $env:TIDYINVOICE_WEBVIEW2_MODE = $previousWebView2Mode
         }
         else {
-            Remove-Item Env:INVOICEFLOW_WEBVIEW2_MODE -ErrorAction SilentlyContinue
+            Remove-Item Env:TIDYINVOICE_WEBVIEW2_MODE -ErrorAction SilentlyContinue
         }
     }
 
@@ -941,6 +941,25 @@ else {
     Remove-PackagedChromiumExcludedEntries -PathValue $distDir -ExcludedEntryNames $chromiumExcludeEntries
     Assert-DistributionTreeSanitized -PathValue $distDir
     Assert-BuildIdentityPayload -PathValue $distDir
+}
+
+Write-Host "Staging license and third-party notices..."
+$licenseRoot = Join-Path $distDir "licenses"
+New-Item -ItemType Directory -Force -Path $licenseRoot | Out-Null
+foreach ($licenseName in @("LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md")) {
+    $licenseSource = Join-Path $RepoRoot $licenseName
+    Assert-LeafPathExists -PathValue $licenseSource -Label "License artifact ($licenseName)"
+    Copy-Item -LiteralPath $licenseSource -Destination (Join-Path $distDir $licenseName) -Force
+}
+$projectLicensesDir = Join-Path $RepoRoot "LICENSES"
+if (Test-Path -LiteralPath $projectLicensesDir -PathType Container) {
+    Copy-Item -LiteralPath $projectLicensesDir -Destination (Join-Path $licenseRoot "project") -Recurse -Force
+}
+$licenseCollector = Join-Path $RepoRoot "tools/licenses/collect.py"
+Assert-LeafPathExists -PathValue $licenseCollector -Label "Third-party license collector"
+& $resolvedBuildPythonExe $licenseCollector --output (Join-Path $licenseRoot "third-party")
+if ($LASTEXITCODE -ne 0) {
+    throw "Third-party license collection failed with exit code $LASTEXITCODE"
 }
 
 if ($RunPortableZip) {

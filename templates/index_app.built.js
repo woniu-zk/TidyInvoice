@@ -1,4 +1,4 @@
-/*! InvoiceFlowAI 前端产物 - 由 tools/compile-frontend.mjs 依据 templates/index_app.js 生成，请勿手改。 */
+/*! 前端产物 - 由 tools/compile-frontend.mjs 依据 templates/index_app.js 生成，请勿手改。 */
 function _extends() { _extends = Object.assign ? Object.assign.bind() : function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; return _extends.apply(this, arguments); }
 const {
   useEffect,
@@ -69,16 +69,22 @@ const DEFAULT_PROGRESS = {
   quota_message: "",
   build_identity: null
 };
-const APP_BRAND = {
-  name: "InvoiceFlowAI",
-  subtitle: "AI发票管家"
-};
+
+// 品牌标识来自 templates/brand.generated.js（由 brand.json 生成，勿手改）。
+// 界面文案（任务模式、结果横幅等）仍在本文件内，后续由 i18n 词表接管。
+if (!window.__APP_BRAND__) {
+  throw new Error("品牌清单未加载：templates/brand.generated.js 必须在 index_app.built.js 之前引入");
+}
+const APP_BRAND = Object.freeze({
+  name: window.__APP_BRAND__.name,
+  subtitle: window.__APP_BRAND__.subtitle
+});
 const APP_VISIBLE_COPY = {
-  topSubtitle: "AI发票管家",
-  footerVersion: "InvoiceFlowAI",
-  footerStamp: "P-H-Dx",
-  githubLabel: "产品官网",
-  githubUrl: "https://github.com/EthanYoQ/Invoice-Downloader",
+  topSubtitle: window.__APP_BRAND__.subtitle,
+  footerVersion: window.__APP_BRAND__.footerVersion,
+  footerStamp: window.__APP_BRAND__.footerStamp,
+  githubLabel: window.__APP_BRAND__.githubLabel,
+  githubUrl: window.__APP_BRAND__.githubUrl,
   taskModes: {
     mail: {
       label: "邮箱提取并整理",
@@ -779,9 +785,10 @@ function parentFolder(path) {
   }
   return value.replace(/[/\\][^/\\]+$/, "");
 }
-const SESSION_SETTINGS_KEY = "invoiceflow.session.settings";
-const SESSION_RUN_SETTINGS_KEY = "invoiceflow.session.runSettings";
-const CONTROLLED_AUTOSTART_PREFIX = "invoiceflow.controlledAutostart";
+const BRAND_SESSION_PREFIX = window.__APP_BRAND__.sessionStoragePrefix;
+const SESSION_SETTINGS_KEY = `${BRAND_SESSION_PREFIX}.session.settings`;
+const SESSION_RUN_SETTINGS_KEY = `${BRAND_SESSION_PREFIX}.session.runSettings`;
+const CONTROLLED_AUTOSTART_PREFIX = `${BRAND_SESSION_PREFIX}.controlledAutostart`;
 function readSessionValue(key) {
   try {
     const raw = window.sessionStorage.getItem(key);
@@ -4814,5 +4821,6 @@ function App() {
     onClose: () => setShowDisclaimer(false)
   }));
 }
+document.title = APP_BRAND.name;
 const root = createRoot(document.getElementById("root"));
 root.render( /*#__PURE__*/React.createElement(App, null));

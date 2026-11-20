@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WINDOWS_BUILD = ROOT / "build" / "windows"
 MANIFEST_PATH = WINDOWS_BUILD / "resources.manifest.json"
 RUNTIME_SOURCES_PATH = WINDOWS_BUILD / "runtime-sources.json"
-SPEC_PATH = WINDOWS_BUILD / "InvoiceFlowAI.spec"
+SPEC_PATH = WINDOWS_BUILD / "TidyInvoice.spec"
 BUILD_RELEASE_PATH = WINDOWS_BUILD / "build_release.ps1"
 PREPARE_RUNTIME_PATH = WINDOWS_BUILD / "prepare_runtime.ps1"
 RELEASE_WORKFLOW_PATH = ROOT / ".github" / "workflows" / "release-desktop.yml"
@@ -202,7 +202,7 @@ def test_resources_manifest_datas_are_mode_specific_and_optional():
 def test_pyinstaller_spec_filters_datas_by_webview2_mode():
     source = _read(SPEC_PATH)
 
-    assert "INVOICEFLOW_WEBVIEW2_MODE" in source
+    assert "TIDYINVOICE_WEBVIEW2_MODE" in source
     assert "fixedRuntimeSource" in source
     assert "bootstrapperSource" in source
     assert 'webview2_mode == "evergreen"' in source
@@ -212,7 +212,7 @@ def test_build_release_script_supports_both_modes():
     source = _read(BUILD_RELEASE_PATH)
 
     assert '[ValidateSet("fixed", "evergreen")]' in source
-    assert "INVOICEFLOW_WEBVIEW2_MODE" in source
+    assert "TIDYINVOICE_WEBVIEW2_MODE" in source
     assert "WebView2 delivery mode:" in source
     # Evergreen builds must not require the fixed runtime payload.
     assert "$WebView2Mode -eq \"evergreen\"" in source

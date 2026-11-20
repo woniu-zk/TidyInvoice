@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * InvoiceFlowAI 前端构建脚本（构建期预编译，运行期不再加载 Babel）。
+ * 前端构建脚本（构建期预编译，运行期不再加载 Babel）。
  *
  * 输入: templates/index_app.js          (JSX 源码)
  * 产物: templates/index_app.built.js    (浏览器可直接执行的 JS)
@@ -24,11 +24,13 @@ const SOURCE_PATH = join(ROOT, "templates", "index_app.js");
 const OUTPUT_PATH = join(ROOT, "templates", "index_app.built.js");
 const BABEL_PATH = join(TOOLS_DIR, "vendor", "babel.min.js");
 const OUTPUT_BANNER =
-    "/*! InvoiceFlowAI 前端产物 - 由 tools/compile-frontend.mjs 依据 templates/index_app.js 生成，请勿手改。 */";
+    "/*! 前端产物 - 由 tools/compile-frontend.mjs 依据 templates/index_app.js 生成，请勿手改。 */";
+// 只校验结构标记：品牌名由 templates/brand.generated.js 提供，
+// 不得让构建门禁依赖任何产品名字面量。
 const REQUIRED_OUTPUT_MARKERS = [
-    'name: "InvoiceFlowAI"',
-    'subtitle: "AI发票管家',
+    "const APP_BRAND =",
     "const APP_VISIBLE_COPY = {",
+    "window.__APP_BRAND__",
     "React.createElement(",
 ];
 

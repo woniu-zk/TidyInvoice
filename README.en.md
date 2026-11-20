@@ -1,4 +1,4 @@
-# InvoiceFlowAI — E-Invoice Organization and Reimbursement Preparation
+# TidyInvoice — E-Invoice Organization and Reimbursement Preparation
 
 <div align="center">
 
@@ -21,22 +21,22 @@
 
 Designed for individuals, freelancers, and small teams that manually collect multiple e-invoices each month. Connect your own QQ Mail, 163 Mail, or 88 Mail account to collect invoices in batches, parse and OCR them locally, archive them by category, and create a summary while retaining unclear results for human review.
 
-Download: [latest Windows installer / portable package and macOS (Apple Silicon) installer](https://github.com/EthanYoQ/Invoice-Downloader/releases/latest)
+Download: [latest Windows installer / portable package and macOS (Apple Silicon) installer](https://github.com/woniu-zk/tidyinvoice/releases/latest)
 
 *Email and invoice files are processed locally from start to finish: e-invoices are parsed directly, while scans and images go through the bundled local OCR. Recognition needs no network and no API key, and invoice content is never uploaded.*
 
 </div>
 
 <p align="center">
-  <img src="./docs/images/invoiceflowai-hero-en.png" alt="InvoiceFlowAI desktop invoice assistant with setup, processing, analysis, and safety screens" />
+  <img src="./docs/images/tidyinvoice-logo.png" alt="TidyInvoice app icon" width="132" />
 </p>
 
 ## DeepSeek Harness Plugin
 
-`@ethanyoq/dsh-invoice-downloader` brings local IMAP invoice download, local parsing and OCR, archiving, and Excel summaries to a right-side DeepSeek Harness panel. It is intended for reimbursement workflows that automate repetitive organizing while keeping a human review step.
+`@woniu-zk/dsh-invoice-downloader` brings local IMAP invoice download, local parsing and OCR, archiving, and Excel summaries to a right-side DeepSeek Harness panel. It is intended for reimbursement workflows that automate repetitive organizing while keeping a human review step.
 
 ```sh
-dsh plugin --profile web add @ethanyoq/dsh-invoice-downloader
+dsh plugin --profile web add @woniu-zk/dsh-invoice-downloader
 dsh web --profile web
 ```
 
@@ -57,7 +57,7 @@ Open **Invoice Downloader** from the right-side entry, choose an output director
 | 🗂️ | **Open expense classification rules** | Built-in defaults + user rules + global custom invoice types + seller dictionary + rule packs; target type and amount range generate archive folders automatically; unmatched invoices go to review |
 | 📂 | **Local folder organizing** | Works without any mailbox: one-click offline organizing of phone exports, WeChat/Alipay download folders, and photographed receipts; archives in place and keeps originals verbatim under `整理前发票/` |
 | 📥 | **Fetch to inbox only** | Saves attachments plus a source manifest into `inbox/` without parsing or renaming, ready for your own tools or a later organizing step |
-| 📊 | **One-click Excel report** | Automatically generates `summary_report.xlsx`, covering invoice lists and amount summaries |
+| 📊 | **One-click Excel report** | Automatically generates `invoice-summary_<timestamp>.xlsx`, covering invoice lists and amount summaries |
 
 ---
 
@@ -101,7 +101,7 @@ Recognition runs entirely on this machine in the order "deterministic parsing fi
 Expense categories are no longer hard-coded. Built-in rules provide factory defaults only; users can add rules, choose or create a target invoice type, enter a keyword and optional amount range, and maintain the same rules through the UI, a text editor, or the CLI.
 
 - **Rule locations**
-  - Global: `%APPDATA%\InvoiceFlowAI\rules\` (macOS: `~/Library/Application Support/InvoiceFlowAI/rules/`)
+  - Global: `%APPDATA%\TidyInvoice\rules\` (macOS: `~/Library/Application Support/TidyInvoice/rules/`)
   - Current invoice library override: `<library>\rules\`
   - Files: `categories.yaml` (rules and keywords), `custom_types.yaml` (global custom invoice types), `user_terms.yaml` (seller → category), `rules.d/*.yaml` (optional rule packs)
 - **Precedence**: current library rules → global rules → built-in defaults. Within one scope, rules match top-to-bottom and the first match wins; no priority is needed.
@@ -285,7 +285,7 @@ Each `manifest.jsonl` line records one attachment's source (`sha256`, relative p
 1. Log in to [mail.88.com](https://mail.88.com) and open **Settings** → **POP Settings**
 2. Confirm that **IMAP/SMTP service** is enabled
 3. In the **Dedicated Password** section, click **Add Dedicated Password**
-4. Enter a name (for example, `InvoiceFlowAI`) and copy the generated random password immediately
+4. Enter a name (for example, `TidyInvoice`) and copy the generated random password immediately
 5. In the app, enter the full email address and put the dedicated password in the authorization code field
 
 > ⚠️ The dedicated password is not your mailbox login password. It is intended for third-party mail clients, so keep it separately.
@@ -298,13 +298,13 @@ Each `manifest.jsonl` line records one attachment's source (`sha256`, relative p
 
 ### Windows (installer / portable)
 
-1. Installer: run `InvoiceFlowAI-*-windows-x64-setup.exe`. Portable: extract `InvoiceFlowAI-*-windows-x64-portable.zip` to a regular folder (avoid cloud-sync directories) and keep `_internal` beside `InvoiceFlowAI.exe`.
-2. Double-click `InvoiceFlowAI.exe`; the settings interface appears on first launch.
+1. Installer: run `TidyInvoice-*-windows-x64-setup.exe`. Portable: extract `TidyInvoice-*-windows-x64-portable.zip` to a regular folder (avoid cloud-sync directories) and keep `_internal` beside `TidyInvoice.exe`.
+2. Double-click `TidyInvoice.exe`; the settings interface appears on first launch.
 3. Enter your email address and authorization code (QQ, 163, or 88), then click "Start Scanning". Recognition runs offline on this machine — scans and images are handled by the bundled OCR, with no network or API key needed. Invoices are archived to the "Invoice Organizer" folder on your desktop.
 
 ### macOS (Apple Silicon)
 
-1. Open `InvoiceFlowAI-*-macos-arm64.dmg` and drag `InvoiceFlowAI` to Applications.
+1. Open `TidyInvoice-*-macos-arm64.dmg` and drag `TidyInvoice` to Applications.
 2. The settings interface appears on first launch. This build is unsigned and not notarized; if macOS blocks it, confirm opening it in **System Settings → Privacy & Security**.
 3. Enter your email address and authorization code (QQ, 163, or 88), then click "Start Scanning". Recognition runs offline on this machine — scans and images are handled by the bundled OCR, with no network or API key needed.
 
@@ -328,7 +328,7 @@ Invoice Organizer/
 ├── Dining/
 ├── Manual Review/     ← Materials that cannot be confirmed reliably
 ├── Non-target Company Invoices/
-└── summary_report.xlsx
+└── invoice-summary_<timestamp>.xlsx
 ```
 
 ---
@@ -338,7 +338,7 @@ Invoice Organizer/
 <details>
 <summary>Q: White screen or no response after launching the software?</summary>
 
-- Make sure the **entire archive is extracted**; the `_internal` folder must be in the same directory as `InvoiceFlowAI.exe`
+- Make sure the **entire archive is extracted**; the `_internal` folder must be in the same directory as `TidyInvoice.exe`
 - Avoid placing the software in a directory containing **Chinese characters or spaces**
 
 </details>
@@ -406,7 +406,7 @@ Yes. A built-in rule's target type, keywords, amount range, and enabled state ca
 <details>
 <summary>Q: Where are the classification rule files, and can I edit them?</summary>
 
-Yes. Global rules live in `%APPDATA%\InvoiceFlowAI\rules\` (macOS: `~/Library/Application Support/InvoiceFlowAI/rules/`); library overrides live in `<library>\rules\`. The files are open YAML: `categories.yaml`, global custom types `custom_types.yaml`, `user_terms.yaml`, and optional `rules.d/*.yaml`. Every save is backed up under `.backup/`, and both the UI and CLI can reset a scope to its defaults.
+Yes. Global rules live in `%APPDATA%\TidyInvoice\rules\` (macOS: `~/Library/Application Support/TidyInvoice/rules/`); library overrides live in `<library>\rules\`. The files are open YAML: `categories.yaml`, global custom types `custom_types.yaml`, `user_terms.yaml`, and optional `rules.d/*.yaml`. Every save is backed up under `.backup/`, and both the UI and CLI can reset a scope to its defaults.
 
 </details>
 
@@ -444,16 +444,28 @@ By using this software, you acknowledge and accept the following terms.
 
 ---
 
+## 🌱 Origin and Credits
+
+This project is a derivative of [Invoice Downloader](https://github.com/EthanYoQ/Invoice-Downloader) by EthanYoQ / Yong Qi (Apache License 2.0), and continues development on top of it. The upstream copyright, license, and [NOTICE](NOTICE) attribution are retained under the same license.
+
+The project is maintained independently by the community. It is not affiliated with, endorsed by, or certified by the upstream author; the product name, icon, release assets, and npm package do not represent the upstream project. Report upstream issues in the upstream repository and issues introduced here in [this repository](https://github.com/woniu-zk/tidyinvoice/issues).
+
+Generally useful fixes are prepared as patches that can be sent upstream; see [docs/UPSTREAM.md](docs/UPSTREAM.md).
+
+---
+
 ## 📜 License
 
-Licensed under the [Apache License 2.0](LICENSE). Commercial use, modification, distribution, and closed-source integration are permitted, provided that redistributions retain the copyright notice, license notice, and author attribution in [NOTICE](NOTICE).
+The project's **own source code** is licensed under the [Apache License 2.0](LICENSE): commercial use, modification, distribution, and closed-source integration are permitted; redistributions must retain the copyright notice, the license text, the [NOTICE](NOTICE) attribution, and the third-party notices.
+
+Published installers bundle the **AGPL-3.0 component PyMuPDF**, so a distributed build must provide the corresponding source to its recipients under AGPL-3.0; each package ships `LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES.md`, and `licenses/`. See [docs/LICENSING.md](docs/LICENSING.md) for the license structure, what you may and may not do, and commercial licensing options; the component inventory is in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ---
 
 <div align="center">
 
-Made with ❤️ by **EthanYoQ / Yong Qi**
+Made with ❤️ by **Woniu (蜗牛)**
 
-[Report Issues](https://github.com/EthanYoQ/Invoice-Downloader/issues) · [163 Mailbox Help](https://help.mail.163.com/) · [QQ Mailbox Help](https://service.mail.qq.com/detail/0/339)
+[Report Issues](https://github.com/woniu-zk/tidyinvoice/issues) · [163 Mailbox Help](https://help.mail.163.com/) · [QQ Mailbox Help](https://service.mail.qq.com/detail/0/339)
 
 </div>

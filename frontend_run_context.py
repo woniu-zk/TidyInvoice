@@ -3,8 +3,10 @@ import os
 import re
 from pathlib import Path
 
+from brand_generated import RUN_CONTEXT_ENV_VAR
+
 _EXPLICIT_RUN_CONTEXT_PATH = ""
-_RUN_CONTEXT_ENV_VAR = "INVOICEFLOWAI_RUN_CONTEXT_PATH"
+_RUN_CONTEXT_ENV_VAR = RUN_CONTEXT_ENV_VAR
 
 
 def _is_truthy(value):

@@ -41,6 +41,7 @@ RUNTIME_SCRIPTS = [
     "./static/history.min.js",
     "./static/react-router.min.js",
     "./static/react-router-dom.min.js",
+    "./brand.generated.js",
     "./index_app.built.js",
 ]
 
@@ -53,7 +54,7 @@ def test_built_bundle_exists_and_keeps_frontend_markers():
     assert BUILT_PATH.is_file(), "templates/index_app.built.js is missing; run node tools/compile-frontend.mjs"
     built = _read(BUILT_PATH)
     assert len(built.encode("utf-8")) > 10_000, "compiled bundle looks empty"
-    for marker in ('name: "InvoiceFlowAI"', 'subtitle: "AI发票管家', "const APP_VISIBLE_COPY = {"):
+    for marker in ("const APP_BRAND =", "const APP_VISIBLE_COPY = {", "window.__APP_BRAND__"):
         assert marker in built, f"compiled bundle lost marker: {marker!r}"
     assert "React.createElement(" in built, "compiled bundle does not look like Babel output"
     assert "</div>" not in built, "compiled bundle still contains raw JSX"
@@ -372,8 +373,10 @@ RULES_VISIBLE_COPY = (
 
 _RULES_BUNDLE_DRIVER_JS = r'''
 const fs = require("node:fs");
+const path = require("node:path");
 const vm = require("node:vm");
-let code = fs.readFileSync(process.argv[2], "utf8");
+const bundlePath = process.argv[2];
+let code = fs.readFileSync(bundlePath, "utf8");
 const lines = code.trimEnd().split("\n");
 if (lines[lines.length - 1].includes("root.render(")) lines.pop();
 if (lines[lines.length - 1].includes("createRoot(")) lines.pop();
@@ -408,6 +411,9 @@ sandbox.ReactRouterDOM = {
     useNavigate: () => () => {},
 };
 vm.createContext(sandbox);
+// 与 index.html 的加载顺序一致：先品牌清单，再应用产物。
+const brandPath = path.join(path.dirname(bundlePath), "brand.generated.js");
+vm.runInContext(fs.readFileSync(brandPath, "utf8"), sandbox, { filename: "brand.generated.js" });
 vm.runInContext(lines.join("\n"), sandbox, { filename: "index_app.built.js" });
 const probeSource = fs.readFileSync(process.argv[3], "utf8");
 vm.runInContext(probeSource, sandbox, { filename: "rules_probe.js" });

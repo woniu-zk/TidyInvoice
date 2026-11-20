@@ -6,11 +6,9 @@ import os
 import sys
 from ctypes import wintypes
 
+from brand_generated import APP_DIR_NAME, LEGACY_APP_DIR_NAMES
 
-APP_DIR_NAME = "InvoiceFlowAI"
-LEGACY_APP_DIR_NAMES = (
-    " ".join(("InvoiceFlowAI", "External", "Test")),
-)
+
 SETTINGS_FILE_NAME = "user_settings.json"
 SENSITIVE_KEYS = {"auth_code", "api_key", "deepseek_api_key"}
 DEFAULT_OUTPUT_DIR_NAME = "发票整理"

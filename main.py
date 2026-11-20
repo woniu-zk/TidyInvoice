@@ -7,6 +7,13 @@ import tempfile
 import time
 from pathlib import Path
 
+from brand_generated import (
+    BRAND_NAME,
+    RUN_CONTEXT_ENV_VAR,
+    SINGLE_INSTANCE_MUTEX_NAME,
+    TEMP_FILE_PREFIX,
+    WEBVIEW2_MODE_ENV,
+)
 from frontend_run_context import set_explicit_run_context_path
 from user_settings import get_runtime_data_dir, get_runtime_diagnostics_dir
 
@@ -16,7 +23,7 @@ WINDOW_BASELINE_HEIGHT = 840
 WINDOW_MARGIN = 24
 WINDOW_MIN_WIDTH = 900
 WINDOW_MIN_HEIGHT = 620
-WINDOW_TITLE = "InvoiceFlowAI"
+WINDOW_TITLE = BRAND_NAME
 WEBVIEW2_RUNTIME_RELATIVE_DIR = Path("runtime") / "webview2-fixed"
 STARTUP_DIAGNOSTIC_CONTEXT = {}
 PACKAGED_UNBLOCK_SUFFIXES = {".dll", ".pyd", ".exe", ".json"}
@@ -24,12 +31,10 @@ PACKAGED_UNBLOCK_SUFFIXES = {".dll", ".pyd", ".exe", ".json"}
 #   fixed     - ship the pinned fixed-version runtime inside the app (offline)
 #   evergreen - use the machine-wide WebView2 runtime (Win11 has it) and fall
 #               back to a bundled bootstrapper when it is missing (small installer)
-WEBVIEW2_MODE_ENV = "INVOICEFLOW_WEBVIEW2_MODE"
 WEBVIEW2_MODES = ("fixed", "evergreen")
 WEBVIEW2_BOOTSTRAPPER_RELATIVE = Path("runtime") / "MicrosoftEdgeWebView2Setup.exe"
 WEBVIEW2_CLIENT_GUID = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 WEBVIEW2_DOWNLOAD_URL = "https://developer.microsoft.com/microsoft-edge/webview2/"
-SINGLE_INSTANCE_MUTEX_NAME = "Local\\InvoiceFlowAI.SingleInstance"
 SINGLE_INSTANCE_LOCK_FILE_NAME = "instance.lock"
 ERROR_ALREADY_EXISTS = 183
 _SINGLE_INSTANCE_HANDLE = None
@@ -129,7 +134,8 @@ def _set_windows_dpi_awareness():
     return "fallback"
 
 
-def _show_startup_error(message, title="InvoiceFlowAI Startup Error"):
+def _show_startup_error(message, title=""):
+    title = title or f"{BRAND_NAME} Startup Error"
     if os.name != "nt":
         return
 
@@ -143,11 +149,11 @@ def _single_instance_lock_path():
     try:
         return Path(get_runtime_data_dir()) / SINGLE_INSTANCE_LOCK_FILE_NAME
     except Exception:
-        return Path(tempfile.gettempdir()) / f"InvoiceFlowAI-{SINGLE_INSTANCE_LOCK_FILE_NAME}"
+        return Path(tempfile.gettempdir()) / f"{TEMP_FILE_PREFIX}-{SINGLE_INSTANCE_LOCK_FILE_NAME}"
 
 
 def _acquire_single_instance_guard():
-    """Return True when this process is the only running InvoiceFlowAI instance.
+    """Return True when this process is the only running application instance.
 
     Windows uses a named kernel mutex; other platforms use an exclusive lock file
     under the per-user runtime data directory. Any unexpected platform failure
@@ -207,7 +213,7 @@ def _acquire_single_instance_guard():
 
 
 def _show_already_running_message():
-    message = "InvoiceFlowAI 已在运行，请使用已打开的窗口。"
+    message = f"{BRAND_NAME} 已在运行，请使用已打开的窗口。"
     if os.name == "nt":
         try:
             ctypes.windll.user32.MessageBoxW(None, message, WINDOW_TITLE, 0x40)
@@ -553,23 +559,28 @@ def _resolve_window_geometry(webview_module):
 def _ensure_expected_frontend_assets(current_dir):
     html_path = current_dir / "templates" / "index.html"
     js_path = current_dir / "templates" / "index_app.built.js"
+    brand_path = current_dir / "templates" / "brand.generated.js"
 
     if not html_path.is_file():
         raise FileNotFoundError(f"Frontend HTML not found: {html_path}")
     if not js_path.is_file():
         raise FileNotFoundError(f"Frontend app bundle not found: {js_path}")
+    if not brand_path.is_file():
+        raise FileNotFoundError(f"Frontend brand manifest not found: {brand_path}")
 
     html_text = html_path.read_text(encoding="utf-8")
     js_text = js_path.read_text(encoding="utf-8")
 
+    # Structural markers only: branding lives in brand.generated.js, so the
+    # packaged-interface contract must never depend on a product name literal.
     expected_html_markers = [
-        "<title>InvoiceFlowAI</title>",
+        "brand.generated.js",
         "color-scheme: dark;",
     ]
     expected_js_markers = [
-        'name: "InvoiceFlowAI"',
-        'subtitle: "AI发票管家',
+        "const APP_BRAND =",
         "const APP_VISIBLE_COPY = {",
+        "window.__APP_BRAND__",
     ]
     unexpected_js_markers = []
 
@@ -618,10 +629,10 @@ def main(argv=None):
         resolved_run_context_path = Path(run_context_path).expanduser().resolve()
         if not resolved_run_context_path.is_file():
             raise FileNotFoundError(f"Run context file not found: {resolved_run_context_path}")
-        os.environ["INVOICEFLOWAI_RUN_CONTEXT_PATH"] = str(resolved_run_context_path)
+        os.environ[RUN_CONTEXT_ENV_VAR] = str(resolved_run_context_path)
         set_explicit_run_context_path(str(resolved_run_context_path))
     else:
-        os.environ.pop("INVOICEFLOWAI_RUN_CONTEXT_PATH", None)
+        os.environ.pop(RUN_CONTEXT_ENV_VAR, None)
         set_explicit_run_context_path("")
 
     _set_windows_dpi_awareness()

@@ -1,4 +1,4 @@
-# InvoiceFlowAI — 电子发票整理与报销准备工具
+# 整票 — 电子发票整理与报销准备工具
 
 <div align="center">
 
@@ -21,22 +21,22 @@
 
 面向每月需要手工收集多张电子发票的个人、自由职业者和小团队。连接自己的 QQ、163 或 88 邮箱后，可批量收集发票、本地解析与 OCR 识别、分类归档并生成汇总；无法可靠识别的内容保留给用户人工复核。
 
-下载：[最新 Windows（安装版 / 免安装版）与 macOS（Apple Silicon）安装包](https://github.com/EthanYoQ/Invoice-Downloader/releases/latest)
+下载：[最新 Windows（安装版 / 免安装版）与 macOS（Apple Silicon）安装包](https://github.com/woniu-zk/tidyinvoice/releases/latest)
 
 *邮件和发票文件全程在本地处理：电子发票直接解析，扫描件与图片由内置的本地 OCR 识别；识别不需要联网、不需要 API Key，发票内容不会上传。*
 
 </div>
 
 <p align="center">
-  <img src="./docs/images/invoiceflowai-hero-zh.png" alt="InvoiceFlowAI 发票助手的启动配置、处理中心、结果分析与安全提示界面" />
+  <img src="./docs/images/tidyinvoice-logo.png" alt="整票 应用图标" width="132" />
 </p>
 
 ## DeepSeek Harness 插件
 
-`@ethanyoq/dsh-invoice-downloader` 将本地 IMAP 发票下载、本地解析与 OCR、归档和 Excel 汇总带到 DeepSeek Harness 的右侧边栏。适用于希望把重复整理工作交给本地自动化、同时保留人工复核的报销场景。
+`@woniu-zk/dsh-invoice-downloader` 将本地 IMAP 发票下载、本地解析与 OCR、归档和 Excel 汇总带到 DeepSeek Harness 的右侧边栏。适用于希望把重复整理工作交给本地自动化、同时保留人工复核的报销场景。
 
 ```powershell
-dsh plugin --profile web add @ethanyoq/dsh-invoice-downloader
+dsh plugin --profile web add @woniu-zk/dsh-invoice-downloader
 dsh web --profile web
 ```
 
@@ -57,7 +57,7 @@ dsh web --profile web
 | 🗂️ | **开放费用归类规则** | 内置默认 + 用户规则 + 全局自定义票种 + 销售方词典 + 规则包；目标票种和金额范围自动生成归档文件夹，未命中进复核 |
 | 📂 | **本地文件夹整理** | 不连邮箱也能用：手机导出、微信/支付宝下载、拍照发票等任意文件夹一键离线整理；默认在原文件夹内分类归档，原件按原文件名原样保留在 `整理前发票/` |
 | 📥 | **仅提取到 inbox** | 只把附件与来源清单保存到 `inbox/`，不做识别和改名，方便交给自己的工具或后续整理 |
-| 📊 | **一键 Excel 报表** | 自动生成 `summary_report.xlsx`，发票清单、金额汇总全覆盖 |
+| 📊 | **一键 Excel 报表** | 自动生成 `结果明细_<时间戳>.xlsx`，发票清单、金额汇总全覆盖 |
 
 ---
 
@@ -101,7 +101,7 @@ flowchart LR
 费用类目不再写死在代码里。内置规则只提供出厂默认值，用户可以在界面里新增规则，选择或新建目标票种，填写关键词和金额范围，也可以用文本编辑器或命令行维护同一套规则。
 
 - **规则位置**
-  - 全局规则：`%APPDATA%\InvoiceFlowAI\rules\`（macOS 为 `~/Library/Application Support/InvoiceFlowAI/rules/`）
+  - 全局规则：`%APPDATA%\TidyInvoice\rules\`（macOS 为 `~/Library/Application Support/TidyInvoice/rules/`）
   - 当前发票库覆盖：`<发票库>\rules\`
   - 文件：`categories.yaml`（规则与关键词）、`custom_types.yaml`（全局自定义票种）、`user_terms.yaml`（销售方 → 类目）、`rules.d/*.yaml`（可选规则包）
 - **生效顺序**：当前发票库规则 → 全局规则 → 内置默认规则；同一范围内按列表从上到下匹配，首条命中即定，不再需要配置优先级。
@@ -284,7 +284,7 @@ python organize_cli.py fetch --email you@qq.com --auth-code env:QQ_AUTH_CODE --o
 1. 登录 [mail.88.com](https://mail.88.com)，进入「**设置**」→「**POP 设置**」
 2. 确认 **IMAP/SMTP 服务**已开启
 3. 找到「**专用密码**」区域，点击「**新增专用密码**」
-4. 输入名称（例如 `InvoiceFlowAI`），生成后立即复制随机密码
+4. 输入名称（例如 `整票`），生成后立即复制随机密码
 5. 在软件中填写完整邮箱地址，并将该专用密码填入授权码一栏
 
 > ⚠️ 专用密码不是邮箱登录密码。它专用于第三方邮件客户端，请单独保存。
@@ -297,13 +297,13 @@ python organize_cli.py fetch --email you@qq.com --auth-code env:QQ_AUTH_CODE --o
 
 ### Windows（安装版 / 免安装版）
 
-1. 安装版：运行 `InvoiceFlowAI-*-windows-x64-setup.exe`；免安装版：解压 `InvoiceFlowAI-*-windows-x64-portable.zip` 到普通文件夹（避免云盘同步目录），并保持 `_internal` 文件夹与 `InvoiceFlowAI.exe` 同级。
-2. 双击 `InvoiceFlowAI.exe`；首次启动会自动弹出设置界面。
+1. 安装版：运行 `TidyInvoice-*-windows-x64-setup.exe`；免安装版：解压 `TidyInvoice-*-windows-x64-portable.zip` 到普通文件夹（避免云盘同步目录），并保持 `_internal` 文件夹与 `TidyInvoice.exe` 同级。
+2. 双击 `TidyInvoice.exe`；首次启动会自动弹出设置界面。
 3. 填入邮箱地址与授权码（QQ、163 或 88），保存后点击「开始扫描」。识别在本机离线运行，扫描件与图片由内置 OCR 处理，无需联网或 API Key；发票会自动归档到桌面「发票整理」文件夹。
 
 ### macOS（Apple Silicon）
 
-1. 打开 `InvoiceFlowAI-*-macos-arm64.dmg`，将 `InvoiceFlowAI` 拖入“应用程序”文件夹。
+1. 打开 `TidyInvoice-*-macos-arm64.dmg`，将 `TidyInvoice` 拖入“应用程序”文件夹。
 2. 首次启动会自动弹出设置界面。此版本未签名、未公证；若 macOS 阻止打开，请在“系统设置 → 隐私与安全性”中确认仍要打开。
 3. 填入邮箱地址与授权码（QQ、163 或 88），保存后点击「开始扫描」。识别在本机离线运行，扫描件与图片由内置 OCR 处理，无需联网或 API Key。
 
@@ -327,7 +327,7 @@ python organize_cli.py fetch --email you@qq.com --auth-code env:QQ_AUTH_CODE --o
 ├── 餐饮/
 ├── 待人工复核/        ← 无法可靠确认的材料，需人工处理
 ├── 非目标公司发票/
-└── summary_report.xlsx
+└── 结果明细_<时间戳>.xlsx
 ```
 
 ---
@@ -337,7 +337,7 @@ python organize_cli.py fetch --email you@qq.com --auth-code env:QQ_AUTH_CODE --o
 <details>
 <summary>Q：软件启动后白屏或无响应？</summary>
 
-- 确认已将**整个压缩包解压**，`_internal` 文件夹须与 `InvoiceFlowAI.exe` 在同一目录
+- 确认已将**整个压缩包解压**，`_internal` 文件夹须与 `TidyInvoice.exe` 在同一目录
 - 避免将软件放在含有**中文路径或空格**的目录下
 
 </details>
@@ -405,7 +405,7 @@ python organize_cli.py fetch --email you@qq.com --auth-code env:QQ_AUTH_CODE --o
 <details>
 <summary>Q：分类规则文件在哪里？可以自己改吗？</summary>
 
-可以。全局规则在 `%APPDATA%\InvoiceFlowAI\rules\`（macOS 为 `~/Library/Application Support/InvoiceFlowAI/rules/`），当前发票库的覆盖规则在 `<发票库>\rules\`。规则是开放的 YAML：`categories.yaml`、全局自定义票种 `custom_types.yaml`、`user_terms.yaml` 和可选的 `rules.d/*.yaml`。每次保存前会自动备份到 `.backup/`，界面和命令行都可以恢复默认。
+可以。全局规则在 `%APPDATA%\TidyInvoice\rules\`（macOS 为 `~/Library/Application Support/TidyInvoice/rules/`），当前发票库的覆盖规则在 `<发票库>\rules\`。规则是开放的 YAML：`categories.yaml`、全局自定义票种 `custom_types.yaml`、`user_terms.yaml` 和可选的 `rules.d/*.yaml`。每次保存前会自动备份到 `.backup/`，界面和命令行都可以恢复默认。
 
 </details>
 
@@ -443,16 +443,28 @@ python organize_cli.py fetch --email you@qq.com --auth-code env:QQ_AUTH_CODE --o
 
 ---
 
+## 🌱 来源与致谢
+
+本项目是 [Invoice Downloader](https://github.com/EthanYoQ/Invoice-Downloader)（作者 EthanYoQ / Yong Qi，Apache License 2.0）的衍生项目，在其基础上继续开发与维护。我们保留上游的版权、许可与 [NOTICE](NOTICE) 署名，并沿用同一许可证。
+
+本项目由社区独立维护，与上游作者无隶属关系，也未获得上游的背书或认证；产品名称、图标、发布包与 npm 包均不代表上游。上游项目自身的问题请提交到上游仓库，本项目引入的问题请提交到[本仓库议题](https://github.com/woniu-zk/tidyinvoice/issues)。
+
+通用改进会尽量整理成可回推上游的补丁，详见 [docs/UPSTREAM.md](docs/UPSTREAM.md)。
+
+---
+
 ## 📜 许可证
 
-本项目基于 [Apache License 2.0](LICENSE) 授权。允许商业使用、修改、分发和闭源集成，但再分发时必须保留 copyright notice、license notice，以及 [NOTICE](NOTICE) 中的作者署名。
+本仓库**自有代码**基于 [Apache License 2.0](LICENSE) 授权：允许商业使用、修改、分发和闭源集成；再分发时须保留版权声明、许可文本、[NOTICE](NOTICE) 归属与第三方声明。
+
+发布的安装包包含 **AGPL-3.0 组件 PyMuPDF**，因此分发物需按 AGPL-3.0 向接收者提供对应源码；安装包内附 `LICENSE`、`NOTICE`、`THIRD_PARTY_NOTICES.md` 与 `licenses/`。许可结构、可做与不可做、商业许可路径见 [docs/LICENSING.md](docs/LICENSING.md)，第三方组件清单见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 ---
 
 <div align="center">
 
-Made with ❤️ by **EthanYoQ / Yong Qi**
+Made with ❤️ by **蜗牛**
 
-[报告问题](https://github.com/EthanYoQ/Invoice-Downloader/issues) · [163邮箱帮助](https://help.mail.163.com/) · [QQ邮箱帮助](https://service.mail.qq.com/detail/0/339)
+[报告问题](https://github.com/woniu-zk/tidyinvoice/issues) · [163邮箱帮助](https://help.mail.163.com/) · [QQ邮箱帮助](https://service.mail.qq.com/detail/0/339)
 
 </div>

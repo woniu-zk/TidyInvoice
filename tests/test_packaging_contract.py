@@ -1,4 +1,4 @@
-"""Release/packaging contract tests for the InvoiceFlowAI desktop build.
+"""Release/packaging contract tests for the TidyInvoice desktop build.
 
 These tests are deliberately offline and cheap: they assert that the release
 pipeline (WebView2 pruning, PyInstaller packaging, dependency pins, CI test
@@ -25,7 +25,7 @@ PRUNE_POLICY_PATH = WINDOWS_BUILD / "webview2-prune-policy.json"
 PRUNE_SCRIPT_PATH = WINDOWS_BUILD / "prune_webview2_runtime.ps1"
 PREPARE_RUNTIME_PATH = WINDOWS_BUILD / "prepare_runtime.ps1"
 BUILD_RELEASE_PATH = WINDOWS_BUILD / "build_release.ps1"
-SPEC_PATH = WINDOWS_BUILD / "InvoiceFlowAI.spec"
+SPEC_PATH = WINDOWS_BUILD / "TidyInvoice.spec"
 MAIN_PATH = ROOT / "main.py"
 RELEASE_WORKFLOW_PATH = ROOT / ".github" / "workflows" / "release-desktop.yml"
 WORKFLOWS_DIR = ROOT / ".github" / "workflows"
@@ -261,7 +261,7 @@ def test_resources_manifest_required_paths_and_datas_resolve():
 
 
 def test_classification_rule_sources_are_packaged_for_desktop_and_plugin():
-    macos_spec = _read(ROOT / "build" / "macos" / "InvoiceFlowAI.spec")
+    macos_spec = _read(ROOT / "build" / "macos" / "TidyInvoice.spec")
     assert 'ROOT / "builtin"' in macos_spec
     assert '"builtin"' in macos_spec
 
@@ -383,7 +383,7 @@ def test_build_release_import_probe_covers_local_ocr_stack():
     assert "Missing Python build dependencies" in build_release
 
 
-def test_invoiceflowai_spec_bundles_ocr_models_and_onnxruntime_binaries():
+def test_tidyinvoice_spec_bundles_ocr_models_and_onnxruntime_binaries():
     spec = _read(SPEC_PATH)
     assert "collect_data_files" in spec
     assert "collect_dynamic_libs" in spec

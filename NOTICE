@@ -1,5 +1,21 @@
+Project: 整票 (TidyInvoice)
+Copyright 2026 蜗牛
+Repository: https://github.com/woniu-zk/tidyinvoice
+
+This product is a derivative work of Invoice Downloader by EthanYoQ / Yong Qi
+(https://github.com/EthanYoQ/Invoice-Downloader) and is distributed under the
+Apache License 2.0. The upstream notice below is retained verbatim.
+
+--- Upstream notice ---
+
 Project: Invoice Downloader
 Copyright 2026 EthanYoQ / Yong Qi
 Original repository: https://github.com/EthanYoQ/Invoice-Downloader
 
 This product includes software developed by EthanYoQ.
+
+---
+
+Third-party software notices: THIRD_PARTY_NOTICES.md
+AGPL-3.0 component (PyMuPDF) license text: LICENSES/AGPL-3.0.txt
+

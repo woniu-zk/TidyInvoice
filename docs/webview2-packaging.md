@@ -1,6 +1,6 @@
 # WebView2 交付模式（fixed / evergreen）说明
 
-本文档说明 InvoiceFlowAI 桌面端两种 WebView2 交付方式、构建命令、运行时行为与验证方法。
+本文档说明 整票（TidyInvoice）桌面端两种 WebView2 交付方式、构建命令、运行时行为与验证方法。
 默认构建仍是 **fixed（内置固定版运行时）**，`evergreen` 为可选精简构建；两者共用同一套业务代码。
 
 ## 1. 两种模式
@@ -33,7 +33,7 @@
 
 ## 3. 运行时行为（`main.py`）
 
-优先级：**命令行 `--webview2-mode fixed|evergreen` > 环境变量 `INVOICEFLOW_WEBVIEW2_MODE` > 自动检测**。
+优先级：**命令行 `--webview2-mode fixed|evergreen` > 环境变量 `TIDYINVOICE_WEBVIEW2_MODE` > 自动检测**。
 
 自动检测规则：能找到完整的固定版运行时目录则用 `fixed`，否则用 `evergreen`。
 
@@ -44,12 +44,12 @@
 3. 未安装但有 bootstrapper（安装包 `runtime/MicrosoftEdgeWebView2Setup.exe` 或 `build/runtime/`）→ 静默执行 `/silent /install`，安装后重试检测；
 4. 仍未安装 → 抛错并在启动错误框/诊断中给出官方下载地址，不会静默崩溃。
 
-启动诊断文件（`%LOCALAPPDATA%/InvoiceFlowAI/diagnostics/webview_startup.json`）记录 `webview2_mode`、`webview2_version`、`runtime_dir`，便于现场排障。
+启动诊断文件（`%LOCALAPPDATA%/TidyInvoice/diagnostics/webview_startup.json`）记录 `webview2_mode`、`webview2_version`、`runtime_dir`，便于现场排障。
 
 ## 4. 打包清单如何切换
 
 - `build/windows/resources.manifest.json` → `webview2` 段声明 `defaultMode`、`modes`、`fixedRuntimeSource`、`bootstrapperSource/Target`；两个数据源在 `datas` 中均为 `optional: true`（构建期 hydrate，缺一个不应失败）。
-- `build/windows/InvoiceFlowAI.spec` 依据 `INVOICEFLOW_WEBVIEW2_MODE` 过滤 `datas`：`evergreen` 不打包固定运行时；`fixed` 不打包 bootstrapper。
+- `build/windows/TidyInvoice.spec` 依据 `TIDYINVOICE_WEBVIEW2_MODE` 过滤 `datas`：`evergreen` 不打包固定运行时；`fixed` 不打包 bootstrapper。
 - `build/windows/build_release.ps1`：`evergreen` 下跳过固定运行时 `requiredPaths` 校验与裁剪步骤，并把模式写入 PyInstaller 子进程环境变量。
 - 固定运行时裁剪策略（`webview2-prune-policy.json`）仅在 `fixed` 构建中生效。
 

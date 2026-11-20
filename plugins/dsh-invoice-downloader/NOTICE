@@ -1,3 +1,14 @@
+Project: 整票 DeepSeek Harness 插件 (TidyInvoice for DeepSeek Harness)
+Copyright 2026 蜗牛
+Repository: https://github.com/woniu-zk/tidyinvoice
+
+This package is a derivative work of the Invoice Downloader project by
+EthanYoQ / Yong Qi (https://github.com/EthanYoQ/Invoice-Downloader) and is
+distributed under the Apache License 2.0. The upstream notice below is retained
+verbatim.
+
+--- Upstream notice ---
+
 Project: Invoice Downloader
 Copyright 2026 EthanYoQ / Yong Qi
 Original repository: https://github.com/EthanYoQ/Invoice-Downloader

@@ -1,6 +1,6 @@
 - insert:
     - id: invoice-downloader
-      name: '@ethanyoq/dsh-invoice-downloader'
+      name: '@woniu-zk/dsh-invoice-downloader'
       inject: ['subprocess', 'connection', 'webServer', 'credentials']
       config:
         savePath: ''

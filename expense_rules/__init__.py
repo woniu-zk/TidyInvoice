@@ -1,4 +1,4 @@
-"""InvoiceFlowAI classification-rules core.
+"""Classification-rules core.
 
 Public API (stable; the desktop app and the web rules page import these)::
 

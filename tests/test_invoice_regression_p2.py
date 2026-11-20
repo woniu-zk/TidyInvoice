@@ -227,7 +227,7 @@ class InvoiceP2RegressionTests(unittest.TestCase):
             {
                 "is_invoice": True,
                 "Date": "20260524",
-                "Purchaser": "Yong Qi",
+                "Purchaser": "张三",
                 "Seller": "未知",
                 "Amount": "49.99",
                 "InvoiceNumber": "Invoice #23265242",
@@ -272,7 +272,7 @@ class InvoiceP2RegressionTests(unittest.TestCase):
                     "Invoice #23265242",
                     "Invoice Date: Sunday, May 24th, 2026",
                     "Invoiced To",
-                    "Yong Qi",
+                    "张三",
                     "Description",
                     "Total",
                     "$49.99 USD",
@@ -289,7 +289,7 @@ class InvoiceP2RegressionTests(unittest.TestCase):
         self.assertEqual(result["InvoiceNumber"], "23265242")
         self.assertEqual(result["Date"], "20260524")
         self.assertEqual(result["Seller"], "IT7 Networks Inc")
-        self.assertEqual(result["Purchaser"], "Yong Qi")
+        self.assertEqual(result["Purchaser"], "张三")
         self.assertEqual(result["Amount"], "49.99")
         self.assertEqual(result["Type"], "其他")
 
@@ -320,7 +320,7 @@ class InvoiceP2RegressionTests(unittest.TestCase):
                     "Invoice #23265242",
                     "Invoice Date: Sunday, May 24th, 2026",
                     "Invoiced To",
-                    "Yong Qi",
+                    "张三",
                     "Total",
                     "$49.99 USD",
                 ]
@@ -386,7 +386,7 @@ class InvoiceP2RegressionTests(unittest.TestCase):
                     "电子发票（铁路电子客票）",
                     "13:38开",
                     "票价:￥223.00",
-                    "亓勇",
+                    "张三",
                     "电子客票号:1001059086112299407762025",
                     "辉瑞投资有限公司",
                     "开票日期:2025年12月24日",
@@ -646,7 +646,7 @@ class InvoiceP2RegressionTests(unittest.TestCase):
         }
         doc_type, reason_codes = helper(
             info_json,
-            "亓勇3月13日行程单 - 机票.pdf",
+            "张三3月13日行程单 - 机票.pdf",
             False,
         )
 
@@ -1590,7 +1590,7 @@ class InvoiceP2RegressionTests(unittest.TestCase):
                     "全季杭州下沙大学城酒店",
                     "结账单",
                     "客人姓名",
-                    "：亓勇",
+                    "：张三",
                     "入住日期",
                     "：2026-06-10",
                     "离店日期",
@@ -1610,7 +1610,7 @@ class InvoiceP2RegressionTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result["Type"], "住宿水单")
         self.assertEqual(result["Date"], "20260611")
-        self.assertEqual(result["Purchaser"], "亓勇")
+        self.assertEqual(result["Purchaser"], "张三")
         self.assertEqual(result["Seller"], "全季杭州下沙大学城酒店")
         self.assertEqual(result["Amount"], "441.15")
 
@@ -1640,7 +1640,7 @@ class InvoiceP2RegressionTests(unittest.TestCase):
                     "~{[G#:117332096|GA:2026-02-03|GD:2026-02-05|AMT:2,399.98|ST:FOLIO]}",
                     '~{[FOLIO:99200|2058.30,16706|135.84,16500|205.84]}',
                     "Guest Folio",
-                    "Qi, Yong  亓勇",
+                    "Zhang, San  张三",
                 ]
             ),
         )
@@ -1673,7 +1673,7 @@ class InvoiceP2RegressionTests(unittest.TestCase):
                     "~{[G#:88685323|GA:2026-04-23|GD:2026-04-24|AMT:0.00|ST:FOLIO]}",
                     "~{[FOLIO:99200|1046.00,29103|5.81,29104|8.80,16706|63.23,16500|95.80]}",
                     "Guest Folio",
-                    "Qi, Yong  亓勇",
+                    "Zhang, San  张三",
                 ]
             ),
         )
@@ -1704,7 +1704,7 @@ class InvoiceP2RegressionTests(unittest.TestCase):
                     "~{[G#:88685323|GA:2026-04-23|GD:2026-04-24|AMT:0.00|ST:FOLIO]}",
                     "~{[FOLIO:99200|1046.00,29103|5.81,29104|8.80,16706|63.23,16500|95.80]}",
                     "Guest Folio",
-                    "Qi, Yong  亓勇",
+                    "Zhang, San  张三",
                 ]
             ),
         )
@@ -1726,7 +1726,7 @@ class InvoiceP2RegressionTests(unittest.TestCase):
                     "Courtyard by Marriott Hangzhou West 杭州西溪万怡酒店",
                     "www.marriott.com",
                     "INFORMATION INVOICE",
-                    "Mr YONG QI",
+                    "Mr ZHANG SAN",
                     "DATE",
                     "日期",
                     "CHARGES",
@@ -1744,7 +1744,7 @@ class InvoiceP2RegressionTests(unittest.TestCase):
                     "离店日期",
                     "01-12-26",
                     "01-13-26",
-                    "亓勇",
+                    "张三",
                 ]
             ),
         )
@@ -1805,11 +1805,11 @@ class InvoiceP2RegressionTests(unittest.TestCase):
 
     def test_truth_builder_keeps_supporting_documents_out_of_non_target_bucket(self):
         self.assertEqual(
-            expected_category_for("住宿水单", "亓勇", "辉瑞"),
+            expected_category_for("住宿水单", "张三", "辉瑞"),
             ("住宿水单", "住宿水单"),
         )
         self.assertEqual(
-            expected_category_for("行程单", "亓勇", "辉瑞"),
+            expected_category_for("行程单", "张三", "辉瑞"),
             ("行程单", "行程单"),
         )
 

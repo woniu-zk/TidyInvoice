@@ -1,4 +1,4 @@
-# InvoiceFlowAI 内置分类规则（L0 默认层）
+# 内置分类规则（L0 默认层）
 #
 # 本文件随应用发布，用户规则按分类 id 逐字段覆盖它：
 #   内置 L0 -> 全局 rules/categories.yaml -> 发票库 rules/categories.yaml

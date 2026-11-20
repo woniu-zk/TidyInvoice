@@ -36,7 +36,7 @@ def test_runtime_hook_uses_frozen_runtime_and_runs_requested_browser_smoke(monke
     monkeypatch.setitem(sys.modules, "playwright.sync_api", sync_api)
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
-    monkeypatch.setenv("INVOICEFLOWAI_PLAYWRIGHT_RUNTIME_SMOKE", "1")
+    monkeypatch.setenv("TIDYINVOICE_PLAYWRIGHT_RUNTIME_SMOKE", "1")
 
     runpy.run_path(str(HOOK_PATH))
 

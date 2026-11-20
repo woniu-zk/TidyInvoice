@@ -3,6 +3,7 @@ import os
 import sys
 from pathlib import Path
 
+from brand_generated import BUILD_IDENTITY_NAME
 from document_types import MANUAL_REVIEW_FOLDER, NON_TARGET_COMPANY_FOLDER
 
 
@@ -13,10 +14,10 @@ BUILD_IDENTITY_FILE = "build-identity.generated.json"
 
 def build_runtime_identity(build_time=None, source_revision=None, build_label=None):
     return {
-        "build_time": str(build_time or os.getenv("INVOICEFLOW_BUILD_TIME") or "").strip() or "development",
-        "baseline": "InvoiceFlowAI",
-        "source_revision": str(source_revision or os.getenv("INVOICEFLOW_BUILD_SOURCE_REVISION") or "").strip() or "snapshot",
-        "build_label": str(build_label or os.getenv("INVOICEFLOW_BUILD_LABEL") or "").strip() or BUILD_LABEL,
+        "build_time": str(build_time or os.getenv("TIDYINVOICE_BUILD_TIME") or "").strip() or "development",
+        "baseline": BUILD_IDENTITY_NAME,
+        "source_revision": str(source_revision or os.getenv("TIDYINVOICE_BUILD_SOURCE_REVISION") or "").strip() or "snapshot",
+        "build_label": str(build_label or os.getenv("TIDYINVOICE_BUILD_LABEL") or "").strip() or BUILD_LABEL,
         "manual_review_folder": MANUAL_REVIEW_FOLDER,
         "non_target_company_folder": NON_TARGET_COMPANY_FOLDER,
         "url_strategy_version": URL_STRATEGY_VERSION,

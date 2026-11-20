@@ -1,3 +1,4 @@
+import json
 import sys
 import types
 import unittest
@@ -83,10 +84,16 @@ class WindowControlContractTests(unittest.TestCase):
 
     def test_frontend_uses_current_repository_link_without_stale_version_copy(self):
         source = (ROOT / "templates" / "index_app.js").read_text(encoding="utf-8")
-        self.assertIn('githubUrl: "https://github.com/EthanYoQ/Invoice-Downloader"', source)
-        self.assertIn('footerVersion: "InvoiceFlowAI"', source)
-        self.assertNotIn("github.com/Ethan-YoungQ/Invoice-Downloader", source)
-        self.assertNotIn('footerVersion: "InvoiceFlowAI v', source)
+        brand_source = (ROOT / "templates" / "brand.generated.js").read_text(encoding="utf-8")
+        brand = json.loads((ROOT / "brand.json").read_text(encoding="utf-8"))
+
+        # 前端只读品牌清单，不自己硬编码仓库地址与版本署名。
+        self.assertIn("window.__APP_BRAND__.githubUrl", source)
+        self.assertIn("window.__APP_BRAND__.footerVersion", source)
+        self.assertNotIn("github.com/", source)
+        self.assertIn(json.dumps(brand["urls"]["repo"]), brand_source)
+        display_name = brand["identity"]["displayName"]["zh"]
+        self.assertNotIn(f'"footerVersion": "{display_name} v', brand_source)
 
 
 class ProviderWrapperContractTests(unittest.TestCase):

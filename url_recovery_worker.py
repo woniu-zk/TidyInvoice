@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from bounded_url_recovery import atomic_write_json
+from brand_generated import NODE_PRELOAD_PREFIX
 from pdf_converter import PDFConverter
 
 
@@ -55,7 +56,7 @@ def _hidden_windows_asyncio_subprocesses():
             mode="w",
             encoding="utf-8",
             newline="\n",
-            prefix="invoiceflow-hide-windows-",
+            prefix=NODE_PRELOAD_PREFIX,
             suffix=".js",
             delete=False,
         ) as preload:

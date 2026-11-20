@@ -37,7 +37,7 @@ for (const file of required) {
 const manifest = JSON.parse(readFileSync(join(packageRoot, 'runtime/engine/MANIFEST.json'), 'utf8'))
 assert.equal(typeof manifest.sourceSha, 'string')
 assert.match(manifest.sourceSha, /^[0-9a-f]{40}$/)
-assert.equal(manifest.sourceRepository, 'https://github.com/EthanYoQ/Invoice-Downloader')
+assert.equal(manifest.sourceRepository, 'https://github.com/woniu-zk/tidyinvoice')
 assert.ok(Array.isArray(manifest.sourceFiles))
 assert.deepEqual((manifest.dataFiles || []).sort(), ['builtin/categories.yaml'])
 

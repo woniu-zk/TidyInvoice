@@ -707,7 +707,11 @@ def _drive_store(store):
     return steps
 
 
-def test_run_state_store_is_semantically_equivalent_to_legacy_oracle():
+def test_run_state_store_is_semantically_equivalent_to_legacy_oracle(monkeypatch):
+    # 两个 store 依次跑同一操作流，日志时间戳来自 wall clock；
+    # 秒级边界会让两次运行取到不同时间，因此冻结时钟后再比对状态。
+    monkeypatch.setattr(time, "strftime", lambda _format: "[00:00:00]")
+
     optimized = RunStateStore()
     oracle = _LegacyRunStateStore()
 

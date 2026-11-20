@@ -32,6 +32,8 @@ from typing import Any
 import yaml
 from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 
+from brand_generated import RULE_FILE_HEADER
+
 from .model import (
     SEVERITY_ERROR,
     SEVERITY_WARNING,
@@ -48,7 +50,7 @@ MAX_BACKUP_DIRS = 20
 _KNOWN_FILE_FIELDS = frozenset({"version", "types"})
 
 _HEADER = (
-    "# InvoiceFlowAI 全局自定义票种\n"
+    RULE_FILE_HEADER + " 全局自定义票种\n"
     "#\n"
     "# 这里登记的票种会在全局规则与各发票库规则中作为 target_type 可选；\n"
     "# 内置票种无需登记，也不能通过本文件删除。\n"

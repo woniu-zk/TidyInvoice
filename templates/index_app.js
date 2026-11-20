@@ -58,17 +58,23 @@ const DEFAULT_PROGRESS = {
     build_identity: null,
 };
 
-const APP_BRAND = {
-    name: "InvoiceFlowAI",
-    subtitle: "AI发票管家",
-};
+// 品牌标识来自 templates/brand.generated.js（由 brand.json 生成，勿手改）。
+// 界面文案（任务模式、结果横幅等）仍在本文件内，后续由 i18n 词表接管。
+if (!window.__APP_BRAND__) {
+    throw new Error("品牌清单未加载：templates/brand.generated.js 必须在 index_app.built.js 之前引入");
+}
+
+const APP_BRAND = Object.freeze({
+    name: window.__APP_BRAND__.name,
+    subtitle: window.__APP_BRAND__.subtitle,
+});
 
 const APP_VISIBLE_COPY = {
-    topSubtitle: "AI发票管家",
-    footerVersion: "InvoiceFlowAI",
-    footerStamp: "P-H-Dx",
-    githubLabel: "产品官网",
-    githubUrl: "https://github.com/EthanYoQ/Invoice-Downloader",
+    topSubtitle: window.__APP_BRAND__.subtitle,
+    footerVersion: window.__APP_BRAND__.footerVersion,
+    footerStamp: window.__APP_BRAND__.footerStamp,
+    githubLabel: window.__APP_BRAND__.githubLabel,
+    githubUrl: window.__APP_BRAND__.githubUrl,
     taskModes: {
         mail: {
             label: "邮箱提取并整理",
@@ -785,9 +791,10 @@ function parentFolder(path) {
     return value.replace(/[/\\][^/\\]+$/, "");
 }
 
-const SESSION_SETTINGS_KEY = "invoiceflow.session.settings";
-const SESSION_RUN_SETTINGS_KEY = "invoiceflow.session.runSettings";
-const CONTROLLED_AUTOSTART_PREFIX = "invoiceflow.controlledAutostart";
+const BRAND_SESSION_PREFIX = window.__APP_BRAND__.sessionStoragePrefix;
+const SESSION_SETTINGS_KEY = `${BRAND_SESSION_PREFIX}.session.settings`;
+const SESSION_RUN_SETTINGS_KEY = `${BRAND_SESSION_PREFIX}.session.runSettings`;
+const CONTROLLED_AUTOSTART_PREFIX = `${BRAND_SESSION_PREFIX}.controlledAutostart`;
 
 function readSessionValue(key) {
     try {
@@ -3963,5 +3970,6 @@ function App() {
     );
 }
 
+document.title = APP_BRAND.name;
 const root = createRoot(document.getElementById("root"));
 root.render(<App />);

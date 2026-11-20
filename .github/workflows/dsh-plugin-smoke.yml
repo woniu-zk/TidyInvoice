@@ -50,11 +50,11 @@ jobs:
           package_tgz="$(find "$GITHUB_WORKSPACE/.runtime/dsh-plugin-artifact" -maxdepth 1 -name '*.tgz' -print -quit)"
           test -n "$package_tgz"
           dsh plugin --profile web add "file:$package_tgz"
-          dsh --profile web --dump-config | grep --fixed-strings '@ethanyoq/dsh-invoice-downloader'
+          dsh --profile web --dump-config | grep --fixed-strings '@woniu-zk/dsh-invoice-downloader'
 
       - name: Install and check the DSH profile-state runtime
         run: |
-          plugin_dir="$(cd "$DSH_HOME/profiles/web" && node -p "require('node:path').dirname(require.resolve('@ethanyoq/dsh-invoice-downloader/package.json'))")"
+          plugin_dir="$(cd "$DSH_HOME/profiles/web" && node -p "require('node:path').dirname(require.resolve('@woniu-zk/dsh-invoice-downloader/package.json'))")"
           runtime_root="$DSH_HOME/invoice-downloader/runtime"
           python3 "$plugin_dir/runtime/install.py" \
             --venv "$runtime_root/.venv" \

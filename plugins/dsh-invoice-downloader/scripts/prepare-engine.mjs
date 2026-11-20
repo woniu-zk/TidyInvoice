@@ -15,6 +15,7 @@ const engineSourceFiles = [
   'archive_pairing.py',
   'archive_service.py',
   'bounded_url_recovery.py',
+  'brand_generated.py',
   'build_identity.py',
   'candidate_pipeline.py',
   'company_rules.py',
@@ -81,6 +82,7 @@ if (!existsSync(join(sourceRoot, 'local_recognition.py'))) {
   throw new Error(`local recognition engine is unavailable at ${sourceRoot}`)
 }
 for (const required of [
+  'brand_generated.py',
   'expense_rules/__init__.py',
   'builtin/categories.yaml',
 ]) {
@@ -111,9 +113,9 @@ const sourceSha = execFileSync('git', ['-C', sourceRoot, 'rev-parse', 'HEAD'], {
 writeFileSync(
   join(engineRoot, 'MANIFEST.json'),
   `${JSON.stringify({
-    sourceRepository: 'https://github.com/EthanYoQ/Invoice-Downloader',
+    sourceRepository: 'https://github.com/woniu-zk/tidyinvoice',
     sourceSha,
-    generatedBy: '@ethanyoq/dsh-invoice-downloader',
+    generatedBy: '@woniu-zk/dsh-invoice-downloader',
     generatedAt: new Date().toISOString(),
     sourceFiles: [...engineSourceFiles, 'ipc/protocol.py'].sort(),
     dataFiles: engineDataFiles,

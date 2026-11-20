@@ -1,5 +1,5 @@
 {
-  "name": "@ethanyoq/dsh-invoice-downloader",
+  "name": "@woniu-zk/dsh-invoice-downloader",
   "version": "0.2.0",
   "description": "Local IMAP invoice download, OCR, archive, and Excel summary bundle for DeepSeek Harness",
   "license": "Apache-2.0",
@@ -8,13 +8,13 @@
   "types": "./lib/index.d.ts",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/EthanYoQ/Invoice-Downloader.git",
+    "url": "git+https://github.com/woniu-zk/tidyinvoice.git",
     "directory": "plugins/dsh-invoice-downloader"
   },
   "bugs": {
-    "url": "https://github.com/EthanYoQ/Invoice-Downloader/issues"
+    "url": "https://github.com/woniu-zk/tidyinvoice/issues"
   },
-  "homepage": "https://github.com/EthanYoQ/Invoice-Downloader#deepseek-harness-plugin",
+  "homepage": "https://github.com/woniu-zk/tidyinvoice#deepseek-harness-plugin",
   "keywords": [
     "deepseek-harness",
     "dsh-plugin",

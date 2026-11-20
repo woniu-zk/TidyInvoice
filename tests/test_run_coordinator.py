@@ -10,6 +10,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from brand_generated import THREAD_NAME_WORKER
+
 
 def _run_reserved(coordinator, request, staging_dir):
     handle = coordinator._lifecycle.begin(request.run_id, staging_dir)
@@ -739,7 +741,7 @@ def test_worker_start_failure_closes_unused_required_report_service(
     original_start = threading.Thread.start
 
     def fail_worker_start(thread):
-        if thread.name == "InvoiceFlowWorker":
+        if thread.name == THREAD_NAME_WORKER:
             raise RuntimeError("private worker start failure")
         return original_start(thread)
 

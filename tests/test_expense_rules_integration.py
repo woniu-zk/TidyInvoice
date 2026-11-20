@@ -81,7 +81,7 @@ def _start_local(api, input_dir: Path, *, split_by_category: bool = True) -> dic
 
 
 def _write_global_rules(tmp_path: Path, body: str) -> Path:
-    path = tmp_path / "AppData" / "Roaming" / "InvoiceFlowAI" / "rules" / "categories.yaml"
+    path = tmp_path / "AppData" / "Roaming" / "TidyInvoice" / "rules" / "categories.yaml"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body, encoding="utf-8")
     return path

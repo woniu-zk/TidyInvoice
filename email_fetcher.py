@@ -15,6 +15,7 @@ import zipfile
 from dataclasses import dataclass
 from urllib.parse import parse_qsl, urlparse, unquote
 from bs4 import BeautifulSoup
+from brand_generated import IMAP_CLIENT_NAME
 from PIL import Image
 from io import BytesIO
 from email_body_receipts import (
@@ -1636,7 +1637,8 @@ class EmailFetcher:
         """发送 RFC 2971 ID 命令（163/88 等 Coremail 邮箱登录后使用）。"""
         tag = self.mail._new_tag()
         deadline = time.monotonic() + IMAP_TIMEOUT_SECONDS
-        self.mail.send(tag + b' ID ("name" "InvoiceFlowAI" "version" "1.0")\r\n')
+        client_name = IMAP_CLIENT_NAME.encode("utf-8")
+        self.mail.send(tag + b' ID ("name" "' + client_name + b'" "version" "1.0")\r\n')
         while time.monotonic() < deadline:
             if self._abort_requested:
                 raise ConnectionAbortedError("IMAP ID command cancelled")

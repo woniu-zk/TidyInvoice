@@ -29,6 +29,8 @@ import subprocess
 import sys
 from typing import Any, Sequence
 
+from brand_generated import BRAND_NAME
+
 from .engine import classify, explain
 from .loader import load_rule_set
 from .model import (
@@ -714,7 +716,7 @@ def _add_match_fields(parser: argparse.ArgumentParser) -> None:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="expense_rules",
-        description="InvoiceFlowAI 分类规则管理（全局规则 / 发票库规则）",
+        description=f"{BRAND_NAME} 分类规则管理（全局规则 / 发票库规则）",
     )
     subparsers = parser.add_subparsers(dest="command")
 

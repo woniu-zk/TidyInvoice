@@ -11,6 +11,7 @@ from pathlib import Path
 
 import fitz
 
+from brand_generated import CANDIDATE_REVISION_ENV_VAR
 from run_evidence import validate_finalized_run_evidence
 from truth_contracts import TruthContractError, TruthManifest
 
@@ -1013,7 +1014,7 @@ def candidate_revision(run_root: Path) -> str:
                 return revision
         except (OSError, json.JSONDecodeError):
             pass
-    override = os.environ.get("INVOICEFLOW_CANDIDATE_REVISION", "").strip()
+    override = os.environ.get(CANDIDATE_REVISION_ENV_VAR, "").strip()
     if override:
         return override
     try:
