@@ -544,6 +544,94 @@ def test_finalizer_thread_start_failure_is_sanitized_and_fails_closed(tmp_path: 
     assert "START-SECRET" not in repr(snapshot)
 
 
+class _FatalSignal(BaseException):
+    """Stand-in for BaseException subclasses such as SystemExit/KeyboardInterrupt."""
+
+
+def test_finalizer_setup_failure_fails_closed_and_releases(tmp_path: Path):
+    from run_coordinator import RunCoordinator, RunDependencies, RunRequest
+    from run_lifecycle import RunLifecycle, RunState
+    from run_state_store import RunStateStore
+
+    class BrokenReportService:
+        def callbacks(self, *_args, **_kwargs):
+            raise ValueError("SETUP-SECRET")
+
+    deps = RunDependencies(
+        connect=lambda _request: object(),
+        scan=lambda *_args: [],
+        report_service=BrokenReportService(),
+    )
+    lifecycle = RunLifecycle()
+    coordinator = RunCoordinator(lifecycle, RunStateStore(), deps)
+    request = RunRequest("setup-fail", "2026-06-01", "2026-06-13", str(tmp_path), "", "q***", "qq")
+    result = _run_reserved(coordinator, request, tmp_path / "staging")
+
+    assert result.state is RunState.FAILED
+    assert "SETUP-SECRET" not in result.error
+    assert "PROCESSING_FAILED" in result.error
+    assert lifecycle.can_begin is True
+    assert lifecycle.owned_staging_count == 0
+    snapshot = coordinator._state.snapshot()
+    assert snapshot["run_state"] == "failed"
+    assert "SETUP-SECRET" not in repr(snapshot)
+
+
+def test_base_exception_in_stage_fails_closed_and_releases(tmp_path: Path):
+    from report_service import ReportService
+    from run_coordinator import RunCoordinator, RunDependencies, RunRequest
+    from run_lifecycle import RunLifecycle, RunState
+    from run_state_store import RunStateStore
+
+    def archive(*_args):
+        raise _FatalSignal("FATAL-SECRET")
+
+    deps = RunDependencies(
+        connect=lambda _request: object(),
+        scan=lambda *_args: ["mail"],
+        candidate=lambda _messages, _request: ["candidate"],
+        extract=lambda _candidates, _request: ["outcome"],
+        archive=archive,
+        report_service=ReportService(),
+    )
+    lifecycle = RunLifecycle()
+    coordinator = RunCoordinator(lifecycle, RunStateStore(), deps)
+    request = RunRequest("fatal-stage", "2026-06-01", "2026-06-13", str(tmp_path), "", "q***", "qq")
+    result = _run_reserved(coordinator, request, tmp_path / "staging")
+
+    assert result.state is RunState.FAILED
+    assert "FATAL-SECRET" not in result.error
+    assert "PROCESSING_FAILED" in result.error
+    assert lifecycle.can_begin is True
+    assert lifecycle.owned_staging_count == 0
+
+
+def test_base_exception_in_finalizer_records_failure_and_releases(tmp_path: Path):
+    from report_service import ReportService
+    from run_coordinator import RunCoordinator, RunDependencies, RunRequest
+    from run_lifecycle import RunLifecycle, RunState
+    from run_state_store import RunStateStore
+
+    def cleanup(_context):
+        raise _FatalSignal("CLEANUP-SECRET")
+
+    deps = RunDependencies(
+        connect=lambda _request: object(),
+        scan=lambda *_args: [],
+        report_service=ReportService(cleanup_callback=cleanup),
+    )
+    lifecycle = RunLifecycle()
+    coordinator = RunCoordinator(lifecycle, RunStateStore(), deps)
+    request = RunRequest("fatal-finalizer", "2026-06-01", "2026-06-13", str(tmp_path), "", "q***", "qq")
+    result = _run_reserved(coordinator, request, tmp_path / "staging")
+
+    assert result.state is RunState.FAILED
+    assert "FINALIZER_CLEANUP_FAILED" in result.error
+    assert "CLEANUP-SECRET" not in result.error
+    assert lifecycle.can_begin is True
+    assert lifecycle.owned_staging_count == 0
+
+
 def test_one_active_run_race_allows_only_one(tmp_path: Path):
     from report_service import ReportService
     from run_coordinator import RunCoordinator, RunDependencies, RunRequest

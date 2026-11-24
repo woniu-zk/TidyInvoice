@@ -44,6 +44,17 @@ class FinalizerCallbackError(RuntimeError):
         super().__init__(f"{self.reason_code}:{type(exc).__name__}:{fingerprint}")
 
 
+class FinalizerSetupError(RuntimeError):
+    """Raised when required finalizer infrastructure is missing.
+
+    The coordinator converts this into a failed run *before* finalizing, so a
+    missing evidence writer can never leave the run stuck in FINALIZING.
+    """
+
+    reason_code = "FINALIZER_SETUP_FAILED"
+    user_message = "运行收尾未能启动，本轮已标记失败。"
+
+
 class _EvidenceCaptureDispatcher:
     """Prestarted dispatcher keeps worker launch off the finalizer thread."""
 
@@ -153,7 +164,7 @@ class ReportService:
 
     def _capture_dispatcher(self) -> _EvidenceCaptureDispatcher:
         if self._evidence_capture_dispatcher is None:
-            raise ValueError("production_evidence_dispatcher_required")
+            raise FinalizerSetupError("production_evidence_dispatcher_required")
         return self._evidence_capture_dispatcher
 
     def close(self) -> None:
@@ -208,7 +219,7 @@ class ReportService:
             self.close()
         if evidence_required:
             if self._evidence_writer is None:
-                raise ValueError("production_evidence_writer_required")
+                raise FinalizerSetupError("production_evidence_writer_required")
             def capture_evidence() -> None:
                 nonlocal evidence_captured
                 dispatcher = self._capture_dispatcher()

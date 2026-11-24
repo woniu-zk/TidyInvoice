@@ -315,7 +315,7 @@ class RunCoordinator:
                     outcome_count=outcome_count,
                     archive_report=archive_report,
                 )
-            except Exception as exc:
+            except BaseException as exc:
                 if isinstance(exc, RunImapCancelled) and exc.run_id == request.run_id and self._cancelled():
                     result = replace(result, cancelled=True)
                 else:
@@ -334,7 +334,7 @@ class RunCoordinator:
 
             try:
                 self._dependencies.state_flush()
-            except Exception as exc:
+            except BaseException as exc:
                 reason_code, user_message, safe_error = self._safe_failure(exc)
                 acquired_handle.fail(
                     exc,
@@ -366,13 +366,47 @@ class RunCoordinator:
             if session is None:
                 try:
                     session = self._dependencies.finalizer_session()
-                except Exception:
+                except BaseException:
                     session = None
             finalizer_callbacks = [("pipeline_close", self._dependencies.pipeline_close)]
-            finalizer_callbacks.extend(
-                self._dependencies.report_service.callbacks(context, result, session)
-            )
-            terminal = acquired_handle.finalize(finalizer_callbacks)
+            try:
+                finalizer_callbacks.extend(
+                    self._dependencies.report_service.callbacks(context, result, session)
+                )
+            except BaseException as exc:
+                # Finalizer setup errors (for example a missing evidence writer)
+                # must fail the run but still let finalize() run and release the
+                # lifecycle slot. Otherwise the UI would stay in FINALIZING.
+                reason_code, user_message, safe_error = self._safe_failure(exc)
+                acquired_handle.fail(
+                    exc,
+                    reason_code=reason_code,
+                    user_message=user_message,
+                )
+                result = replace(
+                    result,
+                    state=RunState.FINALIZING,
+                    reason_code=reason_code,
+                    error=safe_error,
+                )
+            try:
+                terminal = acquired_handle.finalize(finalizer_callbacks)
+            except BaseException as exc:
+                # finalize() releases the handle in a finally block; this guard
+                # only keeps an unexpected failure from escaping the worker.
+                reason_code, user_message, safe_error = self._safe_failure(exc)
+                acquired_handle.fail(
+                    exc,
+                    reason_code=reason_code,
+                    user_message=user_message,
+                )
+                result = replace(
+                    result,
+                    state=RunState.FAILED,
+                    reason_code=reason_code,
+                    error=safe_error,
+                )
+                terminal = acquired_handle.state
             lifecycle_error = acquired_handle.error
             if terminal is RunState.FAILED:
                 reason_code = result.reason_code

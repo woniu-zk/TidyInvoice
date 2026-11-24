@@ -199,41 +199,77 @@ class RunHandle:
             self._finalized.wait()
             return self.state
 
-        self._notify_transition(previous, RunState.FINALIZING)
         callback_failures = []
-        for item in callbacks:
-            if isinstance(item, tuple):
-                callback_name, callback = item
-            else:
-                callback = item
-                callback_name = getattr(callback, "__name__", "callback")
-            safe_name = _safe_callback_name(callback_name)
-            try:
-                callback()
-            except Exception as exc:
-                reason_code = getattr(exc, "reason_code", "") or f"FINALIZER_{safe_name.upper()}_FAILED"
-                user_message = getattr(exc, "user_message", "") or _FINALIZER_MESSAGES.get(
-                    safe_name,
-                    "运行收尾步骤失败。",
-                )
-                callback_failures.append(
-                    _failure_detail(
-                        exc,
-                        reason_code=reason_code,
-                        user_message=user_message,
-                        callback=safe_name,
+        terminal = RunState.FAILED
+        try:
+            self._notify_transition(previous, RunState.FINALIZING)
+            for item in callbacks:
+                if isinstance(item, tuple):
+                    callback_name, callback = item
+                else:
+                    callback = item
+                    callback_name = getattr(callback, "__name__", "callback")
+                safe_name = _safe_callback_name(callback_name)
+                try:
+                    callback()
+                except BaseException as exc:
+                    # BaseException is deliberate: a failing finalizer (even
+                    # SystemExit/KeyboardInterrupt from a worker) must not leave
+                    # the run handle stuck in FINALIZING and leak the lifecycle.
+                    reason_code = getattr(exc, "reason_code", "") or f"FINALIZER_{safe_name.upper()}_FAILED"
+                    user_message = getattr(exc, "user_message", "") or _FINALIZER_MESSAGES.get(
+                        safe_name,
+                        "运行收尾步骤失败。",
                     )
+                    callback_failures.append(
+                        _failure_detail(
+                            exc,
+                            reason_code=reason_code,
+                            user_message=user_message,
+                            callback=safe_name,
+                        )
+                    )
+        except BaseException as exc:
+            # Same guarantee for transition listeners: never leave FINALIZING.
+            callback_failures.append(
+                _failure_detail(
+                    exc,
+                    reason_code=getattr(exc, "reason_code", "") or "FINALIZE_CRASHED",
+                    user_message=getattr(exc, "user_message", "") or "运行收尾失败。",
                 )
+            )
+        finally:
+            with self._lock:
+                self._finalizer_failures = tuple(callback_failures)
+                terminal = (
+                    RunState.FAILED
+                    if self._primary_failure or callback_failures
+                    else RunState.COMPLETED
+                )
+                previous = self._state
+                self._state = terminal
 
-        with self._lock:
-            self._finalizer_failures = tuple(callback_failures)
-            terminal = RunState.FAILED if self._primary_failure or callback_failures else RunState.COMPLETED
-            previous = self._state
-            self._state = terminal
-
-        self._notify_transition(previous, terminal)
-        self._lifecycle._release(self)
-        self._finalized.set()
+            try:
+                self._notify_transition(previous, terminal)
+            except BaseException as exc:
+                # A terminal listener is observability, not business outcome: the
+                # handle is already terminal, so record it and keep going.
+                with self._lock:
+                    self._finalizer_failures = (
+                        *self._finalizer_failures,
+                        _failure_detail(
+                            exc,
+                            reason_code="FINALIZE_NOTIFY_FAILED",
+                            user_message="运行状态通知失败。",
+                        ),
+                    )
+            finally:
+                # Release the run slot and wake waiters even if the terminal
+                # transition listener itself raises.
+                try:
+                    self._lifecycle._release(self)
+                finally:
+                    self._finalized.set()
         return terminal
 
 
