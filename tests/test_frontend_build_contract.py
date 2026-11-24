@@ -987,3 +987,14 @@ def test_rules_page_top_level_cards_never_flex_shrink_into_slivers():
     assert ".rules-layout, .rules-tools-layout, .rules-types-layout { grid-template-columns: 1fr; }" in html
     assert ".rules-editor-grid, .rules-test-grid, .rules-kv-list, .rule-dictionary-form, .rules-builtin-row { grid-template-columns: 1fr; }" in html
     assert html.count("flex: 0 0 auto") >= 5
+
+
+def test_root_render_is_wrapped_in_an_error_boundary():
+    source = _read(SOURCE_PATH)
+    built = _decode_js_unicode_escapes(_read(BUILT_PATH))
+
+    assert "class ErrorBoundary" in source
+    assert "root.render(<ErrorBoundary><App /></ErrorBoundary>)" in source
+    assert "界面加载失败" in source
+    assert "ErrorBoundary" in built
+    assert "root.render(" in built

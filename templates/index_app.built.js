@@ -4794,6 +4794,84 @@ function RulesPage({
     }
   }));
 }
+const ReactComponentBase = React && React.Component || class ReactComponentFallback {
+  constructor(props) {
+    this.props = props;
+    this.state = {};
+  }
+  setState(next) {
+    this.state = {
+      ...this.state,
+      ...next
+    };
+  }
+};
+class ErrorBoundary extends ReactComponentBase {
+  constructor(props) {
+    super(props);
+    this.state = {
+      error: null
+    };
+  }
+  static getDerivedStateFromError(error) {
+    return {
+      error
+    };
+  }
+  componentDidCatch(error) {
+    if (window.console && console.error) {
+      console.error("interface render failed", error);
+    }
+  }
+  render() {
+    if (this.state.error) {
+      return /*#__PURE__*/React.createElement("div", {
+        style: {
+          minHeight: "100vh",
+          padding: "48px",
+          background: "#0f172a",
+          color: "#e5e7eb"
+        }
+      }, /*#__PURE__*/React.createElement("h1", {
+        style: {
+          fontSize: "20px",
+          marginBottom: "12px"
+        }
+      }, "\u754C\u9762\u52A0\u8F7D\u5931\u8D25"), /*#__PURE__*/React.createElement("p", {
+        style: {
+          marginBottom: "20px",
+          color: "#cbd5e1"
+        }
+      }, "\u8BF7\u5173\u95ED\u5E94\u7528\u540E\u91CD\u65B0\u6253\u5F00\uFF1B\u82E5\u95EE\u9898\u6301\u7EED\uFF0C\u8BF7\u67E5\u770B\u8BCA\u65AD\u65E5\u5FD7\u3002"), /*#__PURE__*/React.createElement("button", {
+        type: "button",
+        onClick: () => window.location.reload(),
+        style: {
+          padding: "8px 16px",
+          borderRadius: "6px",
+          border: "1px solid #475569",
+          background: "#1e293b",
+          color: "#e5e7eb"
+        }
+      }, "\u91CD\u65B0\u52A0\u8F7D"));
+    }
+    return this.props.children;
+  }
+}
+function reportClientFatal(detail) {
+  try {
+    console.error("interface fatal", detail);
+  } catch (_error) {
+    // Console may be unavailable in the packaged shell.
+  }
+  const container = document.getElementById("root");
+  if (container && !container.hasChildNodes()) {
+    container.textContent = "界面加载失败，请重新打开应用。";
+  }
+}
+if (typeof window.addEventListener === "function") {
+  window.addEventListener("error", event => reportClientFatal(event.error || event.message));
+  window.addEventListener("unhandledrejection", event => reportClientFatal(event.reason));
+}
 function App() {
   const [showDisclaimer, setShowDisclaimer] = useState(false);
   return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(MemoryRouter, null, /*#__PURE__*/React.createElement(Routes, null, /*#__PURE__*/React.createElement(Route, {
@@ -4823,4 +4901,4 @@ function App() {
 }
 document.title = APP_BRAND.name;
 const root = createRoot(document.getElementById("root"));
-root.render( /*#__PURE__*/React.createElement(App, null));
+root.render( /*#__PURE__*/React.createElement(ErrorBoundary, null, /*#__PURE__*/React.createElement(App, null)));

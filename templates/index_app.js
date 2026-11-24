@@ -3953,6 +3953,70 @@ function RulesPage({ onOpenDisclaimer }) {
     );
 }
 
+const ReactComponentBase = (React && React.Component) || class ReactComponentFallback {
+    constructor(props) {
+        this.props = props;
+        this.state = {};
+    }
+
+    setState(next) {
+        this.state = { ...this.state, ...next };
+    }
+};
+
+class ErrorBoundary extends ReactComponentBase {
+    constructor(props) {
+        super(props);
+        this.state = { error: null };
+    }
+
+    static getDerivedStateFromError(error) {
+        return { error };
+    }
+
+    componentDidCatch(error) {
+        if (window.console && console.error) {
+            console.error("interface render failed", error);
+        }
+    }
+
+    render() {
+        if (this.state.error) {
+            return (
+                <div style={{ minHeight: "100vh", padding: "48px", background: "#0f172a", color: "#e5e7eb" }}>
+                    <h1 style={{ fontSize: "20px", marginBottom: "12px" }}>界面加载失败</h1>
+                    <p style={{ marginBottom: "20px", color: "#cbd5e1" }}>请关闭应用后重新打开；若问题持续，请查看诊断日志。</p>
+                    <button
+                        type="button"
+                        onClick={() => window.location.reload()}
+                        style={{ padding: "8px 16px", borderRadius: "6px", border: "1px solid #475569", background: "#1e293b", color: "#e5e7eb" }}
+                    >
+                        重新加载
+                    </button>
+                </div>
+            );
+        }
+        return this.props.children;
+    }
+}
+
+function reportClientFatal(detail) {
+    try {
+        console.error("interface fatal", detail);
+    } catch (_error) {
+        // Console may be unavailable in the packaged shell.
+    }
+    const container = document.getElementById("root");
+    if (container && !container.hasChildNodes()) {
+        container.textContent = "界面加载失败，请重新打开应用。";
+    }
+}
+
+if (typeof window.addEventListener === "function") {
+    window.addEventListener("error", (event) => reportClientFatal(event.error || event.message));
+    window.addEventListener("unhandledrejection", (event) => reportClientFatal(event.reason));
+}
+
 function App() {
     const [showDisclaimer, setShowDisclaimer] = useState(false);
     return (
@@ -3972,4 +4036,4 @@ function App() {
 
 document.title = APP_BRAND.name;
 const root = createRoot(document.getElementById("root"));
-root.render(<App />);
+root.render(<ErrorBoundary><App /></ErrorBoundary>);
