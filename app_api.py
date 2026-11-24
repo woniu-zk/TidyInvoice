@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from brand_generated import TEMP_DIR_PREFIX, THREAD_NAME_TRUTH_AUDIT, THREAD_NAME_WORKER
+from app_services.exports import write_result_detail_workbook
 from build_identity import load_build_identity
 from company_rules import DEFAULT_COMPANY
 from document_types import (
@@ -6379,92 +6380,25 @@ class InvoiceAppAPI:
             return {"success": False, "message": f"打开失败: {str(e)}"}
 
     def export_run_summary(self, export_path=""):
-        try:
-            from openpyxl import Workbook
-        except ImportError:
-            return {"success": False, "message": "缺少 openpyxl 依赖，无法导出 Excel"}
-
-        target_dir = export_path or self._effective_save_path or self._requested_save_path or self.get_default_save_path()
+        target_dir = (
+            export_path
+            or self._effective_save_path
+            or self._requested_save_path
+            or self.get_default_save_path()
+        )
         if export_path and self._bridge_path_rejects_unc_or_traversal(export_path):
             return {"success": False, "message": "导出目录不可用"}
         os.makedirs(target_dir, exist_ok=True)
-
-        def _parse_amount(value):
-            text = str(value or "").strip()
-            if not text:
-                return 0.0
-            cleaned = re.sub(r"[^\d.\-]", "", text)
-            if not cleaned:
-                return 0.0
-            try:
-                return float(cleaned)
-            except Exception:
-                return 0.0
-
-        def _append_text_row(sheet, values, text_columns):
-            clean = [
-                re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "\ufffd", str(value or ""))
-                if index in text_columns else value
-                for index, value in enumerate(values)
-            ]
-            sheet.append(clean)
-            for index in text_columns:
-                sheet.cell(sheet.max_row, index + 1).data_type = "s"
-
-        workbook = Workbook()
-        summary_sheet = workbook.active
-        summary_sheet.title = "分类汇总"
-        summary_sheet.append(["发票分类", "数量", "金额合计"])
-
-        category_summary = {}
-        for item in self.processed_invoices:
-            category = str(item.get("category") or "未分类")
-            bucket = category_summary.setdefault(category, {"count": 0, "amount": 0.0})
-            bucket["count"] += 1
-            bucket["amount"] += _parse_amount(item.get("amount", ""))
-
-        if category_summary:
-            for category in sorted(category_summary.keys()):
-                bucket = category_summary[category]
-                _append_text_row(summary_sheet, [category, bucket["count"], round(bucket["amount"], 2)], {0})
-        else:
-            summary_sheet.append(["暂无成功记录", 0, 0.0])
-
-        success_sheet = workbook.create_sheet("成功明细")
-        success_sheet.append(
-            ["日期", "金额", "销售方", "分类", "文件路径", "类目ID", "归类来源", "命中规则"]
+        export_file = write_result_detail_workbook(
+            target_dir,
+            self.processed_invoices,
+            self._group_error_invoices(),
         )
-        for item in self.processed_invoices:
-            _append_text_row(success_sheet, [
-                item.get("date", ""),
-                item.get("amount", ""),
-                item.get("merchant", ""),
-                item.get("category", ""),
-                item.get("path", ""),
-                item.get("category_id", ""),
-                item.get("classification_source", ""),
-                item.get("classification_rule", ""),
-            ], set(range(8)))
-
-        error_sheet = workbook.create_sheet("异常记录")
-        error_sheet.append(["分组", "状态", "原因", "日期", "金额", "销售方", "文件名", "文件路径"])
-        for group in self._group_error_invoices():
-            for item in group.get("items", []):
-                _append_text_row(error_sheet, [
-                    group.get("label", ""),
-                    item.get("status", ""),
-                    item.get("reason", ""),
-                    item.get("date", ""),
-                    item.get("amount", ""),
-                    item.get("merchant", ""),
-                    item.get("name", ""),
-                    item.get("path", ""),
-                ], set(range(8)))
-
-        export_file = os.path.join(target_dir, f"结果明细_{time.strftime('%Y%m%d_%H%M%S')}.xlsx")
-        workbook.save(export_file)
+        if export_file is None:
+            return {"success": False, "message": "缺少 openpyxl 依赖，无法导出 Excel"}
         self._last_export_path = export_file
         return {"success": True, "message": "结果明细已导出", "path": export_file}
+
 
 if __name__ == "__main__":
     # 提供 CLI 测试入口
