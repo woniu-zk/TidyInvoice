@@ -17,6 +17,7 @@ The produced payload keeps the legacy payload shape consumed by
 from __future__ import annotations
 
 import hashlib
+import io
 import logging
 import os
 import re
@@ -49,6 +50,19 @@ MAX_OCR_PAGES = 2
 OCR_RENDER_DPI = 200
 OCR_LINE_Y_TOLERANCE = 10.0
 
+# Bounded local recognition: pathological attachments must degrade to manual
+# review instead of holding a worker (and the shared OCR lock) indefinitely.
+MAX_LOCAL_RECOGNITION_SECONDS = 15.0
+OCR_CALL_TIMEOUT_SECONDS = 15.0
+MAX_ABANDONED_OCR_JOBS = 2
+MAX_IMAGE_PIXELS = 40_000_000
+MAX_OCR_IMAGE_EDGE = 4000
+OCR_DOWNSCALE_EDGE = 3000
+MAX_OFD_MEMBERS = 512
+MAX_OFD_MEMBER_BYTES = 32 * 1024 * 1024
+MAX_OFD_TOTAL_BYTES = 128 * 1024 * 1024
+MAX_XML_BYTES = 20 * 1024 * 1024
+
 # Below this amount of useful characters a PDF text layer is treated as empty
 # (scanned documents often carry only a header/footer text layer).
 MIN_USEFUL_TEXT_CHARS = 40
@@ -67,6 +81,9 @@ REASON_TEXT_UNAVAILABLE = "LOCAL_TEXT_UNAVAILABLE"
 REASON_OCR_UNAVAILABLE = "LOCAL_OCR_ENGINE_UNAVAILABLE"
 REASON_UNSUPPORTED = "LOCAL_UNSUPPORTED_SOURCE"
 REASON_NOT_INVOICE = "LOCAL_NOT_INVOICE"
+REASON_SOURCE_TOO_LARGE = "LOCAL_SOURCE_TOO_LARGE"
+REASON_TIMEOUT = "LOCAL_RECOGNITION_TIMEOUT"
+REASON_OCR_BUDGET_EXHAUSTED = "LOCAL_OCR_BUDGET_EXHAUSTED"
 
 # Structured supporting documents that the deterministic rules can classify even
 # though they are not single invoices.
@@ -133,6 +150,105 @@ _OCR_ENGINE_ERROR: BaseException | None = None
 # The pipeline may run two extraction workers; RapidOCR/ONNX inference is
 # serialized to avoid concurrent use of one engine instance.
 _OCR_INFERENCE_LOCK = threading.Lock()
+
+
+class _OcrBudget:
+    """Bounds abandoned OCR jobs so a stuck engine cannot pin the pipeline."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._abandoned = 0
+
+    def reset(self) -> None:
+        with self._lock:
+            self._abandoned = 0
+
+    def ensure_available(self) -> None:
+        with self._lock:
+            if self._abandoned >= MAX_ABANDONED_OCR_JOBS:
+                raise LocalRecognitionUnavailable(
+                    REASON_OCR_BUDGET_EXHAUSTED,
+                    "local OCR budget exhausted for this run",
+                )
+
+    def record_abandoned(self) -> None:
+        with self._lock:
+            self._abandoned += 1
+
+
+_OCR_BUDGET = _OcrBudget()
+
+
+def begin_ocr_run() -> None:
+    """Reset the per-run OCR budget at the start of an extraction pass."""
+    _OCR_BUDGET.reset()
+
+
+def _check_deadline(deadline: float | None, stage: str) -> None:
+    if deadline is not None and time.monotonic() > deadline:
+        raise LocalRecognitionUnavailable(
+            REASON_TIMEOUT,
+            f"local recognition deadline exceeded before {stage}",
+        )
+
+
+def _remaining_seconds(deadline: float | None) -> float:
+    if deadline is None:
+        return OCR_CALL_TIMEOUT_SECONDS
+    return max(0.1, min(OCR_CALL_TIMEOUT_SECONDS, deadline - time.monotonic()))
+
+
+def _read_xml_text(path: str | Path) -> str:
+    try:
+        size = os.path.getsize(str(path))
+    except OSError as exc:
+        raise LocalRecognitionUnavailable("LOCAL_XML_UNREADABLE", str(exc)) from exc
+    if size > MAX_XML_BYTES:
+        raise LocalRecognitionUnavailable(
+            REASON_SOURCE_TOO_LARGE,
+            f"XML exceeds {MAX_XML_BYTES} bytes",
+        )
+    try:
+        raw = Path(path).read_bytes()
+    except OSError as exc:
+        raise LocalRecognitionUnavailable("LOCAL_XML_UNREADABLE", str(exc)) from exc
+    if b"<!doctype" in raw[:8192].lower():
+        raise LocalRecognitionUnavailable(
+            "LOCAL_XML_DOCTYPE_REJECTED",
+            "XML with a DOCTYPE declaration is not accepted",
+        )
+    return raw.decode("utf-8", errors="replace")
+
+
+def _prepare_ocr_image_bytes(image_bytes: bytes) -> bytes:
+    """Reject oversized images and downscale only the OCR input."""
+    try:
+        from PIL import Image
+    except Exception:  # pragma: no cover - Pillow is a pinned dependency
+        return image_bytes
+    try:
+        with Image.open(io.BytesIO(image_bytes)) as image:
+            width, height = image.size
+            if width * height > MAX_IMAGE_PIXELS:
+                raise LocalRecognitionUnavailable(
+                    REASON_SOURCE_TOO_LARGE,
+                    f"image exceeds {MAX_IMAGE_PIXELS} pixels",
+                )
+            longest = max(width, height)
+            if longest <= MAX_OCR_IMAGE_EDGE:
+                return image_bytes
+            scale = OCR_DOWNSCALE_EDGE / float(longest)
+            resized = image.convert("RGB").resize(
+                (max(1, int(width * scale)), max(1, int(height * scale))),
+                Image.LANCZOS,
+            )
+            buffer = io.BytesIO()
+            resized.save(buffer, format="PNG")
+            return buffer.getvalue()
+    except LocalRecognitionUnavailable:
+        raise
+    except Exception:
+        return image_bytes
 
 
 def _load_ocr_engine() -> Any:
@@ -272,9 +388,41 @@ def read_pdf_text(path: str | Path, max_pages: int = MAX_PDF_TEXT_PAGES) -> str:
     return "\n".join(part for part in parts if part).strip()
 
 
-def _ocr_blocks_from_bytes(engine: Any, image_bytes: bytes) -> list[tuple[float, float, str]]:
-    with _OCR_INFERENCE_LOCK:
-        result, _elapsed = engine(image_bytes)
+def _ocr_blocks_from_bytes(
+    engine: Any,
+    image_bytes: bytes,
+    *,
+    deadline: float | None = None,
+) -> list[tuple[float, float, str]]:
+    image_bytes = _prepare_ocr_image_bytes(image_bytes)
+    _OCR_BUDGET.ensure_available()
+    timeout = _remaining_seconds(deadline)
+    done = threading.Event()
+    outcome: dict[str, Any] = {}
+
+    def runner() -> None:
+        try:
+            with _OCR_INFERENCE_LOCK:
+                outcome["value"] = engine(image_bytes)
+        except BaseException as exc:  # propagated to the waiting caller
+            outcome["error"] = exc
+        finally:
+            done.set()
+
+    thread = threading.Thread(target=runner, name="LocalOCR", daemon=True)
+    thread.start()
+    if not done.wait(timeout):
+        # The engine cannot be interrupted in-process; record the abandonment
+        # and let the late result finish in the background. The per-run budget
+        # prevents this from accumulating on pathological files.
+        _OCR_BUDGET.record_abandoned()
+        raise LocalRecognitionUnavailable(
+            REASON_TIMEOUT,
+            f"local OCR exceeded {timeout:.1f}s",
+        )
+    if "error" in outcome:
+        raise outcome["error"]
+    result, _elapsed = outcome.get("value") or (None, None)
     blocks: list[tuple[float, float, str]] = []
     for item in result or []:
         try:
@@ -298,12 +446,14 @@ def read_pdf_ocr_text(
     max_pages: int = MAX_OCR_PAGES,
     dpi: int = OCR_RENDER_DPI,
     ocr_engine: Any = None,
+    deadline: float | None = None,
 ) -> str:
     engine = ocr_engine or _load_ocr_engine()
     fitz = _require_fitz()
     page_texts: list[str] = []
     with fitz.open(str(path)) as document:
         for page_index in range(min(max_pages, len(document))):
+            _check_deadline(deadline, "PDF OCR page render")
             try:
                 page = document.load_page(page_index)
                 pixmap = page.get_pixmap(dpi=dpi, alpha=False)
@@ -311,20 +461,23 @@ def read_pdf_ocr_text(
             except Exception as exc:
                 logger.debug("PDF render failed for OCR: %s", exc)
                 continue
-            blocks = _ocr_blocks_from_bytes(engine, image_bytes)
+            blocks = _ocr_blocks_from_bytes(engine, image_bytes, deadline=deadline)
             lines = _iter_lines_y_ordered(blocks, OCR_LINE_Y_TOLERANCE)
             if lines:
                 page_texts.append("\n".join(lines))
     return "\n\n".join(page_texts).strip()
 
 
-def read_image_ocr_text(path: str | Path, *, ocr_engine: Any = None) -> str:
+def read_image_ocr_text(
+    path: str | Path, *, ocr_engine: Any = None, deadline: float | None = None
+) -> str:
     engine = ocr_engine or _load_ocr_engine()
+    _check_deadline(deadline, "image OCR")
     try:
         image_bytes = Path(path).read_bytes()
     except OSError as exc:
         raise LocalRecognitionUnavailable("LOCAL_IMAGE_UNREADABLE", str(exc)) from exc
-    blocks = _ocr_blocks_from_bytes(engine, image_bytes)
+    blocks = _ocr_blocks_from_bytes(engine, image_bytes, deadline=deadline)
     lines = _iter_lines_y_ordered(blocks, OCR_LINE_Y_TOLERANCE)
     return "\n".join(lines).strip()
 
@@ -354,6 +507,26 @@ def read_ofd_text(path: str | Path) -> str:
     blocks: list[tuple[float, float, str]] = []
     try:
         with zipfile.ZipFile(str(path)) as archive:
+            infos = archive.infolist()
+            if len(infos) > MAX_OFD_MEMBERS:
+                raise LocalRecognitionUnavailable(
+                    REASON_SOURCE_TOO_LARGE,
+                    f"OFD contains more than {MAX_OFD_MEMBERS} members",
+                )
+            total_bytes = 0
+            for info in infos:
+                member_size = int(getattr(info, "file_size", 0) or 0)
+                if member_size > MAX_OFD_MEMBER_BYTES:
+                    raise LocalRecognitionUnavailable(
+                        REASON_SOURCE_TOO_LARGE,
+                        "OFD member exceeds the per-member size limit",
+                    )
+                total_bytes += member_size
+            if total_bytes > MAX_OFD_TOTAL_BYTES:
+                raise LocalRecognitionUnavailable(
+                    REASON_SOURCE_TOO_LARGE,
+                    "OFD exceeds the total uncompressed size limit",
+                )
             content_names = [
                 name
                 for name in archive.namelist()
@@ -394,23 +567,24 @@ def read_document_text(
     path: str | Path,
     *,
     ocr_engine: Any = None,
+    deadline: float | None = None,
 ) -> tuple[str, str]:
     """Return ``(text, engine)`` for any supported document; never touches network."""
     suffix = Path(path).suffix.lower()
     if suffix in OFD_EXTENSIONS:
         return read_ofd_text(path), ENGINE_OFD_TEXT
     if suffix in XML_EXTENSIONS:
-        try:
-            return Path(path).read_text(encoding="utf-8", errors="replace"), ENGINE_XML
-        except OSError as exc:
-            raise LocalRecognitionUnavailable("LOCAL_XML_UNREADABLE", str(exc)) from exc
+        return _read_xml_text(path), ENGINE_XML
     if suffix in IMAGE_EXTENSIONS:
-        return read_image_ocr_text(path, ocr_engine=ocr_engine), ENGINE_OCR_IMAGE
+        return (
+            read_image_ocr_text(path, ocr_engine=ocr_engine, deadline=deadline),
+            ENGINE_OCR_IMAGE,
+        )
     if suffix in PDF_TEXT_EXTENSIONS:
         text = read_pdf_text(path)
         if len(_compact(text)) >= MIN_USEFUL_TEXT_CHARS:
             return text, ENGINE_PDF_TEXT
-        ocr_text = read_pdf_ocr_text(path, ocr_engine=ocr_engine)
+        ocr_text = read_pdf_ocr_text(path, ocr_engine=ocr_engine, deadline=deadline)
         return ocr_text, ENGINE_OCR_PDF
     raise LocalRecognitionUnavailable(REASON_UNSUPPORTED, f"unsupported source: {suffix}")
 
@@ -1251,21 +1425,21 @@ def recognize_document(
 ) -> RecognitionResult:
     """Recognize one invoice document locally. Never performs network access."""
     started = time.perf_counter()
+    deadline = started + MAX_LOCAL_RECOGNITION_SECONDS
     try:
         if not path or not os.path.exists(str(path)):
             raise LocalRecognitionUnavailable("LOCAL_SOURCE_MISSING")
         suffix = Path(path).suffix.lower()
         if suffix in XML_EXTENSIONS:
-            try:
-                xml_text = Path(path).read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                xml_text = ""
+            xml_text = _read_xml_text(path)
             if xml_text.strip():
                 result = _xml_payload(xml_text)
             else:  # binary/encoded XML -> let the field rules try the decoded text
                 result = extract_invoice_payload("", engine=ENGINE_XML)
         else:
-            text, engine = read_document_text(path, ocr_engine=ocr_engine)
+            text, engine = read_document_text(
+                path, ocr_engine=ocr_engine, deadline=deadline
+            )
             compact_length = len(_compact(text))
             if compact_length < 10:
                 result = RecognitionResult(
@@ -1282,23 +1456,28 @@ def recognize_document(
                 ENGINE_QR_IMAGE if suffix in IMAGE_EXTENSIONS else ENGINE_QR_PDF
             )
             qr_payloads: list[str] = []
-            needs_qr = result.payload is None
+            payload_invoice_number = str(
+                (result.payload or {}).get("InvoiceNumber") or ""
+            ).strip()
             if suffix in IMAGE_EXTENSIONS:
-                qr_payloads = decode_qr_payloads(path)
-                if not needs_qr:
-                    invoice_info = result.payload or {}
-                    text_hint = any(hint in text for hint in QR_INVOICE_TEXT_HINTS)
-                    invoice_qr = any(
-                        _is_invoice_issuing_qr(payload) for payload in qr_payloads
-                    )
-                    # Receipts/photos carry the invoice-issuing QR as their real
-                    # content; do not let a weak text match hide that.
-                    needs_qr = bool(
-                        not str(invoice_info.get("InvoiceNumber") or "").strip()
-                        and (text_hint or invoice_qr)
-                    )
-            elif suffix in PDF_TEXT_EXTENSIONS and needs_qr:
-                qr_payloads = decode_qr_payloads(path)
+                needs_qr = result.payload is None or not payload_invoice_number
+                if needs_qr:
+                    _check_deadline(deadline, "QR decode")
+                    qr_payloads = decode_qr_payloads(path)
+                    if result.payload is not None:
+                        text_hint = any(hint in text for hint in QR_INVOICE_TEXT_HINTS)
+                        invoice_qr = any(
+                            _is_invoice_issuing_qr(payload) for payload in qr_payloads
+                        )
+                        # Receipts/photos carry the invoice-issuing QR as their
+                        # real content; only override a weak text payload when
+                        # there is positive QR evidence.
+                        needs_qr = bool(text_hint or invoice_qr)
+            else:
+                needs_qr = result.payload is None
+                if needs_qr:
+                    _check_deadline(deadline, "QR decode")
+                    qr_payloads = decode_qr_payloads(path)
             if needs_qr:
                 qr_result = _build_qr_invoice_payload(
                     text,

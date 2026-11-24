@@ -249,6 +249,11 @@ class ExtractionPipeline:
         progress_total: int | None = None,
         _emit_progress_events: bool = True,
     ) -> list[ExtractionOutcome]:
+        from local_recognition import begin_ocr_run
+
+        # One extraction pass gets one OCR budget; pathological documents can
+        # spend at most a couple of abandoned jobs before degrading to review.
+        begin_ocr_run()
         ordered = [
             candidate
             for _original_index, candidate in sorted(

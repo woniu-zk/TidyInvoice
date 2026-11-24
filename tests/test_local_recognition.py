@@ -593,5 +593,119 @@ def test_embedded_pdf_text_is_cached_per_file_and_invalidated(tmp_path: Path, mo
     assert calls["count"] == 2
 
 
+# ---------------------------------------------------------------------------
+# Resource limits / bounded OCR
+# ---------------------------------------------------------------------------
+
+def _write_png(path: Path, size=(40, 40)) -> Path:
+    Image = pytest.importorskip("PIL.Image")
+    Image.new("RGB", size, "white").save(str(path))
+    return path
+
+
+def test_ofd_member_limit_fails_closed(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(lr, "MAX_OFD_MEMBERS", 2)
+    ofd = tmp_path / "bomb.ofd"
+    with zipfile.ZipFile(ofd, "w") as archive:
+        archive.writestr("a/Content.xml", "<x/>")
+        archive.writestr("b/Content.xml", "<x/>")
+        archive.writestr("c/Content.xml", "<x/>")
+
+    with pytest.raises(lr.LocalRecognitionUnavailable) as excinfo:
+        lr.read_ofd_text(ofd)
+
+    assert excinfo.value.reason_code == lr.REASON_SOURCE_TOO_LARGE
+
+
+def test_xml_doctype_is_rejected(tmp_path: Path):
+    xml = tmp_path / "invoice.xml"
+    xml.write_text(
+        '<!DOCTYPE foo [<!ENTITY bar "baz">]><root/>',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(lr.LocalRecognitionUnavailable) as excinfo:
+        lr._read_xml_text(xml)
+
+    assert excinfo.value.reason_code == "LOCAL_XML_DOCTYPE_REJECTED"
+
+
+def test_xml_size_limit_fails_closed(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(lr, "MAX_XML_BYTES", 8)
+    xml = tmp_path / "invoice.xml"
+    xml.write_text("<root>1234567890</root>", encoding="utf-8")
+
+    with pytest.raises(lr.LocalRecognitionUnavailable) as excinfo:
+        lr._read_xml_text(xml)
+
+    assert excinfo.value.reason_code == lr.REASON_SOURCE_TOO_LARGE
+
+
+def test_oversized_image_is_rejected_before_ocr(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(lr, "MAX_IMAGE_PIXELS", 100)
+    image = _write_png(tmp_path / "big.png", (40, 40))
+
+    with pytest.raises(lr.LocalRecognitionUnavailable) as excinfo:
+        lr._prepare_ocr_image_bytes(image.read_bytes())
+
+    assert excinfo.value.reason_code == lr.REASON_SOURCE_TOO_LARGE
+
+
+def test_ocr_timeout_degrades_with_reason_code(tmp_path: Path, monkeypatch):
+    import time as time_module
+
+    monkeypatch.setattr(lr, "OCR_CALL_TIMEOUT_SECONDS", 0.1)
+    lr.begin_ocr_run()
+    image = _write_png(tmp_path / "slow.png")
+
+    def slow(_bytes):
+        time_module.sleep(0.5)
+        return [], []
+
+    try:
+        with pytest.raises(lr.LocalRecognitionUnavailable) as excinfo:
+            lr.read_image_ocr_text(image, ocr_engine=slow)
+        assert excinfo.value.reason_code == lr.REASON_TIMEOUT
+    finally:
+        lr.begin_ocr_run()
+
+
+def test_ocr_budget_exhausts_after_abandoned_jobs(tmp_path: Path, monkeypatch):
+    import time as time_module
+
+    monkeypatch.setattr(lr, "OCR_CALL_TIMEOUT_SECONDS", 0.05)
+    lr.begin_ocr_run()
+    image = _write_png(tmp_path / "slow.png")
+
+    def slow(_bytes):
+        time_module.sleep(0.3)
+        return [], []
+
+    try:
+        for _ in range(lr.MAX_ABANDONED_OCR_JOBS):
+            with pytest.raises(lr.LocalRecognitionUnavailable):
+                lr.read_image_ocr_text(image, ocr_engine=slow)
+        with pytest.raises(lr.LocalRecognitionUnavailable) as excinfo:
+            lr.read_image_ocr_text(image, ocr_engine=slow)
+        assert excinfo.value.reason_code == lr.REASON_OCR_BUDGET_EXHAUSTED
+    finally:
+        lr.begin_ocr_run()
+
+
+def test_image_with_invoice_number_skips_qr_decode(tmp_path: Path, monkeypatch):
+    image = _write_png(tmp_path / "receipt.png")
+    qr_calls = []
+    monkeypatch.setattr(
+        lr, "decode_qr_payloads", lambda *_args, **_kwargs: qr_calls.append(1) or []
+    )
+    engine = FakeOcrEngine(SAMPLE_EINVOICE_TEXT.splitlines())
+
+    result = lr.recognize_document(image, ocr_engine=engine)
+
+    assert result.payload is not None
+    assert result.payload["InvoiceNumber"] == "26112000000012345678"
+    assert qr_calls == []
+
+
 
 
