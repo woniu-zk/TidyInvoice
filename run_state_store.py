@@ -315,6 +315,34 @@ class RunStateStore:
         with self._lock:
             return copy.deepcopy(self._state)
 
+    def header(self) -> dict[str, Any]:
+        """Small projection for incremental result polling (no invoice lists)."""
+        with self._lock:
+            return {
+                "run_id": str(self._state["run_id"]),
+                "new_categories": list(self._state["new_categories"]),
+                "run_state": str(self._state["run_state"]),
+                "is_running": bool(self._state["is_running"]),
+            }
+
+    def sequence_counts(self) -> dict[str, int]:
+        with self._lock:
+            return {
+                "processed_invoices": len(self._state["processed_invoices"]),
+                "error_invoices": len(self._state["error_invoices"]),
+            }
+
+    def slice(self, field: str, start: int) -> list[Any]:
+        """Return (and copy) only ``state[field][start:]`` under the lock."""
+        if field not in {"processed_invoices", "error_invoices"}:
+            raise ValueError(f"unsupported slice field: {field}")
+        with self._lock:
+            try:
+                offset = max(0, int(start))
+            except (TypeError, ValueError):
+                offset = 0
+            return copy.deepcopy(list(self._state[field][offset:]))
+
     def frontend_snapshot(
         self,
         *,

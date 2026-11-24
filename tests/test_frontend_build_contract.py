@@ -998,3 +998,16 @@ def test_root_render_is_wrapped_in_an_error_boundary():
     assert "界面加载失败" in source
     assert "ErrorBoundary" in built
     assert "root.render(" in built
+
+
+def test_analysis_page_uses_incremental_results_cursor():
+    source = _read(SOURCE_PATH)
+    built = _decode_js_unicode_escapes(_read(BUILT_PATH))
+
+    assert 'callApi("get_results_delta", successCursorRef.current, errorCursorRef.current)' in source
+    assert "successCursorRef" in source
+    assert "resultRunIdRef" in source
+    assert "normalizeSuccessInvoices(" in source
+    assert "results.successInvoices || []," in source
+    assert "successCursorRef.current" in source
+    assert "get_results_delta" in built

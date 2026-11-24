@@ -862,6 +862,7 @@ class InvoiceAppAPI:
         self.progress = 0
         self.status_text = "Ready to start..."
         self.logs = []
+        self._legacy_sync_signature = None
         self._is_running = False
         self._stop_requested = False
         self.run_state = "idle"
@@ -2037,6 +2038,31 @@ class InvoiceAppAPI:
         self._safe_emit_run_state_event(previous_state, run_state)
 
     def _sync_run_state_store_from_legacy(self):
+        # Polling used to replay the full legacy lists into the store on every
+        # tick, which made update() compare thousands of rows per second. Skip
+        # the whole sync when neither scalars nor sequence identities changed.
+        signature = (
+            self.progress,
+            self.status_text,
+            self.run_state,
+            self.last_error,
+            self._stop_requested,
+            self.quota_exhausted,
+            self.quota_message,
+            id(self.logs),
+            len(self.logs),
+            id(self.processed_invoices),
+            len(self.processed_invoices),
+            id(self.error_invoices),
+            len(self.error_invoices),
+            id(self.discovered_categories),
+            len(self.discovered_categories),
+            id(self.stats),
+            len(self.stats),
+        )
+        if signature == self._legacy_sync_signature:
+            return
+        self._legacy_sync_signature = signature
         self._run_state_store.update(
             progress=self.progress,
             status_text=self.status_text,
@@ -2063,6 +2089,7 @@ class InvoiceAppAPI:
             handle.advance(RunState.SCANNING)
         self.progress = 0
         self.logs = []
+        self._legacy_sync_signature = None
         self._stop_requested = False
         self.quota_exhausted = False
         self.quota_message = ""
@@ -2198,6 +2225,7 @@ class InvoiceAppAPI:
         return "PROCESSING_FAILED", "处理过程中发生异常，请重试；如持续失败请查看诊断报告。"
 
     def _finish_run(self, success, status_text, last_error=""):
+        self._legacy_sync_signature = None
         handle = self._active_run_handle or self._prepare_run_lifecycle()
         if handle.state not in {RunState.COMPLETED, RunState.FAILED}:
             if not success:
@@ -5484,6 +5512,7 @@ class InvoiceAppAPI:
             setattr(self, name, value)
 
     def _reset_run_state_for_admission(self, run_id):
+        self._legacy_sync_signature = None
         reset_kwargs = {
             "status_text": "正在准备运行...",
             "run_state": "running",
@@ -6139,6 +6168,62 @@ class InvoiceAppAPI:
             "fetch_summary": dict(getattr(self, "_last_fetch_summary", {}) or {}),
             "organize_summary": dict(getattr(self, "_last_organize_result", None) or {}),
             "invoices": processed_invoices # 兼容旧的数据结构
+        }
+
+    def get_results_delta(self, since_success=0, since_error=0):
+        """Incremental results for the analysis page; cursors are list lengths."""
+        self._sync_run_state_store_from_legacy()
+        header = self._run_state_store.header()
+        counts = self._run_state_store.sequence_counts()
+        processed_total = counts["processed_invoices"]
+        error_total = counts["error_invoices"]
+        try:
+            start_success = max(0, int(since_success or 0))
+            start_error = max(0, int(since_error or 0))
+        except (TypeError, ValueError):
+            start_success = start_error = 0
+        reset = start_success > processed_total or start_error > error_total
+        if reset:
+            start_success = start_error = 0
+        success_invoices = self._run_state_store.slice(
+            "processed_invoices", start_success
+        )
+        error_invoices = self._run_state_store.slice("error_invoices", start_error)
+        summary = self._summarize_stats()
+        return {
+            "run_id": header["run_id"],
+            "reset": reset,
+            "cursor": {"success": processed_total, "error": error_total},
+            "categories": header["new_categories"],
+            "successInvoices": success_invoices,
+            "errorInvoices": error_invoices,
+            "groupedErrorInvoices": self._group_error_invoices(),
+            "manual_check_path": self._manual_check_path(),
+            "output_path": self._effective_save_path
+            or self._requested_save_path
+            or self.get_default_save_path(),
+            "summary": summary,
+            "build_identity": self.build_identity,
+            "raw_date_range": self._raw_date_range_display,
+            "imap_query_range": self._imap_query_range_display,
+            "resultBreakdown": summary.get("result_breakdown", {}),
+            "reasonCodeBreakdown": summary.get("reason_code_breakdown", {}),
+            "quota_exhausted": self.quota_exhausted,
+            "quota_message": self.quota_message,
+            "last_export_path": self._last_export_path,
+            "task_mode": str(getattr(self, "_active_task_mode", "mail") or "mail"),
+            "dry_run": bool(
+                getattr(self, "_active_task_mode", "mail") == "local"
+                and (self._last_organize_result or {}).get("dry_run")
+            ),
+            "input_dir": str(
+                (self._last_organize_result or {}).get("input_dir") or ""
+            ),
+            "fetch_summary": dict(getattr(self, "_last_fetch_summary", {}) or {}),
+            "organize_summary": dict(
+                getattr(self, "_last_organize_result", None) or {}
+            ),
+            "invoices": success_invoices,
         }
 
     def choose_directory(self):

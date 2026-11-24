@@ -2257,12 +2257,13 @@ function describeResultFile(path) {
     fileKindLabel: "文件"
   };
 }
-function normalizeSuccessInvoices(items) {
+function normalizeSuccessInvoices(items, offset = 0) {
   return (items || []).map((item, index) => {
     const path = item.path || "";
     const fileMeta = describeResultFile(path);
+    const globalIndex = offset + index;
     return {
-      key: path || `${item.date || "row"}-${index}`,
+      key: path || `${item.date || "row"}-${globalIndex}`,
       date: safeText(item.date),
       amount: safeText(item.amount),
       merchant: safeText(item.merchant || item.vendor),
@@ -3320,15 +3321,30 @@ function AnalysisPage({
   const [resultTaskMode, setResultTaskMode] = useState("mail");
   const [organizeSummary, setOrganizeSummary] = useState({});
   const [fetchSummary, setFetchSummary] = useState({});
+  const successCursorRef = useRef(0);
+  const errorCursorRef = useRef(0);
+  const resultRunIdRef = useRef("");
   useEffect(() => {
     let active = true;
     let timer = null;
     const loadResults = async () => {
       try {
-        const [results, settingsRes] = await Promise.all([callApi("get_results"), callApi("load_user_settings").catch(() => null)]);
+        const [results, settingsRes] = await Promise.all([callApi("get_results_delta", successCursorRef.current, errorCursorRef.current), callApi("load_user_settings").catch(() => null)]);
         if (!active || !results) return;
+        const runId = String(results.run_id || "");
+        if (results.reset || runId !== resultRunIdRef.current) {
+          resultRunIdRef.current = runId;
+          successCursorRef.current = 0;
+          errorCursorRef.current = 0;
+          setSuccessInvoices([]);
+        }
+        const incoming = normalizeSuccessInvoices(results.successInvoices || [], successCursorRef.current);
+        if (incoming.length) {
+          setSuccessInvoices(previous => previous.concat(incoming));
+        }
+        successCursorRef.current = Number(results.cursor && results.cursor.success || 0);
+        errorCursorRef.current = Number(results.cursor && results.cursor.error || 0);
         setSummary(results.summary || {});
-        setSuccessInvoices(normalizeSuccessInvoices(results.successInvoices || []));
         setGroupedErrors(normalizeGroupedErrors(results.groupedErrorInvoices || []));
         setManualCheckPath(results.manual_check_path || "");
         setResultBreakdown(results.resultBreakdown || results.summary && results.summary.result_breakdown || {});
