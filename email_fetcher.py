@@ -2618,6 +2618,7 @@ class EmailFetcher:
                         filename = attachment_info["filename"]
                         payload = attachment_info["payload"]
                         ext = attachment_info["ext"]
+                        content_sha256 = hashlib.sha256(payload).hexdigest()
                         decision = attachment_info["decision"]
                         pair_key = self._attachment_pair_key(filename)
                         sibling_exts = processed_pair_exts.get(pair_key, set())
@@ -2634,6 +2635,7 @@ class EmailFetcher:
                             "subject": attachment_info.get("subject", subject),
                             "original_filename": filename,
                             "attachment_ext": ext,
+                            "sha256": content_sha256,
                             "payload_size": attachment_info.get("payload_size", len(payload)),
                             "mime_content_type": attachment_info.get("content_type", ""),
                             "content_disposition": attachment_info.get("content_disposition", ""),
@@ -2688,6 +2690,7 @@ class EmailFetcher:
                             "tier": tier,
                             "subject": subject,
                             "is_url": False,
+                            "sha256": content_sha256,
                             "candidate_bucket": decision["candidate_bucket"],
                             "candidate_action": decision["candidate_action"],
                             "source_kind": decision["source_kind"],

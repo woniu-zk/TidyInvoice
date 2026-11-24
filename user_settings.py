@@ -1,9 +1,11 @@
 import base64
+import copy
 import ctypes
 import hashlib
 import json
 import os
 import sys
+import threading
 from ctypes import wintypes
 
 from brand_generated import APP_DIR_NAME, LEGACY_APP_DIR_NAMES
@@ -233,62 +235,87 @@ class UserSettingsStore:
     def __init__(self, settings_path=None):
         self.settings_path = settings_path or get_settings_path()
         self._fallback_paths = [path for path in get_legacy_settings_paths() if os.path.abspath(path) != os.path.abspath(self.settings_path)]
+        self._lock = threading.RLock()
+        # (cache_key, values) where cache_key is (path, mtime_ns, size); polling
+        # the settings every few seconds must not re-run DPAPI/Keychain decryption.
+        self._cache = None
+
+    def _cached_load_locked(self, candidate_path):
+        try:
+            stat = os.stat(candidate_path)
+        except OSError:
+            return None
+        cache_key = (
+            os.path.abspath(candidate_path),
+            int(stat.st_mtime_ns),
+            int(stat.st_size),
+        )
+        if self._cache is not None and self._cache[0] == cache_key:
+            return copy.deepcopy(self._cache[1])
+        try:
+            with open(candidate_path, "r", encoding="utf-8-sig") as handle:
+                payload = json.load(handle)
+        except Exception:
+            return None
+
+        values = dict(payload.get("values") or {})
+        protected = dict(payload.get("protected") or {})
+        for key, encoded in protected.items():
+            try:
+                if _is_macos() and str(encoded).startswith("keychain:"):
+                    values[key] = _load_macos_keychain_secret(encoded)
+                else:
+                    values[key] = _unprotect_text(encoded)
+            except Exception:
+                values[key] = ""
+        self._cache = (cache_key, copy.deepcopy(values))
+        return values
 
     def load(self):
-        for candidate_path in [self.settings_path, *self._fallback_paths]:
-            if not os.path.exists(candidate_path):
-                continue
-
-            try:
-                with open(candidate_path, "r", encoding="utf-8-sig") as handle:
-                    payload = json.load(handle)
-            except Exception:
-                continue
-
-            values = dict(payload.get("values") or {})
-            protected = dict(payload.get("protected") or {})
-            for key, encoded in protected.items():
-                try:
-                    if _is_macos() and str(encoded).startswith("keychain:"):
-                        values[key] = _load_macos_keychain_secret(encoded)
-                    else:
-                        values[key] = _unprotect_text(encoded)
-                except Exception:
-                    values[key] = ""
-            return values
-        return {}
+        with self._lock:
+            for candidate_path in [self.settings_path, *self._fallback_paths]:
+                if not os.path.exists(candidate_path):
+                    continue
+                values = self._cached_load_locked(candidate_path)
+                if values is not None:
+                    return values
+            return {}
 
     def save(self, settings):
-        os.makedirs(os.path.dirname(self.settings_path), exist_ok=True)
-        payload = {"version": 1, "values": {}, "protected": {}}
+        with self._lock:
+            os.makedirs(os.path.dirname(self.settings_path), exist_ok=True)
+            payload = {"version": 1, "values": {}, "protected": {}}
 
-        for key, value in dict(settings or {}).items():
-            clean_value = value if value is not None else ""
-            if key in SENSITIVE_KEYS:
-                if _is_macos():
-                    payload["protected"][key] = _store_macos_keychain_secret(
-                        self.settings_path, key, clean_value
-                    )
+            for key, value in dict(settings or {}).items():
+                clean_value = value if value is not None else ""
+                if key in SENSITIVE_KEYS:
+                    if _is_macos():
+                        payload["protected"][key] = _store_macos_keychain_secret(
+                            self.settings_path, key, clean_value
+                        )
+                    else:
+                        payload["protected"][key] = _protect_text(clean_value)
                 else:
-                    payload["protected"][key] = _protect_text(clean_value)
-            else:
-                payload["values"][key] = clean_value
+                    payload["values"][key] = clean_value
 
-        temp_path = f"{self.settings_path}.tmp"
-        with open(temp_path, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, ensure_ascii=False, indent=2)
-        os.replace(temp_path, self.settings_path)
-        return self.settings_path
+            temp_path = f"{self.settings_path}.tmp"
+            with open(temp_path, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle, ensure_ascii=False, indent=2)
+            os.replace(temp_path, self.settings_path)
+            self._cache = None
+            return self.settings_path
 
     def clear(self):
-        if _is_macos() and os.path.exists(self.settings_path):
-            try:
-                with open(self.settings_path, "r", encoding="utf-8") as handle:
-                    protected = dict((json.load(handle).get("protected") or {}))
-            except Exception:
-                protected = {}
-            for marker in protected.values():
-                if str(marker).startswith("keychain:"):
-                    _delete_macos_keychain_secret(marker)
-        if os.path.exists(self.settings_path):
-            os.remove(self.settings_path)
+        with self._lock:
+            if _is_macos() and os.path.exists(self.settings_path):
+                try:
+                    with open(self.settings_path, "r", encoding="utf-8") as handle:
+                        protected = dict((json.load(handle).get("protected") or {}))
+                except Exception:
+                    protected = {}
+                for marker in protected.values():
+                    if str(marker).startswith("keychain:"):
+                        _delete_macos_keychain_secret(marker)
+            if os.path.exists(self.settings_path):
+                os.remove(self.settings_path)
+            self._cache = None

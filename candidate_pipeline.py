@@ -64,6 +64,14 @@ def _stream_sha256(path: str) -> str:
     return digest.hexdigest()
 
 
+def _cached_content_digest(metadata: Mapping[str, Any]) -> str:
+    """Return the ingest-time digest carried on the candidate, if valid."""
+    cached = str(metadata.get("sha256") or "").strip().lower()
+    if len(cached) == 64 and all(character in "0123456789abcdef" for character in cached):
+        return cached
+    return ""
+
+
 def _normalized_url_digest(value: str) -> str:
     parsed = urlsplit(str(value or "").strip())
     hostname = (parsed.hostname or "").lower()
@@ -99,6 +107,9 @@ def build_compatibility_history_key(
             ).strip()
             or legacy_key,
         )
+    cached_digest = _cached_content_digest(metadata)
+    if cached_digest:
+        return f"att:{cached_digest}"
     try:
         return f"att:{_stream_sha256(source_path)}"
     except Exception:
@@ -243,7 +254,9 @@ class CandidatePipeline:
                     or ""
                 )
                 if source_path and os.path.isfile(source_path):
-                    source_digest = _stream_sha256(source_path)
+                    source_digest = _cached_content_digest(metadata) or _stream_sha256(
+                        source_path
+                    )
                 elif attachment_part_id:
                     source_digest = hashlib.sha256(
                         attachment_part_id.encode("utf-8")

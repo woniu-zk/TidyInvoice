@@ -128,8 +128,15 @@ def save_fetch_rows(
         if not source_path or not os.path.isfile(source_path):
             continue
         digest = str(row.get("sha256") or "").strip().lower()
+        if not digest:
+            # Older fetchers did not put a content digest on the row; compute it
+            # once here so duplicate accounting and the manifest stay correct.
+            try:
+                digest = fetch_handoff.sha256_file(source_path)
+            except OSError:
+                digest = ""
         existed = bool(digest and writer.existing(digest))
-        entry = writer.save_attachment(
+        writer.save_attachment(
             source_path,
             orig_name=str(
                 row.get("original_filename") or os.path.basename(source_path)
@@ -148,7 +155,6 @@ def save_fetch_rows(
                 "fetched_at": fetch_handoff.utc_now_iso(),
             },
         )
-        del entry
         if existed:
             summary.duplicate_count += 1
         else:

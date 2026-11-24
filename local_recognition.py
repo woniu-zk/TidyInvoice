@@ -453,6 +453,11 @@ _AMOUNT_TAX_PAIR_RE = re.compile(
 _AMOUNT_ONLY_RE = re.compile(r"金额[^\d]{0,10}([0-9][0-9,]*\.[0-9]{2})")
 _TAX_ONLY_RE = re.compile(r"税额[^\d]{0,10}([0-9][0-9,]*\.[0-9]{2})")
 _ITEM_NAME_CELL_RE = re.compile(r"\*[^*\n]{2,24}\*[^\s*]{0,40}")
+# Compiled once: the toll-summary parser used to rebuild these on every call.
+_TOLL_AMOUNT_PATTERNS = (
+    re.compile(r"交易金额[￥¥]?([0-9][0-9,]*\.[0-9]{2})"),
+    re.compile(r"价税合计(?:\(小写\)|（小写）|小写)?[￥¥]?([0-9][0-9,]*\.[0-9]{2})"),
+)
 _ITEM_ROW_LABELS = (
     "货物或应税劳务、服务名称",
     "货物或应税劳务服务名称",
@@ -1000,10 +1005,7 @@ def _parse_toll_summary(text: str, engine: str) -> RecognitionResult | None:
         date_value = _find_date(flat)
 
     amount = None
-    for pattern in (
-        re.compile(r"交易金额[￥¥]?([0-9][0-9,]*\.[0-9]{2})"),
-        re.compile(r"价税合计(?:\(小写\)|（小写）|小写)?[￥¥]?([0-9][0-9,]*\.[0-9]{2})"),
-    ):
+    for pattern in _TOLL_AMOUNT_PATTERNS:
         match = pattern.search(flat)
         if match:
             amount = _parse_money(match.group(1))

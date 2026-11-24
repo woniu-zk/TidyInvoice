@@ -58,3 +58,30 @@ def test_macos_settings_keep_secrets_in_keychain_and_clear_them(tmp_path, monkey
 
     assert not settings_path.exists()
     assert keychain == {}
+
+
+def test_user_settings_load_uses_mtime_cache_and_invalidates_on_save(
+    tmp_path, monkeypatch
+):
+    settings_path = tmp_path / "user_settings.json"
+    store = user_settings.UserSettingsStore(settings_path=str(settings_path))
+    store.save({"email": "user@example.com", "company": "ACME"})
+
+    calls = {"count": 0}
+    real_load = user_settings.json.load
+
+    def counting_load(handle, *args, **kwargs):
+        calls["count"] += 1
+        return real_load(handle, *args, **kwargs)
+
+    monkeypatch.setattr(user_settings.json, "load", counting_load)
+
+    assert store.load()["company"] == "ACME"
+    assert calls["count"] == 1
+    # Second poll hits the cache instead of re-reading and decrypting the file.
+    assert store.load()["company"] == "ACME"
+    assert calls["count"] == 1
+
+    store.save({"email": "user@example.com", "company": "Other"})
+    assert store.load()["company"] == "Other"
+    assert calls["count"] == 2

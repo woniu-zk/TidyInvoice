@@ -74,6 +74,12 @@ def _classify_standard_einvoice_type(compact_text):
 
 _STANDARD_EINVOICE_ITEM_CELL_RE = re.compile(r"\*[^*\n]{2,24}\*[^\s*]{0,40}")
 
+# Shared by the two standard-e-invoice party extractors: compiling it inside the
+# method recompiled the same pattern on every invoice.
+_PARTY_PAIR_PATTERN = re.compile(
+    r"([A-Za-z0-9\u4e00-\u9fff（）()·\-]{2,})\s*\n\s*([0-9A-Z]{10,24})"
+)
+
 
 def _extract_standard_einvoice_item_names(text, limit=5):
     """Return up to ``limit`` unique item-name cells, e.g. ``*运输服务*客运服务费``."""
@@ -131,6 +137,10 @@ class InvoiceExtractor:
         self.last_extraction_trace = {}
         self.last_route_trace = {}
         self.last_timing_trace = {}
+        # Fast-path probes share one text extraction per source file; the cache
+        # is keyed by path+mtime+size+page budget so a changed file never reuses
+        # stale text. Instances live for one document in the pipeline.
+        self._pdf_text_cache = {}
         os.makedirs(self.output_dir, exist_ok=True)
 
     def close(self):
@@ -220,15 +230,33 @@ class InvoiceExtractor:
     def _extract_embedded_pdf_text(self, pdf_path, max_pages=2):
         if not pdf_path or not os.path.exists(pdf_path):
             return ""
+        cache_key = None
+        try:
+            stat = os.stat(pdf_path)
+            cache_key = (
+                os.path.abspath(pdf_path),
+                int(stat.st_mtime_ns),
+                int(stat.st_size),
+                int(max_pages),
+            )
+        except OSError:
+            cache_key = None
+        if cache_key is not None and cache_key in self._pdf_text_cache:
+            return self._pdf_text_cache[cache_key]
         try:
             parts = []
             with fitz.open(pdf_path) as doc:
                 for page_index in range(min(max_pages, len(doc))):
                     parts.append(doc.load_page(page_index).get_text("text") or "")
-            return "\n".join(part for part in parts if part).strip()
+            text = "\n".join(part for part in parts if part).strip()
         except Exception as exc:
             logging.warning(f"Failed to read embedded PDF text for fast path: {exc}")
-            return ""
+            text = ""
+        if cache_key is not None:
+            if len(self._pdf_text_cache) >= 32:
+                self._pdf_text_cache.clear()
+            self._pdf_text_cache[cache_key] = text
+        return text
 
     def _reconcile_train_ticket_embedded_fields(self, payload, pdf_path):
         """Prefer deterministic ticket fields over nondeterministic model dates."""
@@ -779,7 +807,7 @@ class InvoiceExtractor:
         invoice_type = _classify_standard_einvoice_type(compact_text)
 
         tail_text = text[date_match.end():]
-        pair_pattern = re.compile(r"([A-Za-z0-9\u4e00-\u9fff（）()·\-]{2,})\s*\n\s*([0-9A-Z]{10,24})")
+        pair_pattern = _PARTY_PAIR_PATTERN
         pairs = []
         seen_names = set()
         for match in pair_pattern.finditer(tail_text):
@@ -997,7 +1025,7 @@ class InvoiceExtractor:
         else:
             pairs = []
             seen_names = set()
-            pair_pattern = re.compile(r"([A-Za-z0-9\u4e00-\u9fff\uff08\uff09()·\-]{2,})\s*\n\s*([0-9A-Z]{10,24})")
+            pair_pattern = _PARTY_PAIR_PATTERN
             excluded_names = {
                 "\u540d\u79f0",
                 "\u9500\u552e\u4fe1\u606f",

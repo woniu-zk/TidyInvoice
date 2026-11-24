@@ -561,4 +561,37 @@ def test_recognition_makes_no_network_calls(monkeypatch, tmp_path: Path):
     assert result.payload["InvoiceNumber"] == "26112000000012345678"
 
 
+def test_embedded_pdf_text_is_cached_per_file_and_invalidated(tmp_path: Path, monkeypatch):
+    """The fast-path probes must share one PDF text extraction per source file."""
+    import os
+    import time
+
+    import fitz
+
+    from invoice_extractor import InvoiceExtractor
+
+    pdf = _write_pdf_with_text(tmp_path / "invoice.pdf", SAMPLE_EINVOICE_TEXT.splitlines())
+    extractor = InvoiceExtractor(api_key="", output_dir=str(tmp_path / "extracted"))
+    calls = {"count": 0}
+    real_open = fitz.open
+
+    def counting_open(*args, **kwargs):
+        calls["count"] += 1
+        return real_open(*args, **kwargs)
+
+    monkeypatch.setattr("invoice_extractor.fitz.open", counting_open)
+    first = extractor._extract_embedded_pdf_text(str(pdf))
+    second = extractor._extract_embedded_pdf_text(str(pdf))
+
+    assert first
+    assert first == second
+    assert calls["count"] == 1
+
+    future = time.time() + 5
+    os.utime(pdf, (future, future))
+    extractor._extract_embedded_pdf_text(str(pdf))
+    assert calls["count"] == 2
+
+
+
 
