@@ -17,6 +17,7 @@ import hashlib
 import json
 import os
 import re
+import tempfile
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -201,6 +202,9 @@ def append_manifest(
         for entry in entries:
             handle.write(json.dumps(entry.to_dict(), ensure_ascii=False))
             handle.write("\n")
+        # One fsync per batch keeps the manifest durable without per-line cost.
+        handle.flush()
+        os.fsync(handle.fileno())
 
 
 def append_todo(path: str | os.PathLike[str], record: Mapping[str, Any]) -> None:
@@ -210,6 +214,8 @@ def append_todo(path: str | os.PathLike[str], record: Mapping[str, Any]) -> None
     with open(todo_path, "a", encoding="utf-8") as handle:
         handle.write(json.dumps(dict(record), ensure_ascii=False, default=str))
         handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
 
 
 def load_fetch_state(path: str | os.PathLike[str]) -> dict[str, Any]:
@@ -227,10 +233,25 @@ def load_fetch_state(path: str | os.PathLike[str]) -> dict[str, Any]:
 def save_fetch_state(path: str | os.PathLike[str], payload: Mapping[str, Any]) -> None:
     state_path = Path(path)
     state_path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = state_path.with_name(state_path.name + ".tmp")
-    with open(temp_path, "w", encoding="utf-8") as handle:
-        json.dump(dict(payload), handle, ensure_ascii=False, indent=2, default=str)
-    os.replace(temp_path, state_path)
+    # Unique temp name + fsync + replace: a concurrent writer cannot steal the
+    # temp file and a crash never leaves a half-written state file.
+    descriptor, temp_name = tempfile.mkstemp(
+        prefix=state_path.name + ".",
+        suffix=".tmp",
+        dir=str(state_path.parent),
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(dict(payload), handle, ensure_ascii=False, indent=2, default=str)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_name, state_path)
+    except BaseException:
+        try:
+            os.unlink(temp_name)
+        except OSError:
+            pass
+        raise
 
 
 def date_bucket(iso_timestamp: str, *, fallback: datetime | None = None) -> str:

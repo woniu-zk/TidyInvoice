@@ -160,31 +160,56 @@ def reconcile_archive_pairs(
         second: tuple[dict[str, Any], Path, str],
     ) -> None:
         validate_targets((first[0], first[1]), (second[0], second[1]))
-        for source, target, role in (first, second):
-            source_path = str(source["path"])
-            os.replace(source_path, target)
-            if trace_store is None:
-                continue
-            document_id = trace_store.get_document_id_by_archive_target(source_path)
-            trace_store.move_archive_target(source_path, str(target))
-            if document_id:
-                counterpart = second[1] if source is first[0] else first[1]
-                trace_store.set_fields(
-                    document_id,
-                    combine_keys={
-                        "combine_type": family,
-                        "document_role": role,
-                        "reason_code": f"{family.upper()}_COMBINE_CANDIDATE",
-                    },
-                    combine_result={
-                        "status": "matched",
-                        "reason_code": f"{family.upper()}_COMBINE_MATCHED",
-                        "paired_with": counterpart.name,
-                        "pair_index": pair_index,
-                        "final_filename": target.name,
-                    },
-                    archive_target=str(target),
+        for source, _target, _role in (first, second):
+            if not Path(str(source["path"])).is_file():
+                raise FileNotFoundError(
+                    f"ARCHIVE_PAIR_SOURCE_MISSING: {source['path']}"
                 )
+        moved: list[tuple[Path, Path]] = []
+        try:
+            for source, target, role in (first, second):
+                source_path = Path(str(source["path"]))
+                os.replace(source_path, target)
+                moved.append((source_path, target))
+                if trace_store is None:
+                    continue
+                document_id = trace_store.get_document_id_by_archive_target(
+                    str(source_path)
+                )
+                trace_store.move_archive_target(str(source_path), str(target))
+                if document_id:
+                    counterpart = second[1] if source is first[0] else first[1]
+                    trace_store.set_fields(
+                        document_id,
+                        combine_keys={
+                            "combine_type": family,
+                            "document_role": role,
+                            "reason_code": f"{family.upper()}_COMBINE_CANDIDATE",
+                        },
+                        combine_result={
+                            "status": "matched",
+                            "reason_code": f"{family.upper()}_COMBINE_MATCHED",
+                            "paired_with": counterpart.name,
+                            "pair_index": pair_index,
+                            "final_filename": target.name,
+                        },
+                        archive_target=str(target),
+                    )
+        except BaseException:
+            # Never leave a half-paired artifact: put already-moved files back
+            # and restore their trace targets, best effort.
+            for source_path, target in reversed(moved):
+                try:
+                    if target.exists() and not source_path.exists():
+                        os.replace(target, source_path)
+                except OSError:
+                    pass
+                if trace_store is not None:
+                    try:
+                        trace_store.move_archive_target(str(target), str(source_path))
+                    except Exception:
+                        pass
+            raise
 
     def emit(event: dict[str, Any]) -> None:
         if event_sink is None:

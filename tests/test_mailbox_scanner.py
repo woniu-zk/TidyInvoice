@@ -55,8 +55,18 @@ def test_scan_uses_uid_all_stable_dedupe_and_never_sequence_ids():
     refs = MailboxScanner(mail).scan(dt.date(2026, 6, 10), dt.date(2026, 6, 11))
 
     assert mail.selected == ("INBOX", True)
-    assert mail.uid_calls[0] == ("SEARCH", (None, "ALL"))
+    assert mail.uid_calls[0] == ("SEARCH", (None, "SINCE", "07-Jun-2026"))
     assert [ref.uid for ref in refs] == [b"91", b"7", b"105"]
+
+
+def test_scan_uses_server_side_since_with_overlap_and_full_scan_escape_hatch():
+    mail = FakeUidMail(b"", lambda *_args: ("ok", []))
+    MailboxScanner(mail).scan(dt.date(2026, 6, 10), None)
+    assert mail.uid_calls[0] == ("SEARCH", (None, "SINCE", "07-Jun-2026"))
+
+    full_mail = FakeUidMail(b"", lambda *_args: ("ok", []))
+    MailboxScanner(full_mail).scan(dt.date(2026, 6, 10), None, full_scan=True)
+    assert full_mail.uid_calls[0] == ("SEARCH", (None, "ALL"))
 
 
 def test_scan_normalizes_shanghai_falls_back_and_retains_unknown_without_early_stop():

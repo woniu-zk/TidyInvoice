@@ -1485,6 +1485,37 @@ def test_archive_pairing_fails_closed_before_overwriting_existing_target(tmp_pat
     assert folio.exists()
 
 
+def test_archive_pairing_rolls_back_first_move_when_second_move_fails(
+    tmp_path: Path, monkeypatch
+):
+    import os
+
+    from archive_pairing_service import reconcile_archive_pairs
+
+    hotel = tmp_path / "住宿发票"
+    hotel.mkdir()
+    invoice = hotel / "20260610_住宿发票_424.15_酒店.pdf"
+    folio = hotel / "20260610_住宿水单_424.15_酒店.pdf"
+    invoice.write_bytes(b"invoice")
+    folio.write_bytes(b"folio")
+
+    real_replace = os.replace
+
+    def flaky_replace(source, target):
+        if str(target).endswith("水单_424.15元.pdf"):
+            raise OSError("disk full")
+        return real_replace(source, target)
+
+    monkeypatch.setattr("archive_pairing_service.os.replace", flaky_replace)
+
+    with pytest.raises(OSError, match="disk full"):
+        reconcile_archive_pairs(tmp_path)
+
+    assert invoice.exists()
+    assert folio.exists()
+    assert not (hotel / "20260610-住宿-01-发票_424.15元.pdf").exists()
+
+
 def test_progress_is_monotonic_bounded_and_has_stable_total():
     events: list[tuple[int, int, int]] = []
     candidates = [_candidate(index) for index in range(4)]

@@ -7,6 +7,7 @@ import hashlib
 import imaplib
 import re
 import ssl
+import time
 from dataclasses import dataclass
 from typing import Callable, Iterable
 
@@ -15,6 +16,31 @@ from typing import Callable, Iterable
 # equivalent to Asia/Shanghai for every real message date, while removing the
 # import-time `zoneinfo`/tzdata dependency that broke Windows release builds.
 SHANGHAI_TZ = dt.timezone(dt.timedelta(hours=8))
+
+# IMAP SEARCH wants English month abbreviations regardless of the host locale,
+# so format the date explicitly instead of relying on strftime("%b").
+_IMAP_MONTHS = (
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+)
+# Server-side SINCE is deliberately widened by a few days: headers and
+# INTERNALDATE can disagree by timezone/skew, and the local exact filter below
+# still removes everything outside the requested window.
+SCAN_SINCE_OVERLAP_DAYS = 3
+
+
+def _imap_date(value: dt.date) -> str:
+    return f"{value.day:02d}-{_IMAP_MONTHS[value.month - 1]}-{value.year}"
 
 # A single RFC822 message is fully buffered before MIME parsing, so its byte
 # length is attacker-controlled (any sender can deliver a huge message, or the
@@ -106,6 +132,8 @@ class MailboxScanner:
         since: dt.date,
         before: dt.date | None,
         mailbox: str = "INBOX",
+        *,
+        full_scan: bool = False,
     ) -> list[MessageRef]:
         since = self._require_date(since, "since")
         before = self._require_date(before, "before", allow_none=True)
@@ -114,7 +142,8 @@ class MailboxScanner:
 
         self.select_mailbox(mailbox)
 
-        uids = self._search_all_uids()
+        search_since = since - dt.timedelta(days=SCAN_SINCE_OVERLAP_DAYS)
+        uids = self._search_uids(search_since, full_scan=full_scan)
         headers: dict[bytes, MessageRef] = {}
         for chunk in self._chunks(uids, self.header_batch_size):
             headers.update(self._fetch_header_subset(chunk))
@@ -179,14 +208,35 @@ class MailboxScanner:
         first = next(batches, None)
         return dict(first.messages) if first is not None else {}
 
-    def _search_all_uids(self) -> list[bytes]:
-        try:
-            status, response = self.mail.uid("SEARCH", None, "ALL")
-        except Exception as exc:
-            raise MailboxScanError("UID SEARCH ALL failed") from exc
-        if not self.is_ok_status(status):
-            raise MailboxScanError("UID SEARCH ALL failed")
+    def _search_uids(self, since: dt.date | None, *, full_scan: bool = False) -> list[bytes]:
+        if full_scan or since is None:
+            label = "UID SEARCH ALL"
+            args: tuple[object, ...] = ("SEARCH", None, "ALL")
+        else:
+            query_date = _imap_date(since)
+            label = f"UID SEARCH SINCE {query_date}"
+            args = ("SEARCH", None, "SINCE", query_date)
 
+        last_exc: BaseException | None = None
+        attempts = max(1, int(self.max_attempts))
+        for attempt in range(attempts):
+            try:
+                status, response = self.mail.uid(*args)
+            except Exception as exc:
+                last_exc = exc
+            else:
+                if self.is_ok_status(status):
+                    return self._parse_search_uids(response, label)
+                last_exc = None
+            if attempt + 1 < attempts:
+                time.sleep(0.2 * (attempt + 1))
+        raise MailboxScanError(f"{label} failed") from last_exc
+
+    def _search_all_uids(self) -> list[bytes]:
+        """Full-mailbox escape hatch for servers that reject SINCE."""
+        return self._search_uids(None, full_scan=True)
+
+    def _parse_search_uids(self, response: object, label: str) -> list[bytes]:
         tokens = []
         malformed = False
         for item in response if isinstance(response, (list, tuple)) else [response]:
@@ -206,7 +256,7 @@ class MailboxScanner:
                 continue
             tokens.extend(parts)
         if malformed:
-            raise MailboxScanError("malformed UID SEARCH ALL response")
+            raise MailboxScanError(f"malformed {label} response")
         return self.normalize_uids(tokens)
 
     def _fetch_header_subset(self, uids: list[bytes]) -> dict[bytes, MessageRef]:

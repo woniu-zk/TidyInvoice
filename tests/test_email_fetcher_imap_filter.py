@@ -111,13 +111,15 @@ class EmailFetcherImapFilterTests(unittest.TestCase):
         fetcher.mail = mail
         return fetcher
 
-    def test_local_date_filter_uses_uid_all_and_fail_open_unknown_dates(self):
+    def test_local_date_filter_uses_uid_since_and_fail_open_unknown_dates(self):
         messages = {str(i).encode(): b"message" for i in range(1, 121)}
         mail = FakeUidMail(messages)
 
         result = self._fetcher(mail).fetch_emails_by_date("2026-06-01", "2026-06-14")
 
-        self.assertEqual(mail.uid_calls[0], ("SEARCH", (None, "ALL")))
+        self.assertEqual(
+            mail.uid_calls[0], ("SEARCH", (None, "SINCE", "29-May-2026"))
+        )
         header_calls = [call for call in mail.uid_calls if call[0] == "FETCH"]
         self.assertEqual(len(header_calls), 1)
         self.assertNotIn(b"5", result)

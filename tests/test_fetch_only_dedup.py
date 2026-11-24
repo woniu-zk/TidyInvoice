@@ -74,3 +74,12 @@ def test_candidate_compatibility_key_reuses_ingest_digest(tmp_path: Path, monkey
     key = build_compatibility_history_key({"sha256": digest}, source.name, str(source))
 
     assert key == f"att:{digest}"
+
+
+def test_save_fetch_state_round_trips_without_leaving_temp_files(tmp_path: Path):
+    state_path = tmp_path / ".fetch_state.json"
+
+    fetch_handoff.save_fetch_state(state_path, {"version": 1, "rows": 3})
+
+    assert fetch_handoff.load_fetch_state(state_path)["rows"] == 3
+    assert not list(tmp_path.glob("*.tmp"))
