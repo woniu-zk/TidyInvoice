@@ -437,6 +437,7 @@ class _CapturedRun:
     started_monotonic_seconds: str
     started_at_utc: str
     lineage: list[dict[str, Any]]
+    output_stats: dict[str, tuple[int, int, str]]
 
 
 class RunEvidenceWriter:
@@ -458,10 +459,26 @@ class RunEvidenceWriter:
         self._capture_promoter = capture_promoter or (lambda: None)
         self._captured: dict[str, _CapturedRun] = {}
         self._abandoned: set[str] = set()
+        # Observability for tests/diagnostics: how many inventory entries were
+        # served from the capture-time stat cache instead of being re-hashed.
+        self.last_inventory_reused = 0
 
     @staticmethod
-    def _lineage(run_id: str, output_root: Path, archive_report: Any) -> list[dict[str, Any]]:
+    def _lineage(
+        run_id: str, output_root: Path, archive_report: Any
+    ) -> list[dict[str, Any]]:
+        """Backward-compatible row-only view of the lineage calculation."""
+        rows, _stats = RunEvidenceWriter._lineage_with_stats(
+            run_id, output_root, archive_report
+        )
+        return rows
+
+    @staticmethod
+    def _lineage_with_stats(
+        run_id: str, output_root: Path, archive_report: Any
+    ) -> tuple[list[dict[str, Any]], dict[str, tuple[int, int, str]]]:
         rows: list[dict[str, Any]] = []
+        output_stats: dict[str, tuple[int, int, str]] = {}
         seen_documents: set[str] = set()
         for archived in tuple(getattr(archive_report, "outcomes", ()) or ()):
             if bool(getattr(archived, "duplicate", False)):
@@ -488,7 +505,19 @@ class RunEvidenceWriter:
                 relative = output_real.relative_to(output_base).as_posix()
             except ValueError as exc:
                 raise ValueError("lineage_output_escape") from exc
+            stat_before = output_real.stat()
             output_hash, output_size = _sha256_file(output_real)
+            stat_after = output_real.stat()
+            if (stat_before.st_size, stat_before.st_mtime_ns) == (
+                stat_after.st_size,
+                stat_after.st_mtime_ns,
+            ):
+                # Safe to reuse at finalize only while size+mtime are unchanged.
+                output_stats[relative] = (
+                    output_size,
+                    stat_after.st_mtime_ns,
+                    output_hash,
+                )
             payload, combined = _payload_parts(outcome)
             metadata = _mapping(getattr(candidate, "to_legacy", lambda: {})())
             source_paths = [Path(str(getattr(candidate, "source_path", "") or ""))]
@@ -545,7 +574,7 @@ class RunEvidenceWriter:
                 }
             )
             seen_documents.add(document_id)
-        return rows
+        return rows, output_stats
 
     @staticmethod
     def _quarantine_capture(context: Any, reason_code: str) -> None:
@@ -599,7 +628,7 @@ class RunEvidenceWriter:
         }
         if not version or not all(scope.values()):
             raise ValueError("incomplete_production_evidence_scope")
-        lineage = self._lineage(
+        lineage, output_stats = self._lineage_with_stats(
             request.run_id,
             Path(request.save_path),
             result.archive_report,
@@ -631,6 +660,7 @@ class RunEvidenceWriter:
             started_monotonic_seconds=str(context.started_monotonic_seconds),
             started_at_utc=str(context.started_at_utc),
             lineage=lineage,
+            output_stats=output_stats,
         )
         self._capture_promoter()
         if not authorized() or request.run_id in self._abandoned:
@@ -654,18 +684,31 @@ class RunEvidenceWriter:
         if captured is None:
             raise ValueError("run_lineage_not_captured")
         entries: list[dict[str, Any]] = []
+        reused = 0
         for path in sorted(
             (item for item in captured.output_root.rglob("*") if item.is_file()),
             key=lambda item: item.relative_to(captured.output_root).as_posix().casefold(),
         ):
-            digest, size = _sha256_file(path)
+            relative = path.relative_to(captured.output_root).as_posix()
+            cached = captured.output_stats.get(relative)
+            stat = path.stat()
+            if (
+                cached is not None
+                and cached[0] == stat.st_size
+                and cached[1] == stat.st_mtime_ns
+            ):
+                size, _mtime_ns, digest = cached
+                reused += 1
+            else:
+                digest, size = _sha256_file(path)
             entries.append(
                 {
-                    "relative_path": path.relative_to(captured.output_root).as_posix(),
+                    "relative_path": relative,
                     "size": size,
                     "sha256": digest,
                 }
             )
+        self.last_inventory_reused = reused
         ended_monotonic = str(self._monotonic())
         ended_utc = _utc_text(self._utc_clock())
         elapsed = format(
