@@ -5058,78 +5058,6 @@ class InvoiceAppAPI:
             exc_type, failure_id = failures[0]
             raise RuntimeError(f"cleanup failed:{exc_type}:{failure_id}:count={len(failures)}")
 
-    def _legacy_export_result_detail_pre_release_prep(self, export_path=""):
-        try:
-            from openpyxl import Workbook
-        except ImportError:
-            return {"success": False, "message": "缺少 openpyxl 依赖，无法导出 Excel"}
-
-        target_dir = export_path or self._effective_save_path or self._requested_save_path or self.get_default_save_path()
-        os.makedirs(target_dir, exist_ok=True)
-
-        def _parse_amount(value):
-            text = str(value or "").strip()
-            if not text:
-                return 0.0
-            cleaned = re.sub(r"[^\d.\-]", "", text)
-            if not cleaned:
-                return 0.0
-            try:
-                return float(cleaned)
-            except Exception:
-                return 0.0
-
-        workbook = Workbook()
-        summary_sheet = workbook.active
-        summary_sheet.title = "分类汇总"
-        summary_sheet.append(["发票分类", "数量", "金额合计"])
-
-        category_summary = {}
-        for item in self.processed_invoices:
-            category = str(item.get("category") or "未分类")
-            bucket = category_summary.setdefault(category, {"count": 0, "amount": 0.0})
-            bucket["count"] += 1
-            bucket["amount"] += _parse_amount(item.get("amount", ""))
-
-        if category_summary:
-            for category in sorted(category_summary.keys()):
-                bucket = category_summary[category]
-                summary_sheet.append([category, bucket["count"], round(bucket["amount"], 2)])
-        else:
-            summary_sheet.append(["暂无成功记录", 0, 0.0])
-
-        success_sheet = workbook.create_sheet("成功明细")
-        success_sheet.append(["日期", "金额", "销售方", "分类", "文件路径"])
-        for item in self.processed_invoices:
-            success_sheet.append([
-                item.get("date", ""),
-                item.get("amount", ""),
-                item.get("merchant", ""),
-                item.get("category", ""),
-                item.get("path", ""),
-            ])
-
-        error_sheet = workbook.create_sheet("异常记录")
-        error_sheet.append(["分组", "状态", "原因", "日期", "金额", "销售方", "文件名", "文件路径"])
-        for group in self._group_error_invoices():
-            for item in group.get("items", []):
-                error_sheet.append([
-                    group.get("label", ""),
-                    item.get("status", ""),
-                    item.get("reason", ""),
-                    item.get("date", ""),
-                    item.get("amount", ""),
-                    item.get("merchant", ""),
-                    item.get("name", ""),
-                    item.get("path", ""),
-                ])
-
-        export_file = os.path.join(target_dir, f"结果明细_{time.strftime('%Y%m%d_%H%M%S')}.xlsx")
-        workbook.save(export_file)
-        self._last_export_path = export_file
-        return {"success": True, "message": "结果明细已导出", "path": export_file}
-
-
     def _start_async_finalizers(self, fetcher=None):
         handle = self._active_run_handle or self._prepare_run_lifecycle()
         if handle.state not in {RunState.FINALIZING, RunState.COMPLETED, RunState.FAILED}:
@@ -5437,53 +5365,6 @@ class InvoiceAppAPI:
     def open_manual_check_folder(self):
         manual_path = self._manual_check_path()
         return self.open_folder(manual_path)
-
-    def _legacy_export_run_summary_pre_release_prep(self, export_path=""):
-        try:
-            from openpyxl import Workbook
-        except ImportError:
-            return {"success": False, "message": "缺少 openpyxl 依赖，无法导出 Excel"}
-
-        target_dir = export_path or self._effective_save_path or self._requested_save_path or self.get_default_save_path()
-        os.makedirs(target_dir, exist_ok=True)
-
-        workbook = Workbook()
-        summary_sheet = workbook.active
-        summary_sheet.title = "运行汇总"
-        summary_sheet.append(["项目", "值"])
-        for key, value in self._summarize_stats().items():
-            summary_sheet.append([key, value])
-
-        success_sheet = workbook.create_sheet("成功记录")
-        success_sheet.append(["日期", "金额", "销售方", "分类", "文件路径"])
-        for item in self.processed_invoices:
-            success_sheet.append([
-                item.get("date", ""),
-                item.get("amount", ""),
-                item.get("merchant", ""),
-                item.get("category", ""),
-                item.get("path", ""),
-            ])
-
-        error_sheet = workbook.create_sheet("异常记录")
-        error_sheet.append(["分组", "状态", "原因", "日期", "金额", "销售方", "文件名", "文件路径"])
-        for group in self._group_error_invoices():
-            for item in group.get("items", []):
-                error_sheet.append([
-                    group.get("label", ""),
-                    item.get("status", ""),
-                    item.get("reason", ""),
-                    item.get("date", ""),
-                    item.get("amount", ""),
-                    item.get("merchant", ""),
-                    item.get("name", ""),
-                    item.get("path", ""),
-                ])
-
-        export_file = os.path.join(target_dir, f"运行摘要_{time.strftime('%Y%m%d_%H%M%S')}.xlsx")
-        workbook.save(export_file)
-        self._last_export_path = export_file
-        return {"success": True, "message": "运行摘要已导出", "path": export_file}
 
     def _finalize_admission_failure(self, handle, exc, *, reason_code="WORKER_START_FAILED"):
         if handle.state in {RunState.COMPLETED, RunState.FAILED}:
@@ -6387,16 +6268,6 @@ class InvoiceAppAPI:
             return {"success": True}
         except Exception as e:
             return {"success": False, "message": str(e)}
-
-    def retry_all_errors(self):
-        """重新处理所有失败的发票任务（占位实现）"""
-        print("Retrying all failed invoices...")
-        return {"success": True, "message": "已为您触发全部重试任务"}
-
-    def retry_single_invoice(self, name):
-        """重新处理特定的一张发票（占位实现）"""
-        print(f"Retrying single invoice: {name}")
-        return {"success": True, "message": f"正在重试发票: {name}"}
 
     def view_invoice(self, path):
         """在系统默认查看器中打开单张发票或图片"""
