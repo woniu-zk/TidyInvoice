@@ -39,6 +39,7 @@ class FetchOnlyResult:
     saved_count: int = 0
     duplicate_count: int = 0
     link_count: int = 0
+    skipped_count: int = 0
     inbox_dir: str = ""
     manifest_path: str = ""
 
@@ -75,6 +76,55 @@ def _stable_hash(value: str) -> str:
     return hashlib.sha256(str(value or "").encode("utf-8", errors="replace")).hexdigest()
 
 
+def _uid_int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _resume_last_uid(state: dict[str, Any], uidvalidity: str) -> int:
+    """Return a comparable checkpoint UID, or 0 when resume is unsafe."""
+    if not uidvalidity:
+        return 0
+    if str(state.get("uidvalidity") or "") != str(uidvalidity):
+        return 0
+    value = _uid_int(state.get("last_uid"))
+    return max(0, value or 0)
+
+
+def _filter_resumed_uids(email_ids: list[Any], last_uid: int) -> tuple[list[Any], int]:
+    if last_uid <= 0:
+        return list(email_ids), 0
+    kept: list[Any] = []
+    skipped = 0
+    for uid in email_ids:
+        value = _uid_int(uid)
+        if value is not None and value <= last_uid:
+            skipped += 1
+            continue
+        kept.append(uid)
+    return kept, skipped
+
+
+def _fetch_state_payload(
+    mailbox: str,
+    uidvalidity: str,
+    last_uid: int,
+    summary: "InboxSaveSummary",
+) -> dict[str, Any]:
+    return {
+        "version": 2,
+        "mailbox": str(mailbox or ""),
+        "uidvalidity": str(uidvalidity or ""),
+        "last_uid": int(last_uid),
+        "saved": int(summary.saved_count),
+        "duplicates": int(summary.duplicate_count),
+        "links": int(summary.link_count),
+        "last_run": fetch_handoff.utc_now_iso(),
+    }
+
+
 def _iso_date_bounds(request: FetchOnlyRequest) -> tuple[str, str]:
     today = datetime.now().date()
 
@@ -97,15 +147,22 @@ def save_fetch_rows(
     rows: list[dict[str, Any]],
     *,
     mailbox: str = "INBOX",
+    writer: fetch_handoff.InboxWriter | None = None,
+    summary: InboxSaveSummary | None = None,
 ) -> InboxSaveSummary:
-    """Persist extracted attachments into ``<output>/inbox`` + manifest."""
+    """Persist extracted attachments into ``<output>/inbox`` + manifest.
+
+    ``writer`` / ``summary`` let a batch loop reuse one manifest index instead of
+    re-reading the whole manifest for every batch.
+    """
     inbox_dir = os.path.join(output_dir, fetch_handoff.INBOX_DIRNAME)
-    writer = fetch_handoff.InboxWriter(inbox_dir)
-    summary = InboxSaveSummary(
-        inbox_dir=inbox_dir,
-        manifest_path=str(writer.manifest_path),
-        warnings=tuple(writer.warnings),
-    )
+    writer = writer or fetch_handoff.InboxWriter(inbox_dir)
+    if summary is None:
+        summary = InboxSaveSummary(
+            inbox_dir=str(writer.root),
+            manifest_path=str(writer.manifest_path),
+            warnings=tuple(writer.warnings),
+        )
     for row in rows or []:
         if not isinstance(row, dict):
             continue
@@ -244,18 +301,97 @@ class FetchOnlyRunner:
             email_ids = fetcher.fetch_emails_by_date(
                 since_date=since, before_date=before
             )
-            rows = fetcher.extract_attachments(email_ids, mailbox=request.mailbox)
-            summary = save_fetch_rows(
-                output_dir, list(rows or []), mailbox=request.mailbox
+            uidvalidity = str(getattr(fetcher, "uidvalidity", "") or "")
+            inbox_dir = os.path.join(output_dir, fetch_handoff.INBOX_DIRNAME)
+            writer = fetch_handoff.InboxWriter(inbox_dir)
+            summary = InboxSaveSummary(
+                inbox_dir=str(writer.root),
+                manifest_path=str(writer.manifest_path),
+                warnings=tuple(writer.warnings),
             )
+            state = fetch_handoff.load_fetch_state(writer.state_path)
+            last_uid = _resume_last_uid(state, uidvalidity)
+            email_ids, skipped_count = _filter_resumed_uids(
+                list(email_ids or []), last_uid
+            )
+            checkpoint = {"last_uid": last_uid, "blocked": False, "saved_once": False}
+
+            def persist_batch(batch_rows, batch_uids, unresolved_uids):
+                # Persist first, then advance the checkpoint: a crash between the
+                # two can only cause a safe re-download, never a lost email.
+                save_fetch_rows(
+                    output_dir,
+                    list(batch_rows),
+                    mailbox=request.mailbox,
+                    writer=writer,
+                    summary=summary,
+                )
+                checkpoint["saved_once"] = True
+                if unresolved_uids:
+                    checkpoint["blocked"] = True
+                elif not checkpoint["blocked"]:
+                    max_uid = max(
+                        (
+                            value
+                            for value in (_uid_int(uid) for uid in batch_uids)
+                            if value is not None
+                        ),
+                        default=None,
+                    )
+                    if max_uid is not None and max_uid > checkpoint["last_uid"]:
+                        checkpoint["last_uid"] = max_uid
+                writer.save_state(
+                    _fetch_state_payload(
+                        request.mailbox,
+                        uidvalidity,
+                        checkpoint["last_uid"],
+                        summary,
+                    )
+                )
+
+            rows = fetcher.extract_attachments(
+                email_ids,
+                mailbox=request.mailbox,
+                batch_callback=persist_batch,
+            )
+            if rows and not checkpoint["saved_once"]:
+                # Defensive fallback for fetchers that do not emit batch callbacks.
+                save_fetch_rows(
+                    output_dir,
+                    list(rows),
+                    mailbox=request.mailbox,
+                    writer=writer,
+                    summary=summary,
+                )
+                max_uid = max(
+                    (
+                        value
+                        for value in (_uid_int(uid) for uid in email_ids)
+                        if value is not None
+                    ),
+                    default=None,
+                )
+                if max_uid is not None and max_uid > checkpoint["last_uid"]:
+                    checkpoint["last_uid"] = max_uid
+                writer.save_state(
+                    _fetch_state_payload(
+                        request.mailbox,
+                        uidvalidity,
+                        checkpoint["last_uid"],
+                        summary,
+                    )
+                )
             return FetchOnlyResult(
                 ok=True,
                 message="附件已提取到 inbox，等待整理",
                 email_count=len(email_ids or []),
-                attachment_count=len(rows or []),
+                attachment_count=(
+                    summary.saved_count + summary.duplicate_count + summary.link_count
+                ),
                 saved_count=summary.saved_count,
                 duplicate_count=summary.duplicate_count,
                 link_count=summary.link_count,
+                skipped_count=skipped_count,
                 inbox_dir=summary.inbox_dir,
                 manifest_path=summary.manifest_path,
             )

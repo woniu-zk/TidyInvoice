@@ -1405,6 +1405,7 @@ class EmailFetcher:
         self.monitoring_dir = os.path.abspath(monitoring_dir) if monitoring_dir else ""
         self.progress_callback = progress_callback
         self.mail = None
+        self.uidvalidity = ""
         self._abort_requested = False
         # Hard per-message raw RFC822 cap; overridable for tests.
         self.max_raw_message_bytes = MAX_RAW_MESSAGE_BYTES
@@ -1702,18 +1703,20 @@ class EmailFetcher:
         since = to_date(since_date, "since_date")
         before = to_date(before_date, "before_date")
         self._emit_progress("正在读取邮箱 UID 并进行本地日期过滤。")
+        scanner = self._mailbox_scanner()
         try:
-            refs = self._mailbox_scanner().scan(since, before, mailbox=mailbox)
+            refs = scanner.scan(since, before, mailbox=mailbox)
         except MailboxScanError:
             self.abort()
             self.disconnect()
             raise
+        self.uidvalidity = str(getattr(scanner, "uidvalidity", "") or "")
         email_ids = [ref.uid for ref in refs]
         logging.info("Local UID date filter retained %s emails.", len(email_ids))
         self._emit_progress(f"本地日期过滤完成，最终保留 {len(email_ids)} 封邮件。")
         return email_ids
 
-    def extract_attachments(self, email_ids, mailbox="INBOX"):
+    def extract_attachments(self, email_ids, mailbox="INBOX", *, batch_callback=None):
         """1.3 Extract direct file attachments via 4-tier funnel filtering"""
         if not self.mail:
             return []
@@ -1754,6 +1757,7 @@ class EmailFetcher:
             chunk = list(message_batch.requested_uids)
             prefetched_messages = dict(message_batch.messages)
             prefetched_oversized = dict(message_batch.oversized_messages)
+            batch_result_start = len(results)
             logging.info(f"Processing chunk {batch_index}/{batch_total}")
 
             for e_id in chunk:
@@ -2536,6 +2540,12 @@ class EmailFetcher:
                     processed_attachment = None
                     payload = None
 
+            if batch_callback is not None:
+                batch_callback(
+                    list(results[batch_result_start:]),
+                    list(message_batch.requested_uids),
+                    list(message_batch.unresolved_uids),
+                )
             time.sleep(EMAIL_FETCH_LOOP_PAUSE_SECONDS)
             prefetched_messages.clear()
             del prefetched_messages

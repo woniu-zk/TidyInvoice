@@ -126,6 +126,9 @@ class MailboxScanner:
         self.max_attempts = max_attempts
         self.max_message_bytes = int(max_message_bytes)
         self.diagnostic_callback = diagnostic_callback
+        # Filled by select_mailbox(); used by fetch-only resume to decide whether
+        # a stored last-UID checkpoint is still comparable.
+        self.uidvalidity = ""
 
     def scan(
         self,
@@ -169,6 +172,24 @@ class MailboxScanner:
             raise MailboxScanError("IMAP SELECT failed") from exc
         if not self.is_ok_status(status):
             raise MailboxScanError("IMAP SELECT failed")
+        self.uidvalidity = self._read_uidvalidity()
+
+    def _read_uidvalidity(self) -> str:
+        """Return the selected mailbox UIDVALIDITY, or "" when unavailable."""
+        response = getattr(self.mail, "response", None)
+        if not callable(response):
+            return ""
+        try:
+            status, data = response("UIDVALIDITY")
+        except Exception:
+            return ""
+        if str(status or "").upper() != "UIDVALIDITY" or not data:
+            return ""
+        value = data[0]
+        if isinstance(value, (bytes, bytearray)):
+            value = bytes(value).decode("ascii", errors="ignore")
+        text = str(value or "").strip()
+        return text if text.isdigit() else ""
 
     def iter_message_batches(
         self, uids: Iterable[bytes], query: str | None = None
