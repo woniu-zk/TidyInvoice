@@ -11,7 +11,9 @@ const sourceRoot = projectRoot
 const engineSourceFiles = [
   'app_api.py',
   'app_services/__init__.py',
+  'app_services/admission.py',
   'app_services/diagnostics.py',
+  'app_services/errors.py',
   'app_services/exports.py',
   'app_services/settings_rules.py',
   'app_archive_adapter.py',
