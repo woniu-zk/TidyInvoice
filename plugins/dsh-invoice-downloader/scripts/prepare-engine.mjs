@@ -46,6 +46,7 @@ const engineSourceFiles = [
   'local_recognition.py',
   'mailbox_scanner.py',
   'main.py',
+  'ocr_runtime.py',
   'pairing_engine.py',
   'pdf_converter.py',
   'pinned_http.py',

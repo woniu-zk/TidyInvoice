@@ -32,6 +32,8 @@ from pathlib import Path
 from typing import Any, Sequence
 from xml.etree import ElementTree as ET
 
+from ocr_runtime import OcrRuntimeError, OcrTimeout, ProcessOcrRuntime, ThreadOcrRuntime
+
 from document_types import (
     CHARGING_SERVICE_TOKENS,
     DINING_BEVERAGE_TOKENS,
@@ -177,6 +179,38 @@ class _OcrBudget:
 
 
 _OCR_BUDGET = _OcrBudget()
+_OCR_RUNTIME: Any = None
+_OCR_RUNTIME_LOCK = threading.Lock()
+
+
+def configure_ocr_runtime(mode: str | None = None) -> str:
+    """Select the OCR runtime (``thread`` default, ``process`` opt-in)."""
+    global _OCR_RUNTIME
+    selected = str(
+        mode or os.getenv("TIDYINVOICE_OCR_RUNTIME", "thread")
+    ).strip().lower()
+    if selected not in {"thread", "process"}:
+        selected = "thread"
+    with _OCR_RUNTIME_LOCK:
+        if _OCR_RUNTIME is not None and _OCR_RUNTIME.mode == selected:
+            return selected
+        if _OCR_RUNTIME is not None:
+            try:
+                _OCR_RUNTIME.close()
+            except Exception:
+                pass
+        if selected == "process":
+            _OCR_RUNTIME = ProcessOcrRuntime()
+        else:
+            _OCR_RUNTIME = ThreadOcrRuntime(lambda: _load_ocr_engine())
+    return selected
+
+
+def _get_ocr_runtime():
+    global _OCR_RUNTIME
+    if _OCR_RUNTIME is None:
+        configure_ocr_runtime()
+    return _OCR_RUNTIME
 
 
 def begin_ocr_run() -> None:
@@ -397,32 +431,21 @@ def _ocr_blocks_from_bytes(
     image_bytes = _prepare_ocr_image_bytes(image_bytes)
     _OCR_BUDGET.ensure_available()
     timeout = _remaining_seconds(deadline)
-    done = threading.Event()
-    outcome: dict[str, Any] = {}
-
-    def runner() -> None:
-        try:
-            with _OCR_INFERENCE_LOCK:
-                outcome["value"] = engine(image_bytes)
-        except BaseException as exc:  # propagated to the waiting caller
-            outcome["error"] = exc
-        finally:
-            done.set()
-
-    thread = threading.Thread(target=runner, name="LocalOCR", daemon=True)
-    thread.start()
-    if not done.wait(timeout):
-        # The engine cannot be interrupted in-process; record the abandonment
-        # and let the late result finish in the background. The per-run budget
-        # prevents this from accumulating on pathological files.
+    runtime = _get_ocr_runtime()
+    try:
+        value = runtime.infer(image_bytes, timeout=timeout, engine=engine)
+    except OcrTimeout:
+        # Thread mode leaves the inference running; the process runtime kills
+        # and restarts its child. Either way the file degrades to review and the
+        # per-run budget prevents repeated hangs.
         _OCR_BUDGET.record_abandoned()
         raise LocalRecognitionUnavailable(
             REASON_TIMEOUT,
             f"local OCR exceeded {timeout:.1f}s",
         )
-    if "error" in outcome:
-        raise outcome["error"]
-    result, _elapsed = outcome.get("value") or (None, None)
+    except OcrRuntimeError as exc:
+        raise LocalRecognitionUnavailable(REASON_OCR_UNAVAILABLE, str(exc)) from exc
+    result, _elapsed = value or (None, None)
     blocks: list[tuple[float, float, str]] = []
     for item in result or []:
         try:
@@ -448,7 +471,7 @@ def read_pdf_ocr_text(
     ocr_engine: Any = None,
     deadline: float | None = None,
 ) -> str:
-    engine = ocr_engine or _load_ocr_engine()
+    engine = ocr_engine
     fitz = _require_fitz()
     page_texts: list[str] = []
     with fitz.open(str(path)) as document:
@@ -471,7 +494,7 @@ def read_pdf_ocr_text(
 def read_image_ocr_text(
     path: str | Path, *, ocr_engine: Any = None, deadline: float | None = None
 ) -> str:
-    engine = ocr_engine or _load_ocr_engine()
+    engine = ocr_engine
     _check_deadline(deadline, "image OCR")
     try:
         image_bytes = Path(path).read_bytes()

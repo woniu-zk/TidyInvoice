@@ -1,6 +1,7 @@
 import argparse
 import ctypes
 import json
+import multiprocessing
 import os
 import sys
 import tempfile
@@ -606,6 +607,8 @@ def _ensure_expected_frontend_assets(current_dir):
 
 
 def main(argv=None):
+    # Required before spawning the optional isolated OCR process in a frozen app.
+    multiprocessing.freeze_support()
     args = _parse_args(argv)
     worker_path = str(args.url_recovery_worker_path or "").strip()
     if worker_path:
