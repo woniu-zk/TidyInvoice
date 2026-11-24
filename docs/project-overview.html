@@ -1,0 +1,2137 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>InvoiceFlowAI 功能总览 · 交互式项目说明</title>
+<meta name="description" content="InvoiceFlowAI 电子发票整理与报销准备工具的功能总览：三种使用方式、端到端流水线、本地识别、费用归类规则、凭证撮合与发布工程。">
+<style>
+/* ============================ tokens ============================ */
+:root{
+  --sidebar-w: 264px;
+  --radius-xl: 24px;
+  --radius-lg: 18px;
+  --radius-md: 14px;
+  --radius-sm: 10px;
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  --font-mono: "Cascadia Code", "JetBrains Mono", Consolas, "SFMono-Regular", monospace;
+  --ease: cubic-bezier(.22,.68,0,1);
+}
+html[data-theme="dark"]{
+  color-scheme: dark;
+  --bg: #05070d;
+  --bg-2: #0a111e;
+  --panel: rgba(13, 21, 37, .78);
+  --panel-solid: #0c1524;
+  --panel-2: rgba(18, 29, 49, .72);
+  --text: #f4f8ff;
+  --soft: rgba(228, 237, 252, .76);
+  --muted: rgba(197, 212, 236, .5);
+  --line: rgba(202, 219, 248, .12);
+  --line-strong: rgba(202, 219, 248, .22);
+  --accent: #4c8fff;
+  --accent-2: #73dcff;
+  --green: #4ed68f;
+  --amber: #f0b35f;
+  --red: #ff7c82;
+  --violet: #b28dff;
+  --shadow: 0 26px 70px rgba(0, 0, 0, .45);
+  --shadow-soft: 0 14px 34px rgba(0, 0, 0, .28);
+  --code-bg: rgba(255, 255, 255, .055);
+  --hero-glow: radial-gradient(circle at 18% 12%, rgba(76,143,255,.2), transparent 34%), radial-gradient(circle at 82% 8%, rgba(115,220,255,.12), transparent 30%);
+  --grid-line: rgba(180, 205, 245, .045);
+}
+html[data-theme="light"]{
+  color-scheme: light;
+  --bg: #f2f5fb;
+  --bg-2: #ffffff;
+  --panel: rgba(255, 255, 255, .82);
+  --panel-solid: #ffffff;
+  --panel-2: rgba(247, 250, 255, .9);
+  --text: #0c1626;
+  --soft: #44506a;
+  --muted: #6c7890;
+  --line: rgba(13, 28, 54, .1);
+  --line-strong: rgba(13, 28, 54, .2);
+  --accent: #2563eb;
+  --accent-2: #0e8bb0;
+  --green: #12855a;
+  --amber: #a76a12;
+  --red: #c43a44;
+  --violet: #6b45c9;
+  --shadow: 0 26px 70px rgba(23, 42, 84, .14);
+  --shadow-soft: 0 14px 34px rgba(23, 42, 84, .08);
+  --code-bg: rgba(15, 32, 65, .05);
+  --hero-glow: radial-gradient(circle at 18% 12%, rgba(37,99,235,.12), transparent 34%), radial-gradient(circle at 82% 8%, rgba(14,139,176,.1), transparent 30%);
+  --grid-line: rgba(20, 45, 90, .05);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0; min-height:100vh;
+  font-family:var(--font-ui);
+  color:var(--text);
+  background:
+    var(--hero-glow),
+    linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 48%, var(--bg) 100%);
+  background-attachment:fixed;
+  line-height:1.65;
+  -webkit-font-smoothing:antialiased;
+}
+body::before{
+  content:""; position:fixed; inset:0; z-index:-1; pointer-events:none;
+  background-image:linear-gradient(var(--grid-line) 1px, transparent 1px),linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size:56px 56px;
+  mask-image:radial-gradient(ellipse at 50% 0%, #000 0%, transparent 72%);
+  -webkit-mask-image:radial-gradient(ellipse at 50% 0%, #000 0%, transparent 72%);
+}
+a{color:var(--accent); text-decoration:none}
+a:hover{text-decoration:underline}
+img{max-width:100%; display:block}
+button,input,select,textarea{font:inherit; color:inherit}
+button{cursor:pointer}
+::selection{background:rgba(76,143,255,.35)}
+:focus-visible{outline:2px solid var(--accent-2); outline-offset:3px; border-radius:6px}
+.skip-link{position:fixed; left:16px; top:-60px; z-index:200; padding:10px 16px; background:var(--accent); color:#fff; border-radius:10px; transition:top .2s}
+.skip-link:focus{top:12px}
+
+/* ============================ progress + sidebar ============================ */
+#progress{position:fixed; top:0; left:0; height:3px; width:0; z-index:120; background:linear-gradient(90deg,var(--accent),var(--accent-2)); box-shadow:0 0 20px rgba(76,143,255,.65)}
+.sidebar{
+  position:fixed; inset:0 auto 0 0; width:var(--sidebar-w); z-index:100;
+  display:flex; flex-direction:column; gap:18px;
+  padding:24px 16px 18px 20px;
+  background:linear-gradient(180deg, rgba(10,17,30,.92), rgba(8,14,25,.86));
+  border-right:1px solid var(--line);
+  backdrop-filter: blur(20px);
+  transition:transform .35s var(--ease);
+}
+html[data-theme="light"] .sidebar{background:linear-gradient(180deg, rgba(255,255,255,.94), rgba(248,251,255,.9))}
+.brand{display:flex; align-items:center; gap:12px; padding:2px 6px 0}
+.brand-mark{
+  width:42px; height:42px; flex:0 0 42px; display:grid; place-items:center;
+  border-radius:13px; font-weight:800; letter-spacing:-.5px; font-size:15px;
+  color:#fff; background:linear-gradient(135deg,#4c8fff,#73dcff 70%,#4ed68f);
+  box-shadow:0 10px 26px rgba(76,143,255,.35);
+}
+.brand-meta{display:flex; flex-direction:column; line-height:1.25}
+.brand-meta strong{font-size:15px; letter-spacing:.2px}
+.brand-meta span{font-size:11.5px; color:var(--muted); letter-spacing:.16em; text-transform:uppercase}
+.search-wrap{position:relative; display:flex; align-items:center}
+.search-wrap svg{position:absolute; left:12px; width:16px; height:16px; color:var(--muted); pointer-events:none}
+#search{
+  width:100%; padding:10px 38px 10px 36px; border-radius:12px;
+  border:1px solid var(--line); background:var(--code-bg); color:var(--text);
+  font-size:13px; outline:none; transition:border-color .2s, box-shadow .2s;
+}
+#search:focus{border-color:var(--accent); box-shadow:0 0 0 3px rgba(76,143,255,.14)}
+#search::placeholder{color:var(--muted)}
+.search-wrap kbd{
+  position:absolute; right:10px; top:50%; transform:translateY(-50%);
+  font-family:var(--font-mono); font-size:10.5px; color:var(--muted);
+  border:1px solid var(--line-strong); border-radius:5px; padding:1px 5px; background:var(--code-bg);
+}
+.nav{flex:1; overflow:auto; padding:2px 4px 8px; margin:0 -4px; scrollbar-width:thin}
+.nav-group{margin:16px 0 6px; padding:0 10px; font-size:10.5px; letter-spacing:.18em; text-transform:uppercase; color:var(--muted)}
+.nav-link{
+  display:flex; align-items:center; gap:9px; padding:8px 10px; margin:1px 0;
+  border-radius:9px; color:var(--soft); font-size:13px; line-height:1.3;
+  border:1px solid transparent; text-decoration:none; transition:background .18s,color .18s,border-color .18s;
+}
+.nav-link:hover{background:var(--code-bg); color:var(--text); text-decoration:none}
+.nav-link.active{background:linear-gradient(90deg, rgba(76,143,255,.18), rgba(115,220,255,.06)); color:var(--text); border-color:rgba(76,143,255,.28)}
+.nav-link .dot{width:5px; height:5px; border-radius:50%; background:var(--muted); flex:0 0 5px; transition:background .18s,box-shadow .18s}
+.nav-link.active .dot{background:var(--accent-2); box-shadow:0 0 10px var(--accent-2)}
+.sidebar-foot{display:flex; flex-direction:column; gap:8px; padding:12px 4px 0; border-top:1px solid var(--line)}
+.side-link{display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:9px; font-size:12.5px; color:var(--soft); border:1px solid transparent; text-decoration:none; background:none; width:100%; text-align:left}
+.side-link:hover{background:var(--code-bg); color:var(--text); text-decoration:none}
+.side-link svg{width:15px; height:15px; flex:0 0 15px}
+.side-note{font-size:11px; color:var(--muted); padding:2px 10px 0; line-height:1.5}
+
+/* ============================ topbar ============================ */
+.topbar{
+  position:sticky; top:0; z-index:80; margin-left:var(--sidebar-w);
+  display:flex; align-items:center; gap:14px; justify-content:space-between;
+  padding:12px clamp(18px, 3vw, 40px);
+  border-bottom:1px solid var(--line);
+  background:var(--bg);
+  background:color-mix(in srgb, var(--bg) 72%, transparent);
+  backdrop-filter: blur(18px) saturate(130%);
+}
+.crumb{display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--muted); min-width:0}
+.crumb strong{color:var(--soft); font-weight:600}
+.crumb .sep{opacity:.5}
+.crumb-current{color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.top-actions{display:flex; align-items:center; gap:8px}
+.chip{
+  display:inline-flex; align-items:center; gap:6px; padding:5px 10px; border-radius:999px;
+  border:1px solid var(--line); background:var(--code-bg); color:var(--soft);
+  font-size:11.5px; white-space:nowrap;
+}
+.chip .pulse{width:6px; height:6px; border-radius:50%; background:var(--green); box-shadow:0 0 0 0 rgba(78,214,143,.7); animation:pulse 2.6s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(78,214,143,.55)}70%{box-shadow:0 0 0 8px rgba(78,214,143,0)}100%{box-shadow:0 0 0 0 rgba(78,214,143,0)}}
+.icon-btn{
+  display:inline-grid; place-items:center; width:34px; height:34px; border-radius:9px;
+  border:1px solid var(--line); background:var(--code-bg); color:var(--soft);
+  transition:color .18s, border-color .18s, background .18s;
+}
+.icon-btn:hover{color:var(--text); border-color:var(--line-strong); background:var(--panel-2)}
+.icon-btn svg{width:16px; height:16px}
+.menu-btn{display:none}
+
+/* ============================ layout ============================ */
+main{margin-left:var(--sidebar-w); padding:0 clamp(18px, 3vw, 44px) 80px}
+.section{max-width:1180px; margin:0 auto; padding:clamp(46px, 6vw, 82px) 0 8px; scroll-margin-top:84px}
+.section + .section{border-top:1px solid var(--line)}
+.eyebrow{display:flex; align-items:center; gap:10px; font-size:11.5px; letter-spacing:.22em; text-transform:uppercase; color:var(--accent-2); font-weight:650}
+.eyebrow::before{content:""; width:22px; height:1px; background:linear-gradient(90deg,var(--accent),transparent)}
+h2.title{margin:12px 0 10px; font-size:clamp(24px, 2.6vw, 34px); line-height:1.25; letter-spacing:-.6px; font-weight:700}
+.lead{max-width:820px; color:var(--soft); font-size:15px; margin:0 0 26px}
+.lead strong{color:var(--text); font-weight:600}
+.mini-title{font-size:12px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); margin:26px 0 12px}
+
+/* ============================ hero ============================ */
+.hero{display:grid; grid-template-columns:minmax(0,1.08fr) minmax(0,.92fr); gap:clamp(28px,4vw,56px); align-items:center; padding-top:clamp(34px,5vw,64px); max-width:1240px}
+.hero h1{margin:16px 0 18px; font-size:clamp(33px, 4vw, 50px); line-height:1.12; letter-spacing:-1.4px; font-weight:780}
+.grad{background:linear-gradient(100deg,var(--accent) 0%,var(--accent-2) 52%,var(--green) 100%); -webkit-background-clip:text; background-clip:text; color:transparent}
+.hero-lead{font-size:16px; color:var(--soft); max-width:600px; margin:0 0 22px}
+.hero-lead strong{color:var(--text)}
+.badges{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:26px}
+.badge{display:inline-flex; align-items:center; gap:7px; padding:6px 11px; border-radius:999px; font-size:12px; color:var(--soft); border:1px solid var(--line); background:var(--panel)}
+.badge svg{width:14px; height:14px; color:var(--accent-2)}
+.hero-actions{display:flex; flex-wrap:wrap; gap:10px; align-items:center}
+.btn{
+  display:inline-flex; align-items:center; gap:8px; padding:11px 18px; border-radius:11px;
+  font-size:13.5px; font-weight:600; border:1px solid var(--line); background:var(--panel); color:var(--text);
+  text-decoration:none; transition:transform .18s var(--ease), box-shadow .18s, border-color .18s, background .18s;
+}
+.btn:hover{transform:translateY(-2px); text-decoration:none; border-color:var(--line-strong); box-shadow:var(--shadow-soft)}
+.btn.primary{background:linear-gradient(135deg,var(--accent),#3a72e8); border-color:transparent; color:#fff; box-shadow:0 14px 30px rgba(76,143,255,.32)}
+.btn.primary:hover{box-shadow:0 18px 38px rgba(76,143,255,.42)}
+.btn.ghost{background:transparent}
+.btn svg{width:15px; height:15px}
+.hero-shot{position:relative}
+.shot-frame{
+  position:relative; border-radius:var(--radius-xl); overflow:hidden;
+  border:1px solid var(--line-strong); background:var(--panel-solid);
+  box-shadow:var(--shadow); transform:perspective(1400px) rotateY(-4deg) rotateX(2deg);
+  transition:transform .5s var(--ease), box-shadow .5s;
+}
+.hero-shot:hover .shot-frame{transform:perspective(1400px) rotateY(0) rotateX(0); box-shadow:0 36px 90px rgba(0,0,0,.5)}
+.shot-frame::after{content:""; position:absolute; inset:0; border-radius:inherit; pointer-events:none; box-shadow:inset 0 1px 0 rgba(255,255,255,.14)}
+.shot-frame img{width:100%; height:auto}
+.shot-tag{
+  position:absolute; left:18px; bottom:18px; display:flex; align-items:center; gap:8px;
+  padding:8px 13px; border-radius:999px; font-size:12px; color:#fff;
+  background:rgba(6,12,24,.72); border:1px solid rgba(255,255,255,.16); backdrop-filter:blur(10px);
+}
+.shot-tag .dot{width:7px; height:7px; border-radius:50%; background:var(--green); box-shadow:0 0 10px var(--green)}
+.float-card{
+  position:absolute; right:-14px; top:-18px; display:flex; align-items:center; gap:10px;
+  padding:11px 14px; border-radius:14px; background:var(--panel-solid); border:1px solid var(--line-strong);
+  box-shadow:var(--shadow-soft); font-size:12px; color:var(--soft); animation:floaty 5.5s ease-in-out infinite;
+}
+.float-card strong{display:block; color:var(--text); font-size:15px; line-height:1.2}
+.float-card .ico{display:grid; place-items:center; width:34px; height:34px; border-radius:10px; background:rgba(78,214,143,.14); color:var(--green)}
+.float-card .ico svg{width:17px; height:17px}
+@keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+
+.stats-band{
+  grid-column:1 / -1; display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:1px;
+  margin-top:clamp(26px,4vw,44px); border:1px solid var(--line); border-radius:var(--radius-lg);
+  overflow:hidden; background:var(--line);
+}
+.stat{background:var(--panel-solid); padding:18px 18px 16px}
+.stat b{display:block; font-size:clamp(22px,2.4vw,30px); line-height:1.15; letter-spacing:-.6px; font-variant-numeric:tabular-nums}
+.stat span{display:block; margin-top:3px; font-size:11.5px; color:var(--muted)}
+.stat em{font-style:normal; color:var(--accent-2); font-size:13px; margin-left:2px}
+
+/* ============================ cards / grids ============================ */
+.grid{display:grid; gap:14px}
+.grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.card{
+  position:relative; padding:20px; border-radius:var(--radius-lg);
+  border:1px solid var(--line); background:var(--panel);
+  backdrop-filter:blur(14px); transition:transform .22s var(--ease), border-color .22s, box-shadow .22s, background .22s;
+}
+.card:hover{transform:translateY(-3px); border-color:var(--line-strong); box-shadow:var(--shadow-soft)}
+.card h3{margin:0 0 8px; font-size:16px; letter-spacing:-.2px}
+.card p{margin:0; color:var(--soft); font-size:13.5px}
+.card .num{
+  display:inline-grid; place-items:center; width:30px; height:30px; border-radius:9px;
+  font-family:var(--font-mono); font-size:12px; color:var(--accent-2);
+  background:rgba(76,143,255,.12); border:1px solid rgba(76,143,255,.24); margin-bottom:12px;
+}
+.step-line{display:flex; align-items:center; gap:8px; margin-bottom:10px}
+.step-line .step-label{font-size:11.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted)}
+.checks{list-style:none; margin:14px 0 0; padding:0; display:grid; gap:9px}
+.checks li{display:flex; gap:10px; font-size:13.5px; color:var(--soft)}
+.checks svg{width:16px; height:16px; flex:0 0 16px; color:var(--green); margin-top:3px}
+.gallery{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-top:18px}
+.gallery figure{margin:0; border-radius:var(--radius-md); overflow:hidden; border:1px solid var(--line); background:var(--panel-solid)}
+.gallery img{width:100%; aspect-ratio:4/3; object-fit:cover; transition:transform .5s var(--ease)}
+.gallery figure:hover img{transform:scale(1.035)}
+.gallery figcaption{padding:9px 12px; font-size:11.5px; color:var(--muted); border-top:1px solid var(--line)}
+.pain-grid{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px}
+.pain{display:grid; grid-template-columns:34px 1fr; gap:12px; padding:16px; border-radius:var(--radius-md); border:1px solid var(--line); background:var(--panel-2)}
+.pain .p-ico{display:grid; place-items:center; width:34px; height:34px; border-radius:10px; background:var(--code-bg); border:1px solid var(--line); font-size:16px}
+.pain h4{margin:1px 0 4px; font-size:13.5px}
+.pain p{margin:0; font-size:12.5px; color:var(--muted)}
+.pain p strong{color:var(--soft); font-weight:600}
+.pain-grid .pain:last-child{grid-column:1 / -1}
+
+/* ============================ tabs ============================ */
+.tabs{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px}
+.tab{
+  padding:9px 15px; border-radius:10px; border:1px solid var(--line); background:var(--panel);
+  color:var(--soft); font-size:13px; transition:all .18s;
+}
+.tab:hover{border-color:var(--line-strong); color:var(--text)}
+.tab[aria-selected="true"]{background:linear-gradient(135deg,rgba(76,143,255,.22),rgba(115,220,255,.1)); border-color:rgba(76,143,255,.42); color:var(--text); box-shadow:0 8px 22px rgba(76,143,255,.16)}
+.panel[hidden]{display:none}
+.panel{animation:fadeUp .35s var(--ease)}
+@keyframes fadeUp{from{opacity:0; transform:translateY(8px)}to{opacity:1; transform:none}}
+.mode-grid{display:grid; grid-template-columns:1.15fr .85fr; gap:18px; align-items:start}
+.mode-steps{display:flex; flex-wrap:wrap; gap:8px; margin:14px 0 16px; padding:0; list-style:none}
+.mode-steps li{display:flex; align-items:center; gap:7px; padding:7px 11px; border-radius:999px; border:1px solid var(--line); background:var(--code-bg); font-size:12px; color:var(--soft)}
+.mode-steps .n{font-family:var(--font-mono); font-size:10px; color:var(--accent-2)}
+.output-box{border:1px dashed var(--line-strong); border-radius:var(--radius-md); padding:14px 16px; background:var(--code-bg)}
+.output-box .mini-title{margin:0 0 8px}
+.output-box code{font-family:var(--font-mono); font-size:12px; color:var(--accent-2); word-break:break-all}
+.note{display:flex; gap:10px; padding:12px 14px; border-radius:var(--radius-md); border:1px solid var(--line); background:var(--panel-2); color:var(--muted); font-size:12.5px; margin-top:14px}
+.note svg{width:16px; height:16px; flex:0 0 16px; color:var(--accent-2); margin-top:2px}
+.callout{display:flex; gap:12px; padding:16px 18px; border-radius:var(--radius-md); border:1px solid rgba(76,143,255,.28); background:linear-gradient(135deg,rgba(76,143,255,.1),rgba(115,220,255,.04)); font-size:13px; color:var(--soft); margin:18px 0}
+.callout svg{width:18px; height:18px; flex:0 0 18px; color:var(--accent-2); margin-top:1px}
+
+/* ============================ features ============================ */
+.toolbar{display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin:0 0 14px}
+.filters{display:flex; flex-wrap:wrap; gap:6px}
+.filter{padding:6px 12px; border-radius:999px; border:1px solid var(--line); background:transparent; color:var(--muted); font-size:12px; transition:all .18s}
+.filter:hover{color:var(--text); border-color:var(--line-strong)}
+.filter[aria-pressed="true"]{color:var(--text); background:var(--code-bg); border-color:var(--accent); box-shadow:0 0 0 3px rgba(76,143,255,.1)}
+.search-status{margin-left:auto; font-size:12px; color:var(--muted); min-height:18px}
+.feature-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(266px,1fr)); gap:12px}
+.feature{
+  position:relative; display:flex; flex-direction:column; gap:9px; padding:17px 18px 15px;
+  border-radius:var(--radius-md); border:1px solid var(--line); background:var(--panel);
+  text-align:left; color:var(--text); min-height:158px;
+  transition:transform .22s var(--ease), border-color .22s, box-shadow .22s, opacity .2s;
+}
+.feature:hover{transform:translateY(-3px); border-color:rgba(76,143,255,.42); box-shadow:var(--shadow-soft)}
+.feature .f-head{display:flex; align-items:center; gap:10px}
+.feature .f-ico{display:grid; place-items:center; width:34px; height:34px; border-radius:10px; background:var(--code-bg); border:1px solid var(--line); font-size:16px}
+.feature h3{font-size:14.5px; margin:0; letter-spacing:-.1px}
+.feature p{font-size:12.5px; color:var(--muted); margin:0; flex:1}
+.feature .f-foot{display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:2px}
+.feature .tag{font-size:10.5px; color:var(--muted); border:1px solid var(--line); border-radius:999px; padding:2px 8px}
+.feature .more{font-size:11.5px; color:var(--accent-2)}
+.feature.hidden{display:none}
+.feature.flash{border-color:var(--accent-2); box-shadow:0 0 0 3px rgba(115,220,255,.12)}
+.empty-state{padding:34px 20px; text-align:center; color:var(--muted); border:1px dashed var(--line-strong); border-radius:var(--radius-md); display:none}
+.empty-state.on{display:block}
+
+/* ============================ stepper ============================ */
+.stepper-wrap{position:relative; margin:8px 0 20px}
+.stepper{display:flex; gap:6px; overflow-x:auto; padding:4px 2px 14px; scrollbar-width:thin}
+.stage{
+  flex:1 0 118px; min-width:118px; position:relative; text-align:left; padding:12px 12px 13px;
+  border-radius:12px; border:1px solid var(--line); background:var(--panel-2); color:var(--soft);
+  transition:all .2s;
+}
+.stage:hover{border-color:var(--line-strong); color:var(--text)}
+.stage[aria-current="true"]{background:linear-gradient(135deg,rgba(76,143,255,.2),rgba(115,220,255,.06)); border-color:rgba(76,143,255,.5); color:var(--text); box-shadow:0 10px 26px rgba(76,143,255,.16)}
+.stage .s-num{font-family:var(--font-mono); font-size:10px; color:var(--muted); display:block}
+.stage[aria-current="true"] .s-num{color:var(--accent-2)}
+.stage .s-name{display:block; font-size:13px; font-weight:600; margin-top:3px}
+.stage .s-sub{display:block; font-size:10.5px; color:var(--muted); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.stage::after{content:""; position:absolute; right:-6px; top:50%; width:6px; height:1px; background:var(--line-strong)}
+.stage:last-child::after{display:none}
+.stage-detail{border:1px solid var(--line); border-radius:var(--radius-lg); background:var(--panel); padding:20px 22px; min-height:250px}
+.stage-detail .sd-head{display:flex; align-items:flex-start; justify-content:space-between; gap:14px; flex-wrap:wrap; margin-bottom:14px}
+.stage-detail h3{margin:0; font-size:19px; letter-spacing:-.3px}
+.stage-detail .sd-sub{color:var(--muted); font-size:12.5px; margin-top:2px}
+.sd-badge{font-family:var(--font-mono); font-size:11px; color:var(--accent-2); border:1px solid rgba(76,143,255,.35); border-radius:999px; padding:4px 10px; background:rgba(76,143,255,.1)}
+.sd-grid{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px}
+.sd-cell{padding:13px 14px; border-radius:var(--radius-sm); border:1px solid var(--line); background:var(--panel-2)}
+.sd-cell .k{font-size:10.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); margin-bottom:6px}
+.sd-cell .v{font-size:13px; color:var(--soft)}
+.sd-cell .v strong{color:var(--text)}
+.sd-modules{display:flex; flex-wrap:wrap; gap:6px; margin-top:14px}
+.mod{font-family:var(--font-mono); font-size:11px; color:var(--soft); border:1px solid var(--line); border-radius:6px; padding:3px 7px; background:var(--code-bg)}
+.sd-nav{display:flex; align-items:center; gap:8px; margin-top:16px; flex-wrap:wrap}
+.sd-nav .btn{padding:8px 13px; font-size:12px}
+.tour-state{font-size:11.5px; color:var(--muted); margin-left:auto}
+
+/* ============================ recognition ============================ */
+.recog{display:grid; grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr); gap:16px; align-items:start}
+.recog-opts{display:grid; gap:8px}
+.recog-opt{display:flex; align-items:center; gap:11px; padding:12px 14px; border-radius:var(--radius-md); border:1px solid var(--line); background:var(--panel); color:var(--soft); text-align:left; transition:all .18s}
+.recog-opt:hover{border-color:var(--line-strong); color:var(--text); transform:translateX(2px)}
+.recog-opt[aria-pressed="true"]{border-color:rgba(76,143,255,.5); background:linear-gradient(135deg,rgba(76,143,255,.18),transparent); color:var(--text)}
+.recog-opt .o-ico{display:grid; place-items:center; width:32px; height:32px; border-radius:9px; background:var(--code-bg); border:1px solid var(--line); font-size:15px}
+.recog-opt b{font-size:13px; font-weight:600; display:block}
+.recog-opt small{font-size:11px; color:var(--muted)}
+.recog-result{border:1px solid var(--line); border-radius:var(--radius-lg); background:var(--panel); padding:20px; min-height:320px}
+.recog-result .rr-head{display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:14px}
+.recog-result h3{margin:0; font-size:16.5px}
+.engine-pill{font-family:var(--font-mono); font-size:11px; color:var(--green); border:1px solid rgba(78,214,143,.35); background:rgba(78,214,143,.1); border-radius:999px; padding:3px 9px; white-space:nowrap}
+.flow-chips{display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:10px 0 14px}
+.flow-chips .fc{font-size:11.5px; color:var(--soft); border:1px solid var(--line); border-radius:8px; padding:5px 9px; background:var(--panel-2)}
+.flow-chips .arrow{color:var(--muted); font-size:11px}
+.rr-meta{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px}
+.rr-meta div{padding:10px 12px; border-radius:var(--radius-sm); background:var(--panel-2); border:1px solid var(--line)}
+.rr-meta span{display:block; font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted)}
+.rr-meta b{font-size:12.5px; font-weight:600; color:var(--soft)}
+.rr-note{margin-top:12px; font-size:12px; color:var(--muted); border-left:2px solid var(--accent); padding-left:10px}
+.thresholds{display:flex; flex-wrap:wrap; gap:8px; margin-top:16px}
+.thresholds .chip{font-family:var(--font-mono); font-size:10.5px}
+
+/* ============================ recovery / filter ============================ */
+.tier-grid{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px}
+.tier{position:relative; padding:18px; border-radius:var(--radius-lg); border:1px solid var(--line); background:var(--panel); overflow:hidden}
+.tier::before{content:""; position:absolute; inset:0 auto 0 0; width:3px; background:var(--tier-color,var(--accent))}
+.tier .t-head{display:flex; align-items:center; gap:8px; margin-bottom:8px}
+.tier .t-n{font-family:var(--font-mono); font-size:10px; color:var(--muted)}
+.tier h3{margin:0; font-size:15px}
+.tier p{margin:0 0 10px; font-size:12.5px; color:var(--muted)}
+.tier ul{margin:0; padding:0; list-style:none; display:grid; gap:6px}
+.tier li{font-size:12px; color:var(--soft); display:flex; gap:7px}
+.tier li::before{content:"›"; color:var(--accent-2)}
+.provider-chips{display:flex; flex-wrap:wrap; gap:6px; margin-top:12px}
+.provider-chips .chip{font-family:var(--font-mono); font-size:10.5px}
+.funnel{display:grid; gap:8px}
+.funnel-layer{
+  display:grid; grid-template-columns:34px 150px 1fr auto; align-items:center; gap:12px;
+  padding:12px 16px; border-radius:var(--radius-md); border:1px solid var(--line);
+  background:linear-gradient(90deg, rgba(76,143,255,.12), var(--panel)); text-align:left; color:var(--soft);
+  transition:all .18s;
+}
+.funnel-layer:hover,.funnel-layer.active{border-color:rgba(76,143,255,.45); color:var(--text); box-shadow:0 8px 22px rgba(76,143,255,.12)}
+.funnel-layer .fl-n{font-family:var(--font-mono); font-size:11px; color:var(--accent-2)}
+.funnel-layer b{font-size:13px; color:var(--text); font-weight:600}
+.funnel-layer span{font-size:12px; color:var(--muted)}
+.funnel-layer .fl-arrow{font-family:var(--font-mono); font-size:11px; color:var(--muted)}
+.funnel-detail{margin-top:10px; min-height:42px; padding:11px 14px; border-radius:var(--radius-sm); border:1px dashed var(--line); background:var(--panel-2); font-size:12.5px; color:var(--soft)}
+.funnel-detail b{color:var(--text)}
+.decision-grid{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-top:14px}
+.decision{padding:14px 16px; border-radius:var(--radius-md); border:1px solid var(--line); background:var(--panel-2)}
+.decision .d-head{display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px}
+.decision b{font-size:13px}
+.decision .badge{padding:3px 8px; font-size:10.5px}
+.decision p{margin:0; font-size:12px; color:var(--muted)}
+.decision.a{border-color:rgba(255,124,130,.28)} .decision.a .badge{color:var(--red); border-color:rgba(255,124,130,.35)}
+.decision.b{border-color:rgba(240,179,95,.28)} .decision.b .badge{color:var(--amber); border-color:rgba(240,179,95,.35)}
+.decision.c{border-color:rgba(78,214,143,.28)} .decision.c .badge{color:var(--green); border-color:rgba(78,214,143,.35)}
+
+/* ============================ rules ============================ */
+.rules-layout{display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.08fr); gap:18px; align-items:start}
+.priority-stack{display:grid; gap:6px}
+.layer-row{
+  display:grid; grid-template-columns:auto auto 1fr; align-items:center; gap:10px;
+  padding:11px 14px; border-radius:10px; border:1px solid var(--line); background:var(--panel-2);
+}
+.layer-row .l-tag{font-family:var(--font-mono); font-size:10px; color:var(--accent-2); border:1px solid rgba(76,143,255,.3); border-radius:5px; padding:2px 6px; background:rgba(76,143,255,.1)}
+.layer-row b{font-size:12.5px}
+.layer-row span{font-size:11.5px; color:var(--muted); text-align:right}
+.stack-arrow{text-align:center; color:var(--muted); font-size:11px; line-height:1; margin:-2px 0}
+.form-grid{display:grid; grid-template-columns:1fr 1fr; gap:10px}
+.field{display:grid; gap:5px}
+.field label{font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--muted)}
+.field input,.field select{
+  width:100%; padding:9px 11px; border-radius:9px; border:1px solid var(--line);
+  background:var(--code-bg); color:var(--text); font-size:13px; outline:none; transition:border-color .18s, box-shadow .18s;
+}
+.field input:focus,.field select:focus{border-color:var(--accent); box-shadow:0 0 0 3px rgba(76,143,255,.12)}
+.folder-preview{margin-top:12px; padding:14px 16px; border-radius:var(--radius-md); border:1px solid rgba(76,143,255,.3); background:linear-gradient(135deg,rgba(76,143,255,.12),transparent)}
+.folder-preview .k{font-size:10.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); margin-bottom:5px}
+.folder-out{display:flex; align-items:center; gap:10px; flex-wrap:wrap}
+.folder-out code{font-family:var(--font-mono); font-size:17px; color:var(--accent-2); word-break:break-all}
+.copy-btn{margin-left:auto; padding:5px 10px; border-radius:7px; border:1px solid var(--line-strong); background:var(--panel); color:var(--soft); font-size:11px}
+.copy-btn:hover{color:var(--text); border-color:var(--accent)}
+.hint{font-size:11.5px; color:var(--muted); margin-top:7px}
+.match-order{margin:14px 0 0; padding:0; list-style:none; display:grid; gap:8px; counter-reset:mo}
+.match-order li{display:grid; grid-template-columns:22px 1fr; gap:9px; font-size:12.5px; color:var(--soft)}
+.match-order .mo-n{width:20px; height:20px; border-radius:50%; border:1px solid var(--line-strong); display:grid; place-items:center; font-family:var(--font-mono); font-size:10px; color:var(--accent-2)}
+.maintain-grid{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin-top:18px}
+.maintain{padding:14px; border-radius:var(--radius-md); border:1px solid var(--line); background:var(--panel-2)}
+.maintain b{display:block; font-size:12.5px; margin-bottom:4px}
+.maintain p{margin:0; font-size:11.5px; color:var(--muted)}
+
+/* ============================ pairing ============================ */
+.pairing-demo{display:grid; grid-template-columns:1fr 1fr; gap:18px; align-items:start}
+.pair-col{border:1px solid var(--line); border-radius:var(--radius-lg); background:var(--panel); padding:18px}
+.pair-col h3{margin:0 0 12px; font-size:14.5px}
+.doc-list{display:grid; gap:8px; min-height:210px}
+#pairedList > .hint{align-self:center; text-align:center; width:100%}
+.doc{display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:var(--radius-sm); border:1px solid var(--line); background:var(--panel-2); font-size:12.5px; transition:all .35s var(--ease)}
+.doc .doc-ico{width:28px; height:28px; border-radius:7px; display:grid; place-items:center; background:var(--code-bg); border:1px solid var(--line); font-size:13px; flex:0 0 28px}
+.doc .doc-name{font-family:var(--font-mono); font-size:11.5px; color:var(--soft); word-break:break-all}
+.doc .doc-new{font-family:var(--font-mono); font-size:11.5px; color:var(--green); word-break:break-all; display:none}
+.doc.paired{border-color:rgba(78,214,143,.4); background:rgba(78,214,143,.07); transform:translateX(3px)}
+.doc.paired .doc-new{display:block}
+.doc.paired .doc-name{color:var(--muted); text-decoration:line-through; text-decoration-color:rgba(255,124,130,.5)}
+.pair-actions{display:flex; gap:8px; margin-top:12px; flex-wrap:wrap}
+.match-rules{margin:14px 0 0; padding:0; list-style:none; display:grid; gap:7px}
+.match-rules li{font-size:12.5px; color:var(--soft); display:flex; gap:8px}
+.match-rules li::before{content:"•"; color:var(--accent-2)}
+
+/* ============================ output ============================ */
+.output-layout{display:grid; grid-template-columns:minmax(0,.95fr) minmax(0,1.05fr); gap:18px; align-items:start}
+.tree{border:1px solid var(--line); border-radius:var(--radius-lg); background:var(--panel); padding:16px 18px; overflow:auto; font-family:var(--font-mono); font-size:12px; line-height:1.9}
+.tree-line{white-space:nowrap; color:var(--soft)}
+.tree-line .t-dir{color:var(--accent-2)}
+.tree-line .t-new{color:var(--green)}
+.tree-line .t-warn{color:var(--amber)}
+.tree-line .t-dim{color:var(--muted)}
+.tree-line .t-comment{color:var(--muted); margin-left:10px; font-family:var(--font-ui); font-size:11px}
+.tree-line.child{padding-left:22px}
+.tree-line.child2{padding-left:44px}
+.xlsx-card{border:1px solid var(--line); border-radius:var(--radius-lg); background:var(--panel); overflow:hidden}
+.xlsx-head{display:flex; align-items:center; gap:8px; padding:12px 16px; border-bottom:1px solid var(--line); background:var(--panel-2); font-size:12px; color:var(--muted)}
+.xlsx-head .file{font-family:var(--font-mono); color:var(--soft)}
+.xlsx-tabs{display:flex; gap:2px; padding:10px 12px 0; overflow-x:auto}
+.xlsx-tab{padding:7px 12px; border-radius:8px 8px 0 0; border:1px solid transparent; border-bottom:none; background:transparent; color:var(--muted); font-size:12px; white-space:nowrap}
+.xlsx-tab[aria-selected="true"]{background:var(--panel-2); border-color:var(--line); color:var(--text)}
+.xlsx-body{padding:0 12px 12px; overflow-x:auto}
+table.data{width:100%; border-collapse:collapse; font-size:11.5px; min-width:520px}
+table.data th,table.data td{padding:8px 10px; text-align:left; border-bottom:1px solid var(--line); white-space:nowrap}
+table.data th{font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); font-weight:600; background:var(--panel-2)}
+table.data td{color:var(--soft); font-family:var(--font-mono); font-size:11px}
+table.data td.txt{font-family:var(--font-ui); font-size:12px}
+table.data tr:hover td{background:var(--code-bg)}
+.sheet-note{padding:0 14px 12px; font-size:11px; color:var(--muted)}
+.other-deliverables{display:grid; gap:8px; margin-top:12px}
+.deliverable{display:flex; gap:9px; font-size:12.5px; color:var(--soft); padding:10px 12px; border-radius:var(--radius-sm); border:1px solid var(--line); background:var(--panel-2)}
+.deliverable b{color:var(--text); font-weight:600}
+.deliverable svg{width:15px; height:15px; flex:0 0 15px; color:var(--accent-2); margin-top:2px}
+
+/* ============================ architecture ============================ */
+.arch{display:grid; gap:10px; margin-top:8px}
+.arch-layer{
+  display:grid; grid-template-columns:170px 1fr; gap:14px; align-items:center;
+  padding:14px 16px; border-radius:var(--radius-md); border:1px solid var(--line);
+  background:linear-gradient(90deg, rgba(76,143,255,.06), var(--panel));
+}
+.arch-layer:hover{border-color:var(--line-strong)}
+.arch-layer .al-name{display:flex; align-items:center; gap:9px; font-size:13px; font-weight:600}
+.arch-layer .al-name .a-ico{display:grid; place-items:center; width:28px; height:28px; border-radius:8px; background:var(--code-bg); border:1px solid var(--line); font-size:13px}
+.arch-chips{display:flex; flex-wrap:wrap; gap:5px}
+.arch-chips .mod{font-size:10.5px}
+.arch-note{font-size:12.5px; color:var(--muted); margin-top:14px; padding:12px 14px; border-left:2px solid var(--accent); background:var(--panel-2); border-radius:0 var(--radius-sm) var(--radius-sm) 0}
+.design-grid{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin-top:18px}
+.design{padding:15px; border-radius:var(--radius-md); border:1px solid var(--line); background:var(--panel-2)}
+.design b{display:block; font-size:12.5px; margin-bottom:5px}
+.design p{margin:0; font-size:11.5px; color:var(--muted)}
+
+/* ============================ config / security ============================ */
+.path-table{width:100%; border-collapse:collapse; font-size:12.5px}
+.path-table th,.path-table td{padding:10px 12px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top}
+.path-table th{font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); font-weight:600}
+.path-table td{color:var(--soft)}
+.path-table td code{font-family:var(--font-mono); font-size:11.5px; color:var(--accent-2); word-break:break-all}
+.security-grid{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px}
+.sec-card{padding:16px; border-radius:var(--radius-md); border:1px solid var(--line); background:var(--panel-2)}
+.sec-card .s-ico{display:grid; place-items:center; width:30px; height:30px; border-radius:8px; background:rgba(78,214,143,.1); border:1px solid rgba(78,214,143,.25); color:var(--green); margin-bottom:9px}
+.sec-card .s-ico svg{width:15px; height:15px}
+.sec-card b{display:block; font-size:12.5px; margin-bottom:4px}
+.sec-card p{margin:0; font-size:11.5px; color:var(--muted)}
+
+/* ============================ engineering ============================ */
+.eng-stats{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin-bottom:16px}
+.eng-stat{padding:16px; border-radius:var(--radius-md); border:1px solid var(--line); background:var(--panel-2)}
+.eng-stat b{display:block; font-size:24px; letter-spacing:-.6px; font-variant-numeric:tabular-nums}
+.eng-stat span{font-size:11.5px; color:var(--muted)}
+.ci-strip{display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin:10px 0 0}
+.ci-step{display:flex; align-items:center; gap:7px; padding:8px 11px; border-radius:9px; border:1px solid var(--line); background:var(--panel-2); font-size:11.5px; color:var(--soft)}
+.ci-step .ci-n{font-family:var(--font-mono); font-size:9.5px; color:var(--accent-2)}
+.ci-arrow{color:var(--muted); font-size:11px}
+.release-grid{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-top:14px}
+.release{padding:14px; border-radius:var(--radius-md); border:1px solid var(--line); background:var(--panel-2)}
+.release b{display:block; font-size:12px; margin-bottom:5px}
+.release code{font-family:var(--font-mono); font-size:10.5px; color:var(--accent-2); word-break:break-all}
+
+/* ============================ quickstart / limits / faq ============================ */
+.code-block{position:relative; border:1px solid var(--line); border-radius:var(--radius-md); background:var(--code-bg); overflow:hidden; margin-top:10px}
+.code-block pre{margin:0; padding:15px 16px; overflow:auto; font-family:var(--font-mono); font-size:12px; line-height:1.8; color:var(--soft)}
+.code-block .code-copy{position:absolute; top:8px; right:8px; padding:4px 9px; border-radius:6px; border:1px solid var(--line-strong); background:var(--panel-solid); color:var(--muted); font-size:10.5px; opacity:0; transition:opacity .18s}
+.code-block:hover .code-copy,.code-block:focus-within .code-copy{opacity:1}
+.code-copy:hover{color:var(--text); border-color:var(--accent)}
+.limit-grid{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px}
+.limit{display:flex; gap:11px; padding:15px 16px; border-radius:var(--radius-md); border:1px solid var(--line); background:var(--panel-2)}
+.limit .l-ico{display:grid; place-items:center; width:32px; height:32px; flex:0 0 32px; border-radius:9px; background:rgba(240,179,95,.1); border:1px solid rgba(240,179,95,.22); color:var(--amber); font-size:14px}
+.limit b{display:block; font-size:12.5px; margin-bottom:3px}
+.limit p{margin:0; font-size:11.5px; color:var(--muted)}
+.faq{display:grid; gap:8px}
+.faq details{border:1px solid var(--line); border-radius:var(--radius-md); background:var(--panel); overflow:hidden; transition:border-color .2s}
+.faq details[open]{border-color:rgba(76,143,255,.35)}
+.faq summary{list-style:none; cursor:pointer; display:flex; align-items:center; gap:10px; padding:13px 16px; font-size:13px; color:var(--soft)}
+.faq summary::-webkit-details-marker{display:none}
+.faq summary .q-mark{font-family:var(--font-mono); font-size:11px; color:var(--accent-2)}
+.faq summary .chev{margin-left:auto; color:var(--muted); transition:transform .2s}
+.faq details[open] summary .chev{transform:rotate(90deg)}
+.faq .a{padding:0 16px 14px 40px; font-size:12.5px; color:var(--muted); line-height:1.75}
+
+/* ============================ footer / modal / misc ============================ */
+footer{margin-left:var(--sidebar-w); border-top:1px solid var(--line); padding:30px clamp(18px,3vw,44px) 40px; color:var(--muted); font-size:12px}
+.foot-inner{max-width:1180px; margin:0 auto; display:flex; flex-wrap:wrap; gap:18px; justify-content:space-between; align-items:flex-start}
+.foot-brand{display:flex; align-items:center; gap:10px; margin-bottom:8px; color:var(--soft)}
+.foot-brand .brand-mark{width:30px; height:30px; flex:0 0 30px; border-radius:9px; font-size:11px}
+.foot-links{display:flex; flex-wrap:wrap; gap:14px}
+.foot-links a{color:var(--soft)}
+.foot-disc{max-width:760px; line-height:1.7}
+#toTop{position:fixed; right:22px; bottom:22px; z-index:90; width:40px; height:40px; border-radius:12px; border:1px solid var(--line-strong); background:var(--panel-solid); color:var(--soft); box-shadow:var(--shadow-soft); display:grid; place-items:center; opacity:0; pointer-events:none; transform:translateY(8px); transition:all .25s}
+#toTop.show{opacity:1; pointer-events:auto; transform:none}
+#toTop:hover{color:var(--text); border-color:var(--accent)}
+#toTop svg{width:16px; height:16px}
+.modal{position:fixed; inset:0; z-index:150; display:none; align-items:center; justify-content:center; padding:20px; background:rgba(3,7,16,.72); backdrop-filter:blur(8px)}
+.modal.open{display:flex}
+.modal-card{position:relative; width:min(660px,100%); max-height:82vh; overflow:auto; border-radius:var(--radius-xl); border:1px solid var(--line-strong); background:var(--panel-solid); box-shadow:0 40px 100px rgba(0,0,0,.55); padding:26px 26px 22px; animation:modalIn .28s var(--ease)}
+@keyframes modalIn{from{opacity:0; transform:translateY(14px) scale(.98)}to{opacity:1; transform:none}}
+.modal-close{position:absolute; top:14px; right:14px; width:30px; height:30px; border-radius:8px; border:1px solid var(--line); background:var(--code-bg); color:var(--muted); font-size:16px; line-height:1}
+.modal-close:hover{color:var(--text)}
+.modal-card .m-eyebrow{font-size:10.5px; letter-spacing:.16em; text-transform:uppercase; color:var(--accent-2)}
+.modal-card h3{margin:8px 0 8px; font-size:22px; letter-spacing:-.4px}
+.modal-card .m-desc{color:var(--soft); font-size:13.5px; margin:0 0 16px}
+.modal-card .m-row{display:grid; grid-template-columns:96px 1fr; gap:10px; padding:10px 0; border-top:1px solid var(--line); font-size:12.5px}
+.modal-card .m-row .k{color:var(--muted)}
+.modal-card .m-row .v{color:var(--soft)}
+.modal-card .m-row .v code{font-family:var(--font-mono); font-size:11px; color:var(--accent-2)}
+.toast{position:fixed; left:50%; bottom:26px; transform:translate(-50%,16px); z-index:200; padding:9px 16px; border-radius:999px; background:var(--panel-solid); border:1px solid var(--line-strong); color:var(--soft); font-size:12px; opacity:0; pointer-events:none; transition:all .25s; box-shadow:var(--shadow-soft)}
+.toast.show{opacity:1; transform:translate(-50%,0)}
+.scrim{position:fixed; inset:0; z-index:95; background:rgba(3,7,16,.55); backdrop-filter:blur(3px); opacity:0; pointer-events:none; transition:opacity .25s}
+body.nav-open .scrim{opacity:1; pointer-events:auto}
+.reveal{opacity:0; transform:translateY(16px); transition:opacity .55s var(--ease), transform .55s var(--ease)}
+.reveal.in{opacity:1; transform:none}
+
+/* ============================ responsive ============================ */
+@media (max-width:1120px){
+  .hero{grid-template-columns:1fr; gap:30px}
+  .hero-shot{max-width:760px}
+  .stats-band{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .sd-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .design-grid,.maintain-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .mode-grid,.rules-layout,.output-layout,.pairing-demo,.recog{grid-template-columns:1fr}
+  .tier-grid{grid-template-columns:1fr}
+  .engine-grid{grid-template-columns:1fr}
+}
+@media (max-width:920px){
+  .sidebar{transform:translateX(-100%); box-shadow:var(--shadow)}
+  body.nav-open .sidebar{transform:none}
+  .topbar,main,footer{margin-left:0}
+  .menu-btn{display:inline-grid}
+  .crumb .brand-crumb{display:none}
+  .security-grid,.release-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .pain-grid{grid-template-columns:1fr}
+  .gallery{grid-template-columns:1fr}
+  .float-card{display:none}
+}
+@media (max-width:640px){
+  .stats-band{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .grid-3,.grid-2{grid-template-columns:1fr}
+  .decision-grid,.eng-stats,.design-grid,.maintain-grid,.limit-grid,.security-grid,.release-grid{grid-template-columns:1fr}
+  .form-grid,.rr-meta{grid-template-columns:1fr}
+  .arch-layer{grid-template-columns:1fr}
+  .funnel-layer{grid-template-columns:26px 1fr auto; row-gap:2px}
+  .funnel-layer span{grid-column:2 / -1}
+  .hero h1{letter-spacing:-1px}
+  .hero-actions .btn{flex:1 1 auto; justify-content:center}
+  .top-actions .chip{display:none}
+  .hero{padding-top:26px}
+  .section{padding-top:44px}
+}
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation-duration:.001ms !important; animation-iteration-count:1 !important; transition-duration:.001ms !important; scroll-behavior:auto !important}
+  .reveal{opacity:1; transform:none}
+}
+@media print{
+  .sidebar,.topbar,#toTop,.modal,.toast,.scrim,#progress,.hero-actions,.toolbar,.tabs,.sd-nav,.pair-actions,.copy-btn,.code-copy{display:none !important}
+  body{background:#fff; color:#111}
+  main,footer{margin-left:0; padding:0}
+  .section{page-break-inside:avoid; padding:22px 0}
+  .card,.panel,.stage-detail,.tree,.xlsx-card,.arch-layer,.feature,.pain,.tier,.limit,.faq details{border-color:#ddd; background:#fff; box-shadow:none}
+  a{color:#111; text-decoration:underline}
+  .reveal{opacity:1; transform:none}
+}
+</style>
+</head>
+<body>
+<a class="skip-link" href="#main">跳到主要内容</a>
+<div id="progress" aria-hidden="true"></div>
+
+<aside class="sidebar" id="sidebar" aria-label="文档导航">
+  <div class="brand">
+    <div class="brand-mark" aria-hidden="true">IF</div>
+    <div class="brand-meta"><strong>InvoiceFlowAI</strong><span>功能总览</span></div>
+  </div>
+  <div class="search-wrap">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <input id="search" type="search" placeholder="搜索功能或模块…" autocomplete="off" aria-label="搜索功能与模块">
+    <kbd>/</kbd>
+  </div>
+  <nav class="nav" id="nav">
+    <div class="nav-group">概览</div>
+    <a class="nav-link active" href="#overview" data-nav><span class="dot"></span>项目定位</a>
+    <a class="nav-link" href="#problems" data-nav><span class="dot"></span>为什么需要它</a>
+    <a class="nav-link" href="#modes" data-nav><span class="dot"></span>三种使用方式</a>
+    <div class="nav-group">能力</div>
+    <a class="nav-link" href="#features" data-nav><span class="dot"></span>功能地图</a>
+    <a class="nav-link" href="#pipeline" data-nav><span class="dot"></span>处理流水线</a>
+    <a class="nav-link" href="#recognition" data-nav><span class="dot"></span>本地识别引擎</a>
+    <a class="nav-link" href="#recovery" data-nav><span class="dot"></span>链接发票恢复</a>
+    <a class="nav-link" href="#filter" data-nav><span class="dot"></span>筛选与附件决策</a>
+    <a class="nav-link" href="#rules" data-nav><span class="dot"></span>费用归类规则</a>
+    <a class="nav-link" href="#pairing" data-nav><span class="dot"></span>凭证匹配</a>
+    <a class="nav-link" href="#output" data-nav><span class="dot"></span>输出与报表</a>
+    <div class="nav-group">工程与使用</div>
+    <a class="nav-link" href="#architecture" data-nav><span class="dot"></span>系统架构</a>
+    <a class="nav-link" href="#config" data-nav><span class="dot"></span>配置与状态</a>
+    <a class="nav-link" href="#security" data-nav><span class="dot"></span>安全与隐私</a>
+    <a class="nav-link" href="#engineering" data-nav><span class="dot"></span>工程质量</a>
+    <a class="nav-link" href="#start" data-nav><span class="dot"></span>快速上手</a>
+    <a class="nav-link" href="#limits" data-nav><span class="dot"></span>边界与 FAQ</a>
+  </nav>
+  <div class="sidebar-foot">
+    <a class="side-link" href="project-overview.zh.md">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+      Markdown 版本
+    </a>
+    <a class="side-link" href="../README.md">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 19.5V5a2 2 0 0 1 2-2h13v18H6a2 2 0 0 1-2-1.5z"/><path d="M8 7h7M8 11h7"/></svg>
+      项目 README
+    </a>
+    <button class="side-link" id="themeToggle" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+      <span id="themeLabel">切换浅色主题</span>
+    </button>
+    <p class="side-note">离线单页文档 · 基于工作区代码整理</p>
+  </div>
+</aside>
+<div class="scrim" id="scrim"></div>
+
+<header class="topbar">
+  <button class="icon-btn menu-btn" id="menuBtn" type="button" aria-label="打开导航" aria-expanded="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+  </button>
+  <div class="crumb">
+    <strong class="brand-crumb">InvoiceFlowAI</strong>
+    <span class="sep brand-crumb">/</span>
+    <span class="crumb-current" id="crumbCurrent">项目定位</span>
+  </div>
+  <div class="top-actions">
+    <span class="chip"><span class="pulse" aria-hidden="true"></span>本地优先 · 识别离线</span>
+    <button class="icon-btn" id="printBtn" type="button" aria-label="打印或导出 PDF" title="打印 / 导出 PDF">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V2h12v7"/><rect x="6" y="14" width="12" height="8"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/></svg>
+    </button>
+    <button class="icon-btn" id="themeToggleTop" type="button" aria-label="切换主题" title="切换主题">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></svg>
+    </button>
+  </div>
+</header>
+
+<main id="main">
+  <!-- ======================= HERO ======================= -->
+  <section class="section hero" id="overview">
+    <div class="hero-copy">
+      <p class="eyebrow">项目功能总览 · 本地优先</p>
+      <h1>把散落的电子发票<br><span class="grad">变成可复核的报销资料</span></h1>
+      <p class="hero-lead">InvoiceFlowAI 连接 <strong>QQ / 163 / 88</strong> 邮箱或任意本地文件夹，批量收集 PDF、OFD、XML 电子发票与下载链接，在本机完成识别、分类、归档，并生成 Excel 报销明细。<strong>识别不联网，邮箱只读，不需要 API Key。</strong></p>
+      <div class="badges">
+        <span class="badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>本地处理</span>
+        <span class="badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m2 7 10 6L22 7"/></svg>邮箱只读</span>
+        <span class="badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2 3 14h8l-1 8 10-12h-8z"/></svg>离线 OCR</span>
+        <span class="badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8M12 18v3"/></svg>Windows / macOS</span>
+      </div>
+      <div class="hero-actions">
+        <a class="btn primary" href="#pipeline">查看处理流水线
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </a>
+        <a class="btn" href="#features">浏览功能地图</a>
+        <a class="btn ghost" href="project-overview.zh.md">下载 Markdown 版</a>
+      </div>
+    </div>
+    <div class="hero-shot">
+      <div class="shot-frame">
+        <img src="images/screens/invoiceflowai-overview-zh.png" alt="InvoiceFlowAI 启动配置界面：任务模式选择、邮箱配置、输出目录与本地识别引擎说明" loading="eager">
+        <span class="shot-tag"><span class="dot" aria-hidden="true"></span>启动配置 · 三种任务模式</span>
+      </div>
+      <div class="float-card">
+        <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg></span>
+        <span><strong>0 次上传</strong>发票与识别文本不出本机</span>
+      </div>
+    </div>
+    <div class="stats-band">
+      <div class="stat"><b data-count="158">0</b><span>Python 模块</span></div>
+      <div class="stat"><b data-count="104" data-suffix="k">0</b><span>行代码（含测试）</span></div>
+      <div class="stat"><b data-count="1379">0</b><span>自动化测试</span></div>
+      <div class="stat"><b data-count="18">0</b><span>票据 / 辅助类型</span></div>
+      <div class="stat"><b data-count="3">0</b><span>任务模式</span></div>
+      <div class="stat"><b>7<em>+1</em></b><span>直连平台 + 百望云</span></div>
+    </div>
+  </section>
+
+  <!-- ======================= POSITION ======================= -->
+  <section class="section" id="position">
+    <p class="eyebrow">它是什么</p>
+    <h2 class="title">收集 · 理解 · 交付，一条本地流水线</h2>
+    <p class="lead">面向每月要手工收集多张发票的个人、自由职业者和小团队。把「翻邮箱、点下载、改文件名、做汇总」四件事压缩成一条可重跑、可复核的流程。</p>
+    <div class="grid grid-3">
+      <article class="card reveal">
+        <span class="num">01</span>
+        <h3>收集：邮箱与文件夹</h3>
+        <p>IMAP 只读读取 QQ / 163 / 88 邮箱，或扫描手机导出、微信/支付宝下载、拍照发票所在的任意文件夹。附件、ZIP、链接都进入同一条流水线。</p>
+      </article>
+      <article class="card reveal">
+        <span class="num">02</span>
+        <h3>理解：本地识别</h3>
+        <p>文本层 PDF、OFD、数电票 XML 直接解析；扫描件与图片交给本地 OCR；再按锚点规则抽取日期、金额、销方、票号等字段并做勾稽校验。</p>
+      </article>
+      <article class="card reveal">
+        <span class="num">03</span>
+        <h3>交付：分类与报表</h3>
+        <p>按费用规则分类、标准化命名、自动撮合凭证，输出分类目录与 Excel 明细；无法可靠确认的材料进入「待人工复核」。</p>
+      </article>
+    </div>
+    <ul class="checks">
+      <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg><span><strong>本地优先</strong>：不调用模型服务，不需要 API Key；OCR 模型随依赖提供。</span></li>
+      <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg><span><strong>不假成功</strong>：低置信度、无法勾稽、未命中规则的材料不会被硬归类。</span></li>
+      <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg><span><strong>可重跑</strong>：文档指纹、发票业务键与布局迁移共同保证重复整理幂等。</span></li>
+    </ul>
+    <div class="gallery">
+      <figure><img src="images/screens/invoiceflowai-overview-zh.png" alt="启动配置界面" loading="lazy"><figcaption>启动配置 · 任务模式与邮箱</figcaption></figure>
+      <figure><img src="images/screens/invoiceflowai-processing-zh.png" alt="处理中心界面" loading="lazy"><figcaption>处理中心 · 进度与实时日志</figcaption></figure>
+      <figure><img src="images/screens/invoiceflowai-analysis-zh.png" alt="结果分析界面" loading="lazy"><figcaption>结果分析 · 分类汇总与导出</figcaption></figure>
+    </div>
+  </section>
+
+  <!-- ======================= PROBLEMS ======================= -->
+  <section class="section" id="problems">
+    <p class="eyebrow">为什么需要它</p>
+    <h2 class="title">七个高频痛点，对应七种机制</h2>
+    <p class="lead">项目不是「批量下载器」，而是把收集、识别、归类、核对和报表串成一条能解释结果的链路。</p>
+    <div class="pain-grid">
+      <div class="pain reveal"><span class="p-ico" aria-hidden="true">📧</span><div><h4>发票散落几百封邮件</h4><p><strong>四层筛选</strong>先判断邮件像不像发票，再按日期范围批量拉取，避免整箱全量识别。</p></div></div>
+      <div class="pain reveal"><span class="p-ico" aria-hidden="true">🔗</span><div><h4>邮件只有下载链接</h4><p><strong>三级恢复</strong>：百望云自动化、税务平台直连、网页转 PDF，下载后与邮件里的期望字段比对。</p></div></div>
+      <div class="pain reveal"><span class="p-ico" aria-hidden="true">🖨️</span><div><h4>扫描件没有文字层</h4><p><strong>本地 OCR</strong> 在 200 DPI 下识别前两页，模型随安装包提供，不上传。</p></div></div>
+      <div class="pain reveal"><span class="p-ico" aria-hidden="true">🏷️</span><div><h4>文件名乱、分类靠手工</h4><p><strong>规则引擎</strong>按票种、关键词、金额范围决定目录，并生成标准文件名。</p></div></div>
+      <div class="pain reveal"><span class="p-ico" aria-hidden="true">🧾</span><div><h4>发票与水单/行程单对不上</h4><p><strong>撮合引擎</strong>按金额、日期、平台做最优匹配，配对件并排命名。</p></div></div>
+      <div class="pain reveal"><span class="p-ico" aria-hidden="true">📊</span><div><h4>报销汇总要手工复制</h4><p><strong>Excel 明细</strong>输出分类汇总、成功明细与异常记录三个工作表。</p></div></div>
+      <div class="pain reveal"><span class="p-ico" aria-hidden="true">🔒</span><div><h4>担心发票被上传云端</h4><p><strong>本地处理</strong>：凭据用 DPAPI / Keychain 加密，识别与归档不离开本机。</p></div></div>
+    </div>
+  </section>
+
+  <!-- ======================= MODES ======================= -->
+  <section class="section" id="modes">
+    <p class="eyebrow">使用方式</p>
+    <h2 class="title">三种模式，提取与整理可以分开用</h2>
+    <p class="lead">桌面端「启动配置」页可切换任务模式。三种模式共享同一套识别、规则、归档与报表代码，区别只在入口和交接边界。</p>
+    <div class="tabs" role="tablist" aria-label="任务模式">
+      <button class="tab" role="tab" id="tab-mail" aria-selected="true" aria-controls="panel-mail" data-mode-tab="mail">📧 邮箱提取并整理</button>
+      <button class="tab" role="tab" id="tab-fetch" aria-selected="false" aria-controls="panel-fetch" data-mode-tab="fetch">📥 仅提取到 inbox</button>
+      <button class="tab" role="tab" id="tab-local" aria-selected="false" aria-controls="panel-local" data-mode-tab="local">📂 本地文件夹整理</button>
+    </div>
+    <div id="panel-mail" class="panel" role="tabpanel" aria-labelledby="tab-mail">
+      <div class="mode-grid">
+        <div class="card">
+          <h3>常规用法：连接邮箱，一次完成提取与整理</h3>
+          <ul class="mode-steps">
+            <li><span class="n">01</span>连接邮箱</li><li><span class="n">02</span>拉取附件</li><li><span class="n">03</span>恢复链接</li><li><span class="n">04</span>本地识别</li><li><span class="n">05</span>规则归类</li><li><span class="n">06</span>归档 + Excel</li>
+          </ul>
+          <p>按日期范围扫描邮箱，先过四层筛选；附件直接进入识别，只有下载链接的发票走恢复流程。识别后按规则分类、命名并归档，无法确认的进入待复核。</p>
+        </div>
+        <div>
+          <div class="output-box"><div class="mini-title">交付物</div><code>分类目录 / 结果明细.xlsx / 待人工复核 / 运行证据</code></div>
+          <div class="note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16h.01"/></svg><span>适合每月集中报销：一次扫描覆盖多个平台与多种票据。</span></div>
+        </div>
+      </div>
+    </div>
+    <div id="panel-fetch" class="panel" role="tabpanel" aria-labelledby="tab-fetch" hidden>
+      <div class="mode-grid">
+        <div class="card">
+          <h3>只收集，不解释：把附件交给自己的工具链</h3>
+          <ul class="mode-steps">
+            <li><span class="n">01</span>连接邮箱</li><li><span class="n">02</span>保存附件</li><li><span class="n">03</span>写 manifest.jsonl</li>
+          </ul>
+          <p>只把邮箱里的发票附件保存到 <code>inbox/</code>，并为每个附件记录 SHA-256、相对路径、邮箱、UID、主题、发件人、收到时间。不识别、不改名、不归档、不写台账。</p>
+        </div>
+        <div>
+          <div class="output-box"><div class="mini-title">交接契约</div><code>inbox/ + manifest.jsonl</code></div>
+          <div class="note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16h.01"/></svg><span>适合已经有自己的归档/识别工具，或想把「收集」与「整理」拆成两步的用户。</span></div>
+        </div>
+      </div>
+    </div>
+    <div id="panel-local" class="panel" role="tabpanel" aria-labelledby="tab-local" hidden>
+      <div class="mode-grid">
+        <div class="card">
+          <h3>不连邮箱也能用：离线整理任意文件夹</h3>
+          <ul class="mode-steps">
+            <li><span class="n">01</span>选择文件夹</li><li><span class="n">02</span>扫描</li><li><span class="n">03</span>离线识别</li><li><span class="n">04</span>分类副本</li><li><span class="n">05</span>原件保留</li>
+          </ul>
+          <p>扫描手机导出、微信/支付宝下载目录或拍照发票文件夹，离线识别后按规则分类。默认在所选文件夹内原地整理：分类文件放子目录，原件按原文件名、原内容、原相对路径保留在 <code>整理前发票/</code>；重复件进 <code>duplicates/</code>。</p>
+        </div>
+        <div>
+          <div class="output-box"><div class="mini-title">目录变化</div><code>分类/ + 整理前发票/ + duplicates/ + 结果明细.xlsx</code></div>
+          <div class="note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16h.01"/></svg><span>不需要邮箱和网络；再次整理幂等，已整理文件不会被重复归档。</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= FEATURES ======================= -->
+  <section class="section" id="features">
+    <p class="eyebrow">能力清单</p>
+    <h2 class="title">功能地图</h2>
+    <p class="lead">按类别浏览功能；支持搜索或筛选，点击卡片查看实现细节与用户结果。</p>
+    <div class="toolbar">
+      <div class="filters" id="featureFilters" role="group" aria-label="功能分类">
+        <button class="filter" data-filter="all" aria-pressed="true">全部</button>
+        <button class="filter" data-filter="collect" aria-pressed="false">采集</button>
+        <button class="filter" data-filter="recognize" aria-pressed="false">识别</button>
+        <button class="filter" data-filter="organize" aria-pressed="false">归类</button>
+        <button class="filter" data-filter="deliver" aria-pressed="false">交付</button>
+        <button class="filter" data-filter="safe" aria-pressed="false">安全</button>
+        <button class="filter" data-filter="extend" aria-pressed="false">扩展</button>
+      </div>
+      <span class="search-status" id="searchStatus" aria-live="polite"></span>
+    </div>
+    <div class="feature-grid" id="featureGrid"></div>
+    <div class="empty-state" id="featureEmpty">没有匹配的功能，换个关键词或分类试试。</div>
+  </section>
+
+  <!-- ======================= PIPELINE ======================= -->
+  <section class="section" id="pipeline">
+    <p class="eyebrow">端到端</p>
+    <h2 class="title">一张图看懂处理流水线</h2>
+    <p class="lead">点击任意阶段，查看这一段的输入、动作、产物与失败去向；也可以自动播放整条链路。</p>
+    <div class="stepper-wrap">
+      <div class="stepper" id="stepper" role="tablist" aria-label="处理阶段"></div>
+    </div>
+    <div class="stage-detail" id="stageDetail" aria-live="polite"></div>
+    <div class="note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16h.01"/></svg><span>运行状态机把上述阶段串成：created → scanning → recovering → extracting → archiving → reporting → finalizing → completed / failed。停止请求会在当前邮件或当前文件处理完后生效。</span></div>
+  </section>
+
+  <!-- ======================= RECOGNITION ======================= -->
+  <section class="section" id="recognition">
+    <p class="eyebrow">本地识别</p>
+    <h2 class="title">确定性优先，OCR 兜底</h2>
+    <p class="lead">选择一份材料，看看它会走哪条识别通道。识别全程不联网、不需要 API Key，也不调用模型服务。</p>
+    <div class="recog">
+      <div class="recog-opts" id="recogOptions" role="group" aria-label="选择材料类型"></div>
+      <div class="recog-result" id="recogResult" aria-live="polite"></div>
+    </div>
+    <div class="thresholds">
+      <span class="chip">文本层 ≥ 40 字符 → 文本解析</span>
+      <span class="chip">OCR：前 2 页 · 200 DPI</span>
+      <span class="chip">图片：JPG / PNG / WEBP / BMP / TIFF</span>
+      <span class="chip">OFD：zip + ofd:TextCode</span>
+      <span class="chip">&lt; 1000 字节 → invalid</span>
+      <span class="chip">无法确认 → 待人工复核</span>
+    </div>
+    <div class="callout">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      <span><strong>离线一致性校验</strong>：合计金额 + 税额应与价税合计勾稽，日期可解析，票号是合法数字串；无法确认时不猜测，转入「待人工复核」由用户核对。</span>
+    </div>
+  </section>
+
+  <!-- ======================= RECOVERY ======================= -->
+  <section class="section" id="recovery">
+    <p class="eyebrow">链接发票</p>
+    <h2 class="title">三级恢复：从「点击下载」到本地 PDF</h2>
+    <p class="lead">系统先按链接域名与路径识别平台，再选择最优恢复策略；恢复在独立子进程中执行，超时可整棵进程树终止。</p>
+    <div class="tier-grid">
+      <article class="tier" style="--tier-color: var(--violet)">
+        <div class="t-head"><span class="t-n">TIER 01</span><h3>百望云自动化</h3></div>
+        <p>识别百望云家族链接，先探测预览 API / 直连产物，再用 Playwright 打开页面捕获下载。</p>
+        <ul><li>登录态与下载动作自动化</li><li>下载后按期望字段比对</li><li>正式 PDF / XML 存档</li></ul>
+      </article>
+      <article class="tier" style="--tier-color: var(--accent)">
+        <div class="t-head"><span class="t-n">TIER 02</span><h3>平台直连</h3></div>
+        <p>识别税务、诺诺、航信、票易通、京东云、拼多多等 7 类直连族，优先走有界 HTTP 请求。</p>
+        <ul><li>发票族群识别</li><li>有界请求 + 重试</li><li>本地字段校验</li></ul>
+      </article>
+      <article class="tier" style="--tier-color: var(--green)">
+        <div class="t-head"><span class="t-n">TIER 03</span><h3>网页转 PDF</h3></div>
+        <p>未知但可信的发票网页：打开页面，检测登录/验证码/产品页，按 A4 渲染成 PDF。</p>
+        <ul><li>平台产品页安全跳过</li><li>渲染前检查发票证据</li><li>无证据不接收</li></ul>
+      </article>
+    </div>
+    <div class="provider-chips">
+      <span class="chip">chinatax</span><span class="chip">baiwang</span><span class="chip">nuonuo</span><span class="chip">fpyun</span><span class="chip">bwjf</span><span class="chip">pdd</span><span class="chip">jdcloud</span><span class="chip">kpbyd</span>
+    </div>
+    <div class="grid grid-3" style="margin-top:14px">
+      <div class="card"><h3>子进程隔离</h3><p>恢复任务在独立进程中运行，超时按进程树终止，避免拖死主程序。</p></div>
+      <div class="card"><h3>并发受限</h3><p>整体并发有上限，强供应商限流且同组串行，降低触发风控的概率。</p></div>
+      <div class="card"><h3>字段闭环</h3><p>下载结果必须匹配邮件正文提取的票号或「销方 + 金额 + 日期」，否则拒收。</p></div>
+    </div>
+  </section>
+
+  <!-- ======================= FILTER ======================= -->
+  <section class="section" id="filter">
+    <p class="eyebrow">筛选与准入</p>
+    <h2 class="title">四层邮件筛选 + 三级附件决策</h2>
+    <p class="lead">不是每封邮件都进入识别。先判断邮件像不像发票，再判断附件值不值得处理，最后才进入识别与校验。</p>
+    <div class="funnel" id="funnel">
+      <button class="funnel-layer active" type="button" data-funnel="0"><span class="fl-n">L1</span><b>域名白名单</b><span>12306、铁路、滴滴、高德、万豪、华住、国旅运通等差旅域名</span><span class="fl-arrow">↓</span></button>
+      <button class="funnel-layer" type="button" data-funnel="1"><span class="fl-n">L2</span><b>主题关键词</b><span>发票、行程单、水单、报销等标题信号</span><span class="fl-arrow">↓</span></button>
+      <button class="funnel-layer" type="button" data-funnel="2"><span class="fl-n">L3</span><b>正文检测</b><span>正文中的发票号、金额、下载入口与平台特征</span><span class="fl-arrow">↓</span></button>
+      <button class="funnel-layer" type="button" data-funnel="3"><span class="fl-n">L4</span><b>二维码 / 其余</b><span>二维码开票入口与低置信度邮件，仍保留候选机会</span><span class="fl-arrow">→</span></button>
+    </div>
+    <div class="funnel-detail" id="funnelDetail" aria-live="polite"><b>L1 域名白名单：</b>命中差旅相关域名的邮件优先进入候选；非白名单邮件仍可凭主题、正文或二维码信号进入，但优先级更低。</div>
+    <div class="decision-grid">
+      <div class="decision a"><div class="d-head"><b>A 层 · 丢弃</b><span class="badge">跳过</span></div><p>追踪像素、Logo、装饰图、极小尺寸/极小字节附件、营销素材。</p></div>
+      <div class="decision b"><div class="d-head"><b>B 层 · 暂存</b><span class="badge">保留</span></div><p>附件 &gt;5MB、ZIP 解包失败或超限、低置信度候选：保留但不进入识别。</p></div>
+      <div class="decision c"><div class="d-head"><b>C 层 · 进入识别</b><span class="badge">处理</span></div><p>正常 PDF / OFD / XML / 图片附件，进入本地识别与校验。</p></div>
+    </div>
+    <div class="note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16h.01"/></svg><span><strong>ZIP 解包限制</strong>：最多 64 个成员、单成员 16MB、总量 32MB、嵌套 2 层；超限只记录不展开。附件尺寸与像素阈值用于拦住追踪像素和装饰图。</span></div>
+  </section>
+
+  <!-- ======================= RULES ======================= -->
+  <section class="section" id="rules">
+    <p class="eyebrow">费用归类</p>
+    <h2 class="title">规则可配置，归档文件夹自动生成</h2>
+    <p class="lead">费用类目不写死在代码里。内置默认、全局规则、当前发票库规则逐层覆盖；一条规则只需要「目标票种 + 关键词 + 金额范围」。</p>
+    <div class="rules-layout">
+      <div>
+        <div class="priority-stack">
+          <div class="layer-row"><span class="l-tag">L2</span><b>当前发票库规则</b><span>优先级最高</span></div>
+          <div class="stack-arrow">↑ 覆盖</div>
+          <div class="layer-row"><span class="l-tag">L1</span><b>全局规则</b><span>对本机所有发票库生效</span></div>
+          <div class="stack-arrow">↑ 覆盖</div>
+          <div class="layer-row"><span class="l-tag">L0</span><b>内置默认规则</b><span>随应用发布，可被覆盖</span></div>
+          <div class="stack-arrow">+</div>
+          <div class="layer-row"><span class="l-tag">PACK</span><b>规则包 rules.d/*.yaml</b><span>可叠加的开放扩展</span></div>
+        </div>
+        <ol class="match-order">
+          <li><span class="mo-n">1</span><span><strong>销售方词典</strong>：税号精确匹配优先，其次名称包含，长词优先。</span></li>
+          <li><span class="mo-n">2</span><span><strong>关键词规则</strong>：后层先匹配、层内按声明顺序，命中首条即停。</span></li>
+          <li><span class="mo-n">3</span><span><strong>票种兜底</strong>：已识别票种按 <code>type_categories</code> 映射目录。</span></li>
+          <li><span class="mo-n">4</span><span><strong>未命中</strong>：标记未分类并进入待人工复核，不硬塞进「其他」。</span></li>
+        </ol>
+      </div>
+      <div class="card">
+        <h3>试试生成归档文件夹</h3>
+        <p>选择目标票种并填写金额范围（可留空），下方实时生成规则对应的归档目录。</p>
+        <div class="form-grid" style="margin-top:14px">
+          <div class="field">
+            <label for="ruleType">目标票种</label>
+            <select id="ruleType">
+              <option>酒店</option>
+              <option>打车</option>
+              <option>餐饮</option>
+              <option>住宿发票</option>
+              <option>火车票</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="ruleMin">金额下限（可选）</label>
+            <input id="ruleMin" type="number" inputmode="decimal" min="0" step="0.01" placeholder="如 100">
+          </div>
+          <div class="field">
+            <label for="ruleMax">金额上限（可选）</label>
+            <input id="ruleMax" type="number" inputmode="decimal" min="0" step="0.01" placeholder="如 200">
+          </div>
+          <div class="field">
+            <label>生效范围</label>
+            <select disabled><option>由规则所在层决定</option></select>
+          </div>
+        </div>
+        <div class="folder-preview">
+          <div class="k">生成的归档文件夹</div>
+          <div class="folder-out"><code id="folderOut">酒店/</code><button class="copy-btn" id="folderCopy" type="button">复制</button></div>
+          <div class="hint" id="folderHint">不填金额时直接使用票种名作为目录。</div>
+        </div>
+        <div class="note" style="margin-top:12px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16h.01"/></svg><span>修改规则后，之后的新归档进入新文件夹；旧文件不会自动搬家。</span></div>
+      </div>
+    </div>
+    <div class="maintain-grid">
+      <div class="maintain"><b>界面维护</b><p>规则列表、词典与测试、票种管理三个面板，支持覆盖与恢复默认。</p></div>
+      <div class="maintain"><b>命令行维护</b><p><code>rules list / validate / test / explain / add-rule / reset</code>。</p></div>
+      <div class="maintain"><b>直接编辑 YAML</b><p>下一次整理自动生效，无需重启；保存前自动备份。</p></div>
+      <div class="maintain"><b>自定义票种</b><p>写入全局 <code>custom_types.yaml</code>，被规则引用时不能删除。</p></div>
+    </div>
+  </section>
+
+  <!-- ======================= PAIRING ======================= -->
+  <section class="section" id="pairing">
+    <p class="eyebrow">凭证匹配</p>
+    <h2 class="title">发票与凭证自动配对</h2>
+    <p class="lead">住宿发票配水单/确认单，打车发票配行程单。按金额、日期、平台与邮件线索打分，做全局最优指派；多解时标记歧义，不强行配对。</p>
+    <div class="pairing-demo">
+      <div class="pair-col">
+        <h3>归档前</h3>
+        <div class="doc-list" id="docList">
+          <div class="doc" data-kind="ride-invoice"><span class="doc-ico" aria-hidden="true">🧾</span><span class="doc-name">0312-滴滴-发票_45.50.pdf</span></div>
+          <div class="doc" data-kind="ride-itinerary"><span class="doc-ico" aria-hidden="true">🗺️</span><span class="doc-name">行程单_45.50.pdf</span></div>
+          <div class="doc" data-kind="hotel-invoice"><span class="doc-ico" aria-hidden="true">🏨</span><span class="doc-name">住宿发票_888.00.pdf</span></div>
+          <div class="doc" data-kind="hotel-folio"><span class="doc-ico" aria-hidden="true">📄</span><span class="doc-name">酒店水单_888.00.pdf</span></div>
+        </div>
+        <div class="pair-actions">
+          <button class="btn primary" id="pairRun" type="button">运行撮合</button>
+          <button class="btn ghost" id="pairReset" type="button">重置</button>
+        </div>
+      </div>
+      <div class="pair-col">
+        <h3>归档后</h3>
+        <div class="doc-list" id="pairedList">
+          <p class="hint" id="pairedHint">点击「运行撮合」，查看配对后的并排命名。</p>
+        </div>
+        <ul class="match-rules" style="padding:0 4px">
+          <li>打车：金额相等，或含税率换算容差；住宿：金额差 ≤0.01 且业务日期差 ≤3 天。</li>
+          <li>同平台、同邮件、商户词重合、金额相等依次加分。</li>
+          <li>出现多组最优解时记为歧义，保留原状。</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= OUTPUT ======================= -->
+  <section class="section" id="output">
+    <p class="eyebrow">交付物</p>
+    <h2 class="title">目录结构、Excel 明细与台账</h2>
+    <p class="lead">成功的归档进入分类目录，不确定的进入待复核，保全候选单独存放；Excel 明细可直接用于核对或交给财务。</p>
+    <div class="output-layout">
+      <div>
+        <div class="tree">
+          <div class="tree-line"><span class="t-dir">发票整理/</span></div>
+          <div class="tree-line child"><span class="t-dir">inbox/</span><span class="t-comment">仅提取模式交接</span></div>
+          <div class="tree-line child"><span class="t-dir">火车票/</span><span class="t-dim">20260315-北京-上海-火车票.pdf</span></div>
+          <div class="tree-line child"><span class="t-dir">机票/</span><span class="t-dim">20260301_机票_1280.00_中国国际航空.pdf</span></div>
+          <div class="tree-line child"><span class="t-dir">住宿发票/</span><span class="t-dim">发票 + 水单并排命名</span></div>
+          <div class="tree-line child"><span class="t-dir">打车/</span><span class="t-dim">发票 + 行程单并排命名</span></div>
+          <div class="tree-line child"><span class="t-dir">餐饮/</span></div>
+          <div class="tree-line child"><span class="t-warn">待人工复核/</span><span class="t-comment">需要人工确认</span></div>
+          <div class="tree-line child"><span class="t-warn">非目标公司发票/</span><span class="t-comment">购买方不符</span></div>
+          <div class="tree-line child"><span class="t-dim">_audit_retention/</span><span class="t-comment">保全但不归档</span></div>
+          <div class="tree-line child"><span class="t-new">结果明细_20260315_101530.xlsx</span></div>
+          <div class="tree-line child"><span class="t-dir">整理前发票/</span><span class="t-comment">本地整理：原件原样保留</span></div>
+          <div class="tree-line child"><span class="t-dir">duplicates/</span><span class="t-comment">本地整理：重复件</span></div>
+        </div>
+        <div class="other-deliverables">
+          <div class="deliverable"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg><span><b>manifest.jsonl</b>：附件来源清单，含 SHA-256、相对路径、邮箱、UID、主题、发件人、收到时间。</span></div>
+          <div class="deliverable"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg><span><b>运行证据</b>：输入清单、归档映射、哈希与构建身份，支持事后复查。</span></div>
+          <div class="deliverable"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18M3 12h18M3 17h18"/></svg><span><b>输出库状态</b>：按输出目录哈希隔离在 <code>%APPDATA%\InvoiceFlowAI\state\output_scoped\</code>。</span></div>
+        </div>
+      </div>
+      <div class="xlsx-card">
+        <div class="xlsx-head"><span aria-hidden="true">📊</span><span class="file">结果明细_20260315_101530.xlsx</span><span style="margin-left:auto">示例数据</span></div>
+        <div class="xlsx-tabs" role="tablist" aria-label="Excel 工作表">
+          <button class="xlsx-tab" role="tab" aria-selected="true" data-sheet="summary">分类汇总</button>
+          <button class="xlsx-tab" role="tab" aria-selected="false" data-sheet="success">成功明细</button>
+          <button class="xlsx-tab" role="tab" aria-selected="false" data-sheet="error">异常记录</button>
+        </div>
+        <div class="xlsx-body">
+          <div class="sheet" id="sheet-summary">
+            <table class="data"><thead><tr><th>发票分类</th><th>数量</th><th>金额合计</th></tr></thead><tbody>
+              <tr><td class="txt">打车</td><td>3</td><td>¥ 128.50</td></tr>
+              <tr><td class="txt">住宿发票</td><td>2</td><td>¥ 1,776.00</td></tr>
+              <tr><td class="txt">火车票</td><td>1</td><td>¥ 553.00</td></tr>
+              <tr><td class="txt">餐饮</td><td>2</td><td>¥ 186.00</td></tr>
+            </tbody></table>
+          </div>
+          <div class="sheet" id="sheet-success" hidden>
+            <table class="data"><thead><tr><th>日期</th><th>金额</th><th>销售方</th><th>分类</th><th>文件路径</th><th>归类来源</th><th>命中规则</th></tr></thead><tbody>
+              <tr><td>20260315</td><td>45.50</td><td class="txt">滴滴出行</td><td class="txt">打车</td><td class="txt">打车/0312-滴滴-01-发票_45.50元.pdf</td><td class="txt">用户规则</td><td class="txt">滴滴出行</td></tr>
+              <tr><td>20260314</td><td>888.00</td><td class="txt">某酒店</td><td class="txt">住宿发票</td><td class="txt">住宿发票/20260310-住宿-01-发票_888.00元.pdf</td><td class="txt">票种兜底</td><td class="txt">住宿发票</td></tr>
+              <tr><td>20260315</td><td>553.00</td><td class="txt">中国铁路</td><td class="txt">火车票</td><td class="txt">火车票/20260315-北京-上海-火车票.pdf</td><td class="txt">内置关键词</td><td class="txt">中国铁路</td></tr>
+            </tbody></table>
+          </div>
+          <div class="sheet" id="sheet-error" hidden>
+            <table class="data"><thead><tr><th>分组</th><th>状态</th><th>原因</th><th>日期</th><th>金额</th><th>文件名</th></tr></thead><tbody>
+              <tr><td class="txt">待复核</td><td class="txt">待人工复核</td><td class="txt">金额勾稽不平</td><td>20260310</td><td>—</td><td class="txt">scan_01.pdf</td></tr>
+              <tr><td class="txt">暂存</td><td class="txt">已保全待判断</td><td class="txt">低置信度候选</td><td>—</td><td>—</td><td class="txt">link_02.url.txt</td></tr>
+              <tr><td class="txt">隔离</td><td class="txt">非目标公司</td><td class="txt">购买方不符</td><td>20260311</td><td>120.00</td><td class="txt">invoice_03.pdf</td></tr>
+            </tbody></table>
+          </div>
+        </div>
+        <div class="sheet-note">实际列以当前版本导出为准；本地整理也会自动导出一份结果明细。</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= ARCHITECTURE ======================= -->
+  <section class="section" id="architecture">
+    <p class="eyebrow">系统架构</p>
+    <h2 class="title">双形态同源：桌面应用与 DSH 插件</h2>
+    <p class="lead">桌面端是 pywebview + WebView2 的本地应用，插件复用同一套 Python 引擎。两者都不是 REST 服务：桌面走 js_api 进程内桥，插件走 RPC + NDJSON 子进程。</p>
+    <div class="arch">
+      <div class="arch-layer reveal"><div class="al-name"><span class="a-ico" aria-hidden="true">🖥️</span>桌面壳</div><div class="arch-chips"><span class="mod">pywebview</span><span class="mod">WebView2 fixed / evergreen</span><span class="mod">React 四页</span><span class="mod">js_api 33 方法</span></div></div>
+      <div class="arch-layer reveal"><div class="al-name"><span class="a-ico" aria-hidden="true">🧠</span>应用编排</div><div class="arch-chips"><span class="mod">app_api.py</span><span class="mod">run_coordinator</span><span class="mod">run_lifecycle</span><span class="mod">run_state_store</span></div></div>
+      <div class="arch-layer reveal"><div class="al-name"><span class="a-ico" aria-hidden="true">📥</span>采集与候选</div><div class="arch-chips"><span class="mod">mailbox_scanner</span><span class="mod">email_fetcher</span><span class="mod">candidate_pipeline</span><span class="mod">fetch_only</span></div></div>
+      <div class="arch-layer reveal"><div class="al-name"><span class="a-ico" aria-hidden="true">🔗</span>恢复</div><div class="arch-chips"><span class="mod">pdf_converter</span><span class="mod">bounded_url_recovery</span><span class="mod">provider_baiwang</span><span class="mod">provider_direct_invoice</span></div></div>
+      <div class="arch-layer reveal"><div class="al-name"><span class="a-ico" aria-hidden="true">🔎</span>识别与校验</div><div class="arch-chips"><span class="mod">local_recognition</span><span class="mod">invoice_extractor</span><span class="mod">artifact_verifier</span><span class="mod">document_acceptance</span></div></div>
+      <div class="arch-layer reveal"><div class="al-name"><span class="a-ico" aria-hidden="true">🗂️</span>归类归档</div><div class="arch-chips"><span class="mod">expense_rules</span><span class="mod">archive_service</span><span class="mod">organize_layout</span><span class="mod">local_organize</span></div></div>
+      <div class="arch-layer reveal"><div class="al-name"><span class="a-ico" aria-hidden="true">🧾</span>配对与交付</div><div class="arch-chips"><span class="mod">pairing_engine</span><span class="mod">archive_pairing</span><span class="mod">report_service</span><span class="mod">run_evidence</span></div></div>
+      <div class="arch-layer reveal"><div class="al-name"><span class="a-ico" aria-hidden="true">💾</span>本地存储</div><div class="arch-chips"><span class="mod">user_settings</span><span class="mod">DPAPI / Keychain</span><span class="mod">output_scoped 状态</span><span class="mod">构建身份</span></div></div>
+    </div>
+    <div class="arch-note">前端与 Python 之间没有 HTTP 业务路由：<code>http_server=True</code> 只用于托管本地页面；进度由前端每 1 秒轮询 <code>get_progress</code>，不依赖 SSE/WebSocket。</div>
+    <div class="design-grid">
+      <div class="design"><b>本地优先</b><p>识别不依赖外部模型服务，发布包不携带 API Key。</p></div>
+      <div class="design"><b>确定性优先</b><p>能解析的结构化数据不交给 OCR，能校验的字段不猜测。</p></div>
+      <div class="design"><b>不假成功</b><p>未解决输入、未完成配对与待复核项都会进入报告。</p></div>
+      <div class="design"><b>证据可回溯</b><p>输入、归档映射、哈希与构建身份都可复查。</p></div>
+    </div>
+  </section>
+
+  <!-- ======================= CONFIG ======================= -->
+  <section class="section" id="config">
+    <p class="eyebrow">运行环境</p>
+    <h2 class="title">配置、状态与数据位置</h2>
+    <p class="lead">所有状态都在本机：用户设置、规则、输出库台账与诊断文件分别落在固定目录，敏感字段加密存储。</p>
+    <div class="card" style="padding:6px 18px">
+      <table class="path-table">
+        <thead><tr><th>内容</th><th>位置</th></tr></thead>
+        <tbody>
+          <tr><td>用户设置</td><td><code>%APPDATA%\InvoiceFlowAI\user_settings.json</code>（macOS：<code>~/Library/Application Support/InvoiceFlowAI/</code>）</td></tr>
+          <tr><td>敏感字段</td><td>授权码等经 Windows DPAPI 加密；macOS 使用 Keychain</td></tr>
+          <tr><td>全局规则</td><td><code>%APPDATA%\InvoiceFlowAI\rules\</code></td></tr>
+          <tr><td>发票库规则</td><td><code>&lt;发票库&gt;\rules\</code></td></tr>
+          <tr><td>运行数据 / 诊断</td><td><code>%LOCALAPPDATA%\InvoiceFlowAI\</code>（macOS：<code>~/Library/Caches/InvoiceFlowAI/</code>）</td></tr>
+          <tr><td>输出库状态与台账</td><td><code>%APPDATA%\InvoiceFlowAI\state\output_scoped\&lt;目录哈希&gt;\</code></td></tr>
+          <tr><td>默认输出目录</td><td>桌面 <code>发票整理/</code></td></tr>
+          <tr><td>启动参数</td><td><code>--run-context</code>（受控复跑）、<code>--webview2-mode</code>（fixed / evergreen）、<code>--url-recovery-worker</code>（内部子进程）</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="grid grid-3" style="margin-top:14px">
+      <div class="card"><h3>受控复跑</h3><p><code>--run-context</code> 会锁定输出目录与日期窗口，用于诊断和自动起跑；普通启动不启用。</p></div>
+      <div class="card"><h3>WebView2 双模式</h3><p><code>fixed</code> 随包携带固定版运行时，离线可用；<code>evergreen</code> 使用系统运行时并附带 bootstrapper。</p></div>
+      <div class="card"><h3>单实例</h3><p>Windows 命名互斥量、其他平台锁文件；重复启动会提示已在运行。</p></div>
+    </div>
+  </section>
+
+  <!-- ======================= SECURITY ======================= -->
+  <section class="section" id="security">
+    <p class="eyebrow">隐私与安全</p>
+    <h2 class="title">数据留在本机，边界写进代码</h2>
+    <p class="lead">安全不是一句「本地处理」，而是只读邮箱、加密凭据、路径白名单、URL 公网校验与前端 CSP 的组合。</p>
+    <div class="security-grid">
+      <div class="sec-card"><span class="s-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m2 7 10 6L22 7"/></svg></span><b>邮箱只读</b><p>IMAP 只读取，不发送、不删除、不修改邮件。</p></div>
+      <div class="sec-card"><span class="s-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></span><b>识别不上传</b><p>解析、OCR、归档均在本机完成，不调用模型服务。</p></div>
+      <div class="sec-card"><span class="s-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></span><b>凭据加密</b><p>Windows DPAPI / macOS Keychain，设置文件不存明文。</p></div>
+      <div class="sec-card"><span class="s-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a15 15 0 0 1 0 18"/></svg></span><b>URL 安全</b><p>只允许公网单播地址，DNS 钉扎与响应端复验，日志脱敏。</p></div>
+      <div class="sec-card"><span class="s-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h7v7H3zM14 7h7v7h-7zM3 17h7v4H3zM14 17h7v4h-7z"/></svg></span><b>路径白名单</b><p>桥接只允许访问用户确认过的目录，拒绝 UNC 与路径穿越。</p></div>
+      <div class="sec-card"><span class="s-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m8 6-6 6 6 6M16 6l6 6-6 6"/></svg></span><b>前端 CSP</b><p>桌面页面默认 <code>default-src 'none'</code>，脚本与资源仅本地来源。</p></div>
+    </div>
+    <div class="callout"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16h.01"/></svg><span>无法可靠确认的票据不会被硬归类：进入「待人工复核」是正常路径，不是程序故障。</span></div>
+  </section>
+
+  <!-- ======================= ENGINEERING ======================= -->
+  <section class="section" id="engineering">
+    <p class="eyebrow">工程质量</p>
+    <h2 class="title">测试、CI 与可追溯发布</h2>
+    <p class="lead">仓库把桌面应用、CLI、插件与发布流程放在一起维护；发布前有测试门禁、冻结契约、双平台构建与哈希校验。</p>
+    <div class="eng-stats">
+      <div class="eng-stat"><b>49</b><span>测试文件</span></div>
+      <div class="eng-stat"><b>1379</b><span>pytest 用例</span></div>
+      <div class="eng-stat"><b>2</b><span>CI 平台（Windows / macOS）</span></div>
+      <div class="eng-stat"><b>3</b><span>发布产物（exe / zip / dmg）</span></div>
+    </div>
+    <div class="card">
+      <h3>发布流水线</h3>
+      <div class="ci-strip">
+        <span class="ci-step"><span class="ci-n">01</span>测试门禁</span><span class="ci-arrow">→</span>
+        <span class="ci-step"><span class="ci-n">02</span>冻结发布契约</span><span class="ci-arrow">→</span>
+        <span class="ci-step"><span class="ci-n">03</span>双平台构建与 qualify</span><span class="ci-arrow">→</span>
+        <span class="ci-step"><span class="ci-n">04</span>校验哈希与 provenance</span><span class="ci-arrow">→</span>
+        <span class="ci-step"><span class="ci-n">05</span>发布 GitHub Release</span>
+      </div>
+      <div class="release-grid">
+        <div class="release"><b>Windows 安装版</b><code>InvoiceFlowAI-&lt;tag&gt;-windows-x64-setup.exe</code></div>
+        <div class="release"><b>Windows 免安装版</b><code>InvoiceFlowAI-&lt;tag&gt;-windows-x64-portable.zip</code></div>
+        <div class="release"><b>macOS Apple Silicon</b><code>InvoiceFlowAI-&lt;tag&gt;-macos-arm64.dmg</code></div>
+      </div>
+    </div>
+    <div class="grid grid-3" style="margin-top:14px">
+      <div class="card"><h3>测试分层</h3><p><code>env_bound</code>（机器绑定，托管 CI 排除）、<code>slow</code>、<code>network</code> 标记；测试环境隔离到临时目录。</p></div>
+      <div class="card"><h3>构建可追溯</h3><p>打包流程写入构建身份，运行时可回报版本与产物信息；发布附 SHA256SUMS 与 manifest。</p></div>
+      <div class="card"><h3>DSH 插件</h3><p><code>@ethanyoq/dsh-invoice-downloader</code> v0.2.0：侧边栏入口、12 个 RPC 能力、本地引擎安装与 NDJSON 子进程。</p></div>
+    </div>
+  </section>
+
+  <!-- ======================= QUICKSTART ======================= -->
+  <section class="section" id="start">
+    <p class="eyebrow">快速上手</p>
+    <h2 class="title">三种入口，按需选择</h2>
+    <p class="lead">桌面端最适合日常使用；命令行适合脚本化与批量；DSH 插件适合把整理工作放进 AI 工作流侧边栏。</p>
+    <div class="tabs" role="tablist" aria-label="上手方式">
+      <button class="tab" role="tab" aria-selected="true" data-start-tab="gui">桌面端</button>
+      <button class="tab" role="tab" aria-selected="false" data-start-tab="cli">命令行</button>
+      <button class="tab" role="tab" aria-selected="false" data-start-tab="plugin">DSH 插件</button>
+    </div>
+    <div class="panel" id="start-gui" role="tabpanel">
+      <div class="grid grid-2">
+        <div class="card"><h3>四步完成一次整理</h3><ul class="checks" style="margin-top:4px"><li><span>1. 选择任务模式与输出目录。</span></li><li><span>2. 填写邮箱地址与 IMAP 授权码，可先测试连接。</span></li><li><span>3. 选择日期范围（首次建议覆盖 180 天以上），开始处理。</span></li><li><span>4. 在结果分析页查看汇总、处理待复核项并导出 Excel。</span></li></ul></div>
+        <div class="card"><h3>首次配置提示</h3><p>QQ / 163 / 88 的授权码不是登录密码；修改邮箱密码后授权码可能失效。识别引擎已内置，无需填写 API Key。图片与扫描件由本地 OCR 处理。</p></div>
+      </div>
+    </div>
+    <div class="panel" id="start-cli" role="tabpanel" hidden>
+      <div class="code-block"><button class="code-copy" type="button">复制</button><pre># 预览本地文件夹整理（默认 dry-run、原地输出）
+python organize_cli.py organize "D:\发票\待整理"
+
+# 真正执行整理
+python organize_cli.py organize "D:\发票\待整理" --apply
+
+# 指定独立归档库（原件保留在原文件夹）
+python organize_cli.py organize "D:\发票\待整理" --output "D:\发票库" --apply
+
+# 只提取邮箱附件到 inbox（授权码支持 env:变量名）
+python organize_cli.py fetch --email you@qq.com --auth-code env:QQ_AUTH_CODE --output "D:\发票库"
+
+# 规则维护与解释
+python organize_cli.py rules test --text "酒店住宿" --amount 150.00
+python organize_cli.py rules explain --library "D:\发票库" --text "酒店"</pre></div>
+    </div>
+    <div class="panel" id="start-plugin" role="tabpanel" hidden>
+      <div class="code-block"><button class="code-copy" type="button">复制</button><pre>dsh plugin --profile web add @ethanyoq/dsh-invoice-downloader
+dsh web --profile web</pre></div>
+      <div class="note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16h.01"/></svg><span>打开右侧「发票下载」入口 → 安装本地引擎（首次需联网下载 Python 依赖与 Chromium）→ 选择保存位置、填写 IMAP 授权码 → 开始扫描。</span></div>
+    </div>
+  </section>
+
+  <!-- ======================= LIMITS ======================= -->
+  <section class="section" id="limits">
+    <p class="eyebrow">边界与取舍</p>
+    <h2 class="title">它擅长什么，不承诺什么</h2>
+    <p class="lead">本地离线识别换来了隐私与零 API 成本，也带来明确的能力边界；正确使用方式是「自动整理 + 人工复核」。</p>
+    <div class="limit-grid">
+      <div class="limit"><span class="l-ico" aria-hidden="true">⚖️</span><div><b>识别是辅助，不是结论</b><p>不保证票面数据或归档结果 100% 正确；报销、入账、税务判断必须人工复核。</p></div></div>
+      <div class="limit"><span class="l-ico" aria-hidden="true">📮</span><div><b>只支持三种邮箱</b><p>QQ、163、88；其他邮箱需要扩展通道注册表。</p></div></div>
+      <div class="limit"><span class="l-ico" aria-hidden="true">🧐</span><div><b>待复核是正常路径</b><p>图片模糊、非标准票据、加密 PDF、金额勾稽异常都会进入待人工复核。</p></div></div>
+      <div class="limit"><span class="l-ico" aria-hidden="true">📁</span><div><b>本地整理默认原地</b><p>会改变文件夹结构；建议先在副本上试运行（CLI 支持 --dry-run），重要目录先备份。</p></div></div>
+      <div class="limit"><span class="l-ico" aria-hidden="true">🔁</span><div><b>规则修改不回迁旧文件</b><p>新归档进入新文件夹，旧文件不会自动搬家。</p></div></div>
+      <div class="limit"><span class="l-ico" aria-hidden="true">🧾</span><div><b>不含联网验真 / 报税</b><p>不提供发票真伪查验、税务申报或财务系统对接。</p></div></div>
+      <div class="limit"><span class="l-ico" aria-hidden="true">📊</span><div><b>Excel 文件名以实际为准</b><p>README 中写作 summary_report.xlsx，当前实现为 结果明细_&lt;时间戳&gt;.xlsx。</p></div></div>
+      <div class="limit"><span class="l-ico" aria-hidden="true">🍎</span><div><b>macOS 版本未签名</b><p>首次打开需要在系统设置中放行。</p></div></div>
+    </div>
+    <div class="mini-title" style="margin-top:28px">常见问题</div>
+    <div class="faq">
+      <details><summary><span class="q-mark">Q</span>识别需要联网或填写 API Key 吗？<span class="chev">›</span></summary><div class="a">不需要。文本层 PDF、OFD、XML 直接解析，扫描件与图片由内置本地 OCR 识别；模型随依赖提供，识别过程不联网、不调用模型服务。</div></details>
+      <details><summary><span class="q-mark">Q</span>为什么有发票进入「待人工复核」？<span class="chev">›</span></summary><div class="a">当本地解析与规则校验无法可靠确认时（图片模糊、非标准票据、加密 PDF、金额勾稽不平、未命中归类规则等），系统会放入待人工复核目录，由用户确认，而不是硬猜。</div></details>
+      <details><summary><span class="q-mark">Q</span>支持哪些邮箱？授权码是什么？<span class="chev">›</span></summary><div class="a">支持 QQ、163、88。授权码是邮箱后台生成的第三方客户端专用密码，不是登录密码；QQ 修改密码后授权码可能失效，需要重新生成。</div></details>
+      <details><summary><span class="q-mark">Q</span>本地文件夹整理会移动或删除原文件吗？<span class="chev">›</span></summary><div class="a">默认原地整理时，原件按原文件名、原内容、原相对路径保留在「整理前发票/」，不删除；分类结果以副本形式放入分类目录。重复件移入 duplicates/。</div></details>
+      <details><summary><span class="q-mark">Q</span>修改归类规则后，旧文件会自动搬家吗？<span class="chev">›</span></summary><div class="a">不会。规则修改只影响之后的新归档；已有文件保持原位置。</div></details>
+      <details><summary><span class="q-mark">Q</span>为什么第一次扫描发票很少？<span class="chev">›</span></summary><div class="a">部分邮箱默认只拉取近 30 天邮件。把起始日期调整到 180 天以上，并在邮箱 IMAP 设置里选择收取全部邮件。</div></details>
+      <details><summary><span class="q-mark">Q</span>Excel 文件叫什么名字？<span class="chev">›</span></summary><div class="a">当前实现导出「结果明细_YYYYmmdd_HHMMSS.xlsx」，包含分类汇总、成功明细、异常记录三个工作表。README 中的 summary_report.xlsx 是旧称。</div></details>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="foot-inner">
+    <div>
+      <div class="foot-brand"><span class="brand-mark" aria-hidden="true">IF</span><span>InvoiceFlowAI · 电子发票整理与报销准备工具</span></div>
+      <p class="foot-disc">本页基于当前仓库工作区（2026-11-19，含未提交改动）整理，用于快速理解项目功能与架构。项目通过 IMAP 只读访问邮箱，仅用于发票邮件的下载、识别、分类、归档等自动化辅助；作者不保证识别、归档或报表结果的准确性、完整性、税务或财务合规性，使用前请人工复核并确保拥有合法授权。</p>
+    </div>
+    <div>
+      <div class="foot-links">
+        <a href="../README.md">README</a>
+        <a href="project-overview.zh.md">Markdown 版</a>
+        <a href="../LICENSE">Apache-2.0</a>
+        <a href="../NOTICE">NOTICE</a>
+        <a href="https://github.com/EthanYoQ/Invoice-Downloader" target="_blank" rel="noopener noreferrer">GitHub</a>
+      </div>
+      <p style="margin:10px 0 0">统计口径：158 个 Python 模块 / 约 104k 行（含测试）/ 1379 个 pytest 用例 / 49 个测试文件。</p>
+    </div>
+  </div>
+</footer>
+
+<button id="toTop" type="button" aria-label="回到顶部">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+</button>
+
+<div class="modal" id="featureModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+  <div class="modal-card" id="modalCard">
+    <button class="modal-close" type="button" aria-label="关闭">×</button>
+    <p class="m-eyebrow" id="modalEyebrow">功能细节</p>
+    <h3 id="modalTitle"></h3>
+    <p class="m-desc" id="modalDesc"></p>
+    <div id="modalRows"></div>
+  </div>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(function () {
+  "use strict";
+  var $ = function (selector, root) { return (root || document).querySelector(selector); };
+  var $$ = function (selector, root) { return Array.prototype.slice.call((root || document).querySelectorAll(selector)); };
+  var reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* ------------------------------------------------------------------ theme */
+  var THEME_KEY = "invoiceflowai-overview-theme";
+  function applyTheme(theme) {
+    document.documentElement.setAttribute("data-theme", theme === "light" ? "light" : "dark");
+    try { localStorage.setItem(THEME_KEY, theme); } catch (error) { /* file:// storage can be blocked */ }
+    var label = $("#themeLabel");
+    if (label) label.textContent = theme === "dark" ? "切换浅色主题" : "切换深色主题";
+  }
+  var savedTheme = null;
+  try { savedTheme = localStorage.getItem(THEME_KEY); } catch (error) { savedTheme = null; }
+  applyTheme(savedTheme || "dark");
+  function toggleTheme() {
+    applyTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark");
+  }
+  ["#themeToggle", "#themeToggleTop"].forEach(function (selector) {
+    var el = $(selector);
+    if (el) el.addEventListener("click", toggleTheme);
+  });
+
+  /* ------------------------------------------------------------- ui helpers */
+  var toastTimer = null;
+  function toast(message) {
+    var el = $("#toast");
+    if (!el) return;
+    el.textContent = message;
+    el.classList.add("show");
+    window.clearTimeout(toastTimer);
+    toastTimer = window.setTimeout(function () { el.classList.remove("show"); }, 1800);
+  }
+  function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      return navigator.clipboard.writeText(text).then(function () { return true; }, fallbackCopy);
+    }
+    return Promise.resolve(fallbackCopy());
+    function fallbackCopy() {
+      try {
+        var area = document.createElement("textarea");
+        area.value = text;
+        area.setAttribute("readonly", "");
+        area.style.position = "fixed";
+        area.style.opacity = "0";
+        document.body.appendChild(area);
+        area.select();
+        var ok = document.execCommand("copy");
+        document.body.removeChild(area);
+        return ok;
+      } catch (error) { return false; }
+    }
+  }
+  function esc(value) {
+    return String(value).replace(/[&<>"]/g, function (character) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[character];
+    });
+  }
+
+  /* --------------------------------------------------------------- features */
+  var CAT_LABELS = { collect: "采集", recognize: "识别", organize: "归类", deliver: "交付", safe: "安全", extend: "扩展" };
+  var FEATURES = [
+    {
+      id: "mail", cat: "collect", icon: "📧", title: "邮箱批量提取",
+      desc: "IMAP 只读读取 QQ / 163 / 88 邮箱，按日期范围批量扫描，附件与链接进入同一流水线。",
+      tags: ["QQ / 163 / 88", "IMAP 只读", "日期范围"],
+      detail: "支持三种国内常用邮箱，自动处理 163/88 的 IMAP ID 命令；邮件正文中的平台回执也会被解析成候选记录。",
+      outcome: "一次配置后，每月点击运行即可拉取多平台发票，不需要手工翻邮箱。",
+      modules: ["email_channel.py", "mailbox_scanner.py", "email_fetcher.py"],
+      evidence: "邮箱通道注册表 + 扫描/抓取模块；附件按 RFC822 分段读取并做大小上限保护。"
+    },
+    {
+      id: "fetch-only", cat: "collect", icon: "📥", title: "仅提取到 inbox",
+      desc: "只保存附件与来源清单到 inbox/，不识别、不改名，方便交给自己的工具或后续整理。",
+      tags: ["inbox", "manifest.jsonl", "解耦"],
+      detail: "每个附件记录 SHA-256、相对路径、邮箱、UID、主题、发件人、收到时间；清单格式公开、可手工编辑。",
+      outcome: "把「收集」与「整理」拆成两步，已有归档/识别工具链的用户可以直接接管。",
+      modules: ["fetch_only.py", "fetch_handoff.py", "organize_cli.py"],
+      evidence: "Handoff 契约明确限定 inbox 与 manifest 的字段和文件类型。"
+    },
+    {
+      id: "local-organize", cat: "collect", icon: "📂", title: "本地文件夹整理",
+      desc: "不连邮箱也能用：扫描手机导出、微信/支付宝下载、拍照发票等任意文件夹，离线识别并整理。",
+      tags: ["离线", "原地整理", "原件保留"],
+      detail: "默认输出到所选文件夹本身；分类副本进子目录，原件按原文件名、原内容、原相对路径保留在「整理前发票/」，重复件进 duplicates/。",
+      outcome: "不需要邮箱配置和网络，一次点击完成本机发票的识别、分类与报表。",
+      modules: ["local_organize.py", "organize_source.py", "organize_layout.py", "organize_cli.py"],
+      evidence: "本地整理与桌面/CLI 共用 LocalOrganizer；布局迁移只认自己产出的文件名。"
+    },
+    {
+      id: "funnel", cat: "collect", icon: "🔍", title: "四层邮件筛选",
+      desc: "域名白名单 → 主题关键词 → 正文检测 → 二维码/其余，逐层判断邮件是否值得进入识别。",
+      tags: ["四层漏斗", "差旅域名", "降噪"],
+      detail: "白名单覆盖 12306、铁路、滴滴、高德、万豪、华住、国旅运通等 11 个差旅相关域名；非白名单邮件仍可凭主题、正文或二维码信号进入，但优先级更低。",
+      outcome: "避免整箱全量识别，减少无效 OCR 与误判。",
+      modules: ["email_fetcher.py"],
+      evidence: "TIER1_DOMAINS 常量与 _classify_email_tier 逐层判定。"
+    },
+    {
+      id: "attachment", cat: "collect", icon: "🧹", title: "附件三级决策",
+      desc: "A 层丢弃追踪像素与装饰图，B 层暂存超大/解包失败附件，C 层进入识别。",
+      tags: ["A/B/C", "5MB", "ZIP 限制"],
+      detail: "超过 5MB、ZIP 解包失败或超限的附件保留但不处理；ZIP 最多 64 个成员、单成员 16MB、总量 32MB、嵌套 2 层。",
+      outcome: "小图、Logo、追踪像素不会拖慢识别；异常附件不会丢失。",
+      modules: ["email_fetcher.py"],
+      evidence: "极端信号与强负信号阈值、MAX_ATTACHMENT_BYTES 与 ZIP 展开限制。"
+    },
+    {
+      id: "recovery", cat: "recognize", icon: "🔗", title: "链接发票恢复",
+      desc: "邮件只有下载链接时，按平台选择百望云自动化、平台直连或网页转 PDF。",
+      tags: ["百望云", "7 类直连", "Playwright"],
+      detail: "恢复在独立子进程中执行，超时可整棵进程树终止；下载结果必须与邮件正文提取的期望字段匹配，否则拒收。",
+      outcome: "「点击下载」的链接变成可归档的本地 PDF，并保留字段比对证据。",
+      modules: ["pdf_converter.py", "provider_baiwang.py", "provider_direct_invoice.py", "bounded_url_recovery.py"],
+      evidence: "三级恢复策略 + 子进程隔离 + URL 公网策略与字段闭环。"
+    },
+    {
+      id: "recognition", cat: "recognize", icon: "🔎", title: "本地识别引擎",
+      desc: "文本层 PDF、OFD、数电票 XML 直接解析；扫描件与图片走本地 OCR，全程离线。",
+      tags: ["PyMuPDF", "RapidOCR", "离线"],
+      detail: "文本层 ≥ 40 字符走文本解析；否则渲染前 2 页（200 DPI）做 OCR；OFD 解 ZIP 读 ofd:TextCode；XML 按字段别名解析。",
+      outcome: "不需要联网、不需要 API Key，发票内容不上传。",
+      modules: ["local_recognition.py", "invoice_extractor.py"],
+      evidence: "识别顺序与阈值集中定义，OCR 引擎懒加载并支持失败降级。"
+    },
+    {
+      id: "doc-types", cat: "recognize", icon: "🏷️", title: "票种与字段抽取",
+      desc: "18 种票据/辅助类型，锚点规则抽取日期、金额、销售方、购买方、票号与明细。",
+      tags: ["18 类", "锚点规则", "票种判定"],
+      detail: "打车、行程单、火车票、机票、住宿发票、住宿水单、餐饮、过路费、充电、定额发票、差旅服务费、通行费汇总单、开票二维码等；另有非目标公司/个人非报销隔离类型。",
+      outcome: "不同平台的票据进入统一的字段模型，供规则、命名、报表复用。",
+      modules: ["document_types.py", "invoice_extractor.py"],
+      evidence: "文档类型注册表统一归档目录与购买方校验豁免规则。"
+    },
+    {
+      id: "acceptance", cat: "recognize", icon: "✅", title: "校验与人工复核",
+      desc: "金额勾稽、日期、票号、字段可见性和购买方归属都通过才归档；不确定就进待复核。",
+      tags: ["勾稽校验", "可见性验证", "待复核"],
+      detail: "PDF 产物还要验证字段真的可见、没有被图片覆盖；无法确认时不猜测，转入「待人工复核」或隔离目录。",
+      outcome: "报销资料里不会混入明显错误或无法核实的票据。",
+      modules: ["document_acceptance.py", "artifact_verifier.py", "truth_contracts.py"],
+      evidence: "独立最终产物验证 + 准入服务 + 真实性契约。"
+    },
+    {
+      id: "rules", cat: "organize", icon: "🗂️", title: "费用归类规则",
+      desc: "内置 → 全局 → 发票库逐层覆盖；目标票种 + 关键词 + 金额范围自动生成归档文件夹。",
+      tags: ["YAML", "多层覆盖", "自动目录"],
+      detail: "匹配顺序：销售方词典 → 关键词规则 → 票种兜底 → 未命中进复核；规则保留文件与行号，可解释「为什么归到这一类」。",
+      outcome: "费用类目不用改代码，界面或 YAML 都能维护，归档目录自动生成。",
+      modules: ["expense_rules/", "builtin/categories.yaml"],
+      evidence: "规则加载/覆盖/匹配/解释与备份恢复均有独立模块与 CLI。"
+    },
+    {
+      id: "custom-types", cat: "organize", icon: "🧩", title: "自定义票种与词典",
+      desc: "内置票种之外可新建全局自定义票种；销售方词典按税号精确或名称包含匹配。",
+      tags: ["custom_types.yaml", "user_terms.yaml", "全局可用"],
+      detail: "自定义票种写入全局 custom_types.yaml，所有规则都能选用；被规则引用时不能删除。",
+      outcome: "公司自己的费用口径可以沉淀成规则，不必每次手工挪文件。",
+      modules: ["expense_rules/types.py", "expense_rules/loader.py", "company_rules.py"],
+      evidence: "票种管理、词典匹配与购买方归属校验。"
+    },
+    {
+      id: "pairing", cat: "organize", icon: "🧾", title: "发票与凭证撮合",
+      desc: "住宿发票配水单/确认单，打车发票配行程单，按金额、日期、平台做最优匹配并排命名。",
+      tags: ["打车 + 行程单", "住宿 + 水单", "最优指派"],
+      detail: "同平台、同邮件、商户词重合、金额相等依次加分；多组最优解记为歧义，保留原状不强行配对。",
+      outcome: "同一笔报销的主凭证和附件相邻存放，财务按笔核对更省事。",
+      modules: ["pairing_engine.py", "archive_pairing.py", "archive_pairing_service.py"],
+      evidence: "兼容条件、打分与全局指派在配对引擎中实现。"
+    },
+    {
+      id: "excel", cat: "deliver", icon: "📊", title: "Excel 结果明细",
+      desc: "分类汇总、成功明细、异常记录三个工作表，覆盖日期、金额、销售方、归类来源与文件路径。",
+      tags: ["xlsx", "三个工作表", "可导出"],
+      detail: "当前实现文件名为 结果明细_YYYYmmdd_HHMMSS.xlsx；本地整理执行后也会自动导出。",
+      outcome: "报销汇总不用手工复制粘贴，异常项也能直接筛出来排查。",
+      modules: ["app_api.py", "local_organize.py"],
+      evidence: "openpyxl 导出逻辑与分类/异常分组复用同一份结果数据。"
+    },
+    {
+      id: "evidence", cat: "deliver", icon: "🛡️", title: "运行证据与状态机",
+      desc: "九态运行状态机、进度日志、安全停止，以及输入/归档/哈希/构建身份组成的不可变证据。",
+      tags: ["状态机", "证据链", "安全停止"],
+      detail: "运行状态为 created → scanning → recovering → extracting → archiving → reporting → finalizing → completed / failed；停止请求在当前文件处理完后生效。",
+      outcome: "每次运行都可复查，出错时能定位到具体阶段与文件。",
+      modules: ["run_lifecycle.py", "run_coordinator.py", "run_evidence.py", "run_state_store.py"],
+      evidence: "生命周期、协调器、证据写入与状态存储相互独立。"
+    },
+    {
+      id: "privacy", cat: "safe", icon: "🔒", title: "本地隐私与凭据",
+      desc: "DPAPI / Keychain 加密授权码，路径白名单限制桥接访问，URL 公网策略与前端 CSP 兜底。",
+      tags: ["DPAPI", "Keychain", "CSP"],
+      detail: "IMAP 只读；识别不上传；URL 只允许公网单播地址并做 DNS 钉扎与响应端复验；日志链接脱敏。",
+      outcome: "邮箱凭据与发票内容留在本机，桥接不能访问未授权目录。",
+      modules: ["user_settings.py", "url_security.py", "pinned_http.py"],
+      evidence: "设置加密、URL 策略与桥接路径白名单均有独立实现与测试。"
+    },
+    {
+      id: "entries", cat: "extend", icon: "🖥️", title: "多入口与 DSH 插件",
+      desc: "Windows 安装版/便携版、macOS DMG、源码启动、CLI 与 DeepSeek Harness 侧边栏插件。",
+      tags: ["Windows", "macOS", "CLI", "DSH"],
+      detail: "桌面端是 pywebview + WebView2；插件复用同一套 Python 引擎，通过 12 个 RPC 能力和 NDJSON 子进程协议调用。",
+      outcome: "同一套能力可以在桌面、脚本和 AI 工作流侧边栏里使用。",
+      modules: ["main.py", "organize_cli.py", "plugins/dsh-invoice-downloader/"],
+      evidence: "PyInstaller 打包、Inno Setup 安装包、DMG 构建与插件打包校验。"
+    }
+  ];
+
+  var featureGrid = $("#featureGrid");
+  var activeFilter = "all";
+  var searchInput = $("#search");
+  var searchStatus = $("#searchStatus");
+  var featureEmpty = $("#featureEmpty");
+
+  function renderFeatures() {
+    if (!featureGrid) return;
+    featureGrid.innerHTML = FEATURES.map(function (feature) {
+      var haystack = [feature.title, feature.desc, feature.tags.join(" "), feature.modules.join(" "), CAT_LABELS[feature.cat]].join(" ").toLowerCase();
+      return '<article class="feature" role="button" tabindex="0" data-feature="' + feature.id + '" data-cat="' + feature.cat + '" data-search="' + esc(haystack) + '" aria-haspopup="dialog">' +
+        '<span class="f-head"><span class="f-ico" aria-hidden="true">' + feature.icon + '</span><h3>' + esc(feature.title) + '</h3></span>' +
+        '<p>' + esc(feature.desc) + '</p>' +
+        '<span class="f-foot"><span class="tag">' + CAT_LABELS[feature.cat] + '</span><span class="more">查看细节 →</span></span>' +
+        '</article>';
+    }).join("");
+    bindFeatureCards();
+    applyFilter();
+  }
+  function bindFeatureCards() {
+    $$(".feature", featureGrid).forEach(function (card) {
+      card.addEventListener("click", function () { openFeature(card.getAttribute("data-feature")); });
+      card.addEventListener("keydown", function (event) {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          openFeature(card.getAttribute("data-feature"));
+        }
+      });
+    });
+  }
+  function applyFilter() {
+    if (!featureGrid) return;
+    var query = (searchInput ? searchInput.value : "").trim().toLowerCase();
+    var visible = 0;
+    $$(".feature", featureGrid).forEach(function (card) {
+      var categoryOk = activeFilter === "all" || card.getAttribute("data-cat") === activeFilter;
+      var queryOk = !query || card.getAttribute("data-search").indexOf(query) !== -1;
+      var show = categoryOk && queryOk;
+      card.classList.toggle("hidden", !show);
+      if (show) visible += 1;
+    });
+    if (featureEmpty) featureEmpty.classList.toggle("on", visible === 0);
+    if (searchStatus) {
+      if (query) {
+        searchStatus.textContent = "搜索「" + query + "」· 匹配 " + visible + " / " + FEATURES.length + " 项";
+      } else if (activeFilter !== "all") {
+        searchStatus.textContent = CAT_LABELS[activeFilter] + " · " + visible + " 项";
+      } else {
+        searchStatus.textContent = "共 " + FEATURES.length + " 项能力";
+      }
+    }
+  }
+  $$("#featureFilters .filter").forEach(function (button) {
+    button.addEventListener("click", function () {
+      activeFilter = button.getAttribute("data-filter");
+      $$("#featureFilters .filter").forEach(function (item) {
+        item.setAttribute("aria-pressed", item === button ? "true" : "false");
+      });
+      applyFilter();
+    });
+  });
+  if (searchInput) searchInput.addEventListener("input", applyFilter);
+
+  /* --------------------------------------------------------------- modal */
+  var modal = $("#featureModal");
+  var lastFocused = null;
+  function openFeature(id) {
+    var feature = FEATURES.filter(function (item) { return item.id === id; })[0];
+    if (!feature || !modal) return;
+    lastFocused = document.activeElement;
+    $("#modalEyebrow").textContent = CAT_LABELS[feature.cat] + " · 功能细节";
+    $("#modalTitle").textContent = feature.title;
+    $("#modalDesc").textContent = feature.detail;
+    $("#modalRows").innerHTML = [
+      ["用户结果", esc(feature.outcome)],
+      ["标签", feature.tags.map(function (tag) { return '<span class="chip">' + esc(tag) + '</span>'; }).join(" ")],
+      ["关键模块", feature.modules.map(function (name) { return "<code>" + esc(name) + "</code>"; }).join(" · ")],
+      ["实现参考", esc(feature.evidence)]
+    ].map(function (row) {
+      return '<div class="m-row"><div class="k">' + row[0] + '</div><div class="v">' + row[1] + '</div></div>';
+    }).join("");
+    modal.classList.add("open");
+    document.body.style.overflow = "hidden";
+    var closeButton = $(".modal-close", modal);
+    if (closeButton) closeButton.focus();
+  }
+  function closeModal() {
+    if (!modal || !modal.classList.contains("open")) return;
+    modal.classList.remove("open");
+    document.body.style.overflow = "";
+    if (lastFocused && lastFocused.focus) lastFocused.focus();
+  }
+  if (modal) {
+    $(".modal-close", modal).addEventListener("click", closeModal);
+    modal.addEventListener("click", function (event) { if (event.target === modal) closeModal(); });
+  }
+
+  /* --------------------------------------------------------------- stepper */
+  var STAGES = [
+    {
+      name: "扫描", sub: "邮箱 / 文件夹", desc: "把邮箱邮件或本地文件变成可处理的候选输入。",
+      input: "邮箱 UID、本地文件目录", actions: "IMAP 分段读取；附件解包；计算 SHA-256；记录来源元数据", output: "候选文件 + 来源清单", failure: "跳过 / unresolved", modules: ["mailbox_scanner.py", "email_fetcher.py"]
+    },
+    {
+      name: "候选化", sub: "筛选与冻结", desc: "判断哪些邮件与附件值得进入识别，并把候选冻结成不可变对象。",
+      input: "邮件、附件名、链接", actions: "四层筛选；A/B/C 三级决策；供应商族识别；文档指纹", output: "DocumentCandidate", failure: "丢弃 / 仅保全", modules: ["email_fetcher.py", "candidate_pipeline.py"]
+    },
+    {
+      name: "链接恢复", sub: "下载正式 PDF", desc: "把只有下载链接的发票变成可归档的本地文件。",
+      input: "发票链接、邮件期望字段", actions: "平台识别；百望云自动化 / 平台直连 / 网页转 PDF；子进程隔离；字段比对", output: "本地 PDF / XML", failure: "暂存 / 待复核", modules: ["pdf_converter.py", "bounded_url_recovery.py", "provider_*.py"]
+    },
+    {
+      name: "本地识别", sub: "解析 + OCR", desc: "按确定性优先级识别票面并抽取字段。",
+      input: "候选 PDF / OFD / XML / 图片", actions: "文本层解析；OFD 文本；XML 字段；OCR 兜底；二维码；锚点抽取", output: "统一字段 payload", failure: "needs_remote / 待复核", modules: ["local_recognition.py", "invoice_extractor.py"]
+    },
+    {
+      name: "校验准入", sub: "勾稽与可见性", desc: "确认识别结果可靠，再决定接受、复核还是隔离。",
+      input: "字段 payload + PDF", actions: "金额勾稽；日期/票号校验；字段可见性；购买方归属", output: "接受 / 拒绝", failure: "待复核 / 隔离目录", modules: ["document_acceptance.py", "artifact_verifier.py", "truth_contracts.py"]
+    },
+    {
+      name: "归类", sub: "规则与目录", desc: "按费用规则决定票种、目录与分类结果。",
+      input: "字段 + 规则集", actions: "销售方词典 → 关键词规则 → 票种兜底；生成归档文件夹", output: "归档目录 + 分类", failure: "未分类 / 待复核", modules: ["expense_rules/", "app_archive_adapter.py"]
+    },
+    {
+      name: "归档与配对", sub: "命名与去重", desc: "把文件安全落盘，并把主凭证与附件配对命名。",
+      input: "归类结果 + 文件", actions: "去重；标准命名；凭证撮合；目录布局迁移", output: "分类文件 + 台账", failure: "duplicates / 待复核", modules: ["archive_service.py", "archive_pairing.py", "organize_layout.py"]
+    },
+    {
+      name: "报表与证据", sub: "交付与追溯", desc: "生成 Excel 明细与不可变运行证据。",
+      input: "本轮结果", actions: "分类汇总；异常分组；Excel 导出；输入/归档/哈希证据", output: "结果明细.xlsx + 证据链", failure: "异常记录工作表", modules: ["report_service.py", "run_evidence.py", "app_api.py"]
+    }
+  ];
+  var stepper = $("#stepper");
+  var stageDetail = $("#stageDetail");
+  var currentStage = 0;
+  var tourTimer = null;
+
+  function renderStepper() {
+    if (!stepper) return;
+    stepper.innerHTML = STAGES.map(function (stage, index) {
+      return '<button class="stage" type="button" role="tab" data-stage="' + index + '" aria-current="' + (index === currentStage ? "true" : "false") + '">' +
+        '<span class="s-num">STAGE ' + String(index + 1).padStart(2, "0") + '</span>' +
+        '<span class="s-name">' + stage.name + '</span>' +
+        '<span class="s-sub">' + stage.sub + '</span>' +
+        '</button>';
+    }).join("");
+    $$(".stage", stepper).forEach(function (button) {
+      button.addEventListener("click", function () {
+        stopTour();
+        selectStage(Number(button.getAttribute("data-stage")));
+      });
+    });
+    selectStage(currentStage);
+  }
+  function selectStage(index) {
+    currentStage = (index + STAGES.length) % STAGES.length;
+    $$(".stage", stepper).forEach(function (button) {
+      button.setAttribute("aria-current", Number(button.getAttribute("data-stage")) === currentStage ? "true" : "false");
+    });
+    var stage = STAGES[currentStage];
+    stageDetail.innerHTML =
+      '<div class="sd-head"><div><h3>' + stage.name + ' · ' + stage.sub + '</h3><p class="sd-sub">' + stage.desc + '</p></div><span class="sd-badge">STAGE ' + String(currentStage + 1).padStart(2, "0") + ' / ' + String(STAGES.length).padStart(2, "0") + '</span></div>' +
+      '<div class="sd-grid">' +
+        '<div class="sd-cell"><div class="k">输入</div><div class="v">' + stage.input + '</div></div>' +
+        '<div class="sd-cell"><div class="k">关键动作</div><div class="v">' + stage.actions + '</div></div>' +
+        '<div class="sd-cell"><div class="k">产物</div><div class="v"><strong>' + stage.output + '</strong></div></div>' +
+        '<div class="sd-cell"><div class="k">失败去向</div><div class="v">' + stage.failure + '</div></div>' +
+      '</div>' +
+      '<div class="sd-modules">' + stage.modules.map(function (module) { return '<span class="mod">' + module + '</span>'; }).join("") + '</div>' +
+      '<div class="sd-nav">' +
+        '<button class="btn" type="button" data-stage-step="-1">← 上一阶段</button>' +
+        '<button class="btn" type="button" data-stage-step="1">下一阶段 →</button>' +
+        '<button class="btn ghost" type="button" data-stage-tour="' + (tourTimer ? "stop" : "start") + '" id="stageTour">' + (tourTimer ? "停止自动播放" : "自动播放") + '</button>' +
+        '<span class="tour-state">' + (tourTimer ? "自动播放中，点击任意阶段可退出" : "点击阶段查看细节") + '</span>' +
+      '</div>';
+    stageDetail.onclick = onStageDetailClick;
+  }
+  function onStageDetailClick(event) {
+    var stepButton = event.target.closest("[data-stage-step]");
+    if (stepButton) {
+      stopTour();
+      selectStage(currentStage + Number(stepButton.getAttribute("data-stage-step")));
+      return;
+    }
+    var tourButton = event.target.closest("[data-stage-tour]");
+    if (tourButton) {
+      if (tourTimer) stopTour(); else startTour();
+      selectStage(currentStage);
+    }
+  }
+  function startTour() {
+    stopTour();
+    tourTimer = window.setInterval(function () {
+      selectStage(currentStage + 1);
+    }, 3000);
+  }
+  function stopTour() {
+    if (tourTimer) {
+      window.clearInterval(tourTimer);
+      tourTimer = null;
+    }
+  }
+
+  /* ----------------------------------------------------------- recognition */
+  var RECOGNITION = {
+    text: {
+      icon: "📄", label: "文本层 PDF", small: "电子发票 / 有文字层",
+      title: "文本层 PDF", engine: "PyMuPDF 文本解析",
+      flow: ["读取版式文本", "锚点字段抽取", "勾稽校验"],
+      meta: [["触发条件", "文本 ≥ 40 字符"], ["输出", "票面字段 + 明细"], ["失败去向", "待人工复核"], ["是否联网", "否"]],
+      note: "不经过 OCR，速度与准确率都更高；这是电子发票的首选通道。"
+    },
+    scan: {
+      icon: "🖨️", label: "扫描 PDF", small: "图片型 PDF / 拍照",
+      title: "扫描 PDF", engine: "PDF 渲染 + 本地 OCR",
+      flow: ["200 DPI 渲染前 2 页", "RapidOCR 识别", "字段抽取", "勾稽校验"],
+      meta: [["触发条件", "无文本层或文本不足"], ["输出", "票面字段"], ["失败去向", "待人工复核"], ["是否联网", "否"]],
+      note: "识别在本机完成；图片模糊或版式异常时会进入待人工复核，不会硬猜。"
+    },
+    image: {
+      icon: "🖼️", label: "图片", small: "JPG / PNG / WEBP / BMP / TIFF",
+      title: "图片文件", engine: "本地 OCR",
+      flow: ["图片 OCR", "字段抽取", "勾稽校验"],
+      meta: [["支持格式", "JPG / PNG / WEBP / BMP / TIFF"], ["输出", "票面字段"], ["失败去向", "待人工复核"], ["是否联网", "否"]],
+      note: "拍照发票、截图小票走这条通道，OCR 模型随依赖提供。"
+    },
+    ofd: {
+      icon: "📘", label: "OFD", small: "国标版式文件",
+      title: "OFD 文件", engine: "ZIP + ofd:TextCode 提取",
+      flow: ["解 ZIP 容器", "读取 ofd:TextCode", "字段抽取", "勾稽校验"],
+      meta: [["容器", "ZIP + XML"], ["输出", "票面字段"], ["失败去向", "待人工复核"], ["是否联网", "否"]],
+      note: "OFD 是电子发票常见版式，直接解析文本节点，不经过 OCR。"
+    },
+    xml: {
+      icon: "🧩", label: "数电票 XML", small: "税务标准格式",
+      title: "数电票 / 增值税 XML", engine: "结构解析 + 字段别名",
+      flow: ["解析 XML 结构", "字段别名映射", "业务校验"],
+      meta: [["字段要求", "四要素 + 号码/日期/金额"], ["输出", "票面字段"], ["失败去向", "待人工复核"], ["是否联网", "否"]],
+      note: "结构化数据最可靠；票号、日期、金额不合法时直接拒绝归档。"
+    },
+    unknown: {
+      icon: "❓", label: "未知 / 过小文件", small: "无法判断的材料",
+      title: "未知材料", engine: "预判 → 拒绝或复核",
+      flow: ["探测文件类型", "尝试本地识别", "判定 invalid / 复核"],
+      meta: [["小文件阈值", "< 1000 字节直接 invalid"], ["输出", "无有效票面字段"], ["失败去向", "待人工复核"], ["是否联网", "否"]],
+      note: "无法确认的材料不会被强行归类，避免污染报销库。"
+    }
+  };
+  var recogOptions = $("#recogOptions");
+  var recogResult = $("#recogResult");
+  function renderRecognition() {
+    if (!recogOptions) return;
+    recogOptions.innerHTML = Object.keys(RECOGNITION).map(function (key) {
+      var item = RECOGNITION[key];
+      return '<button class="recog-opt" type="button" data-recog="' + key + '" aria-pressed="false"><span class="o-ico" aria-hidden="true">' + item.icon + '</span><span><b>' + item.label + '</b><small>' + item.small + '</small></span></button>';
+    }).join("");
+    $$(".recog-opt", recogOptions).forEach(function (button) {
+      button.addEventListener("click", function () { selectRecognition(button.getAttribute("data-recog")); });
+    });
+    selectRecognition("text");
+  }
+  function selectRecognition(key) {
+    var item = RECOGNITION[key];
+    if (!item || !recogResult) return;
+    $$(".recog-opt", recogOptions).forEach(function (button) {
+      button.setAttribute("aria-pressed", button.getAttribute("data-recog") === key ? "true" : "false");
+    });
+    recogResult.innerHTML =
+      '<div class="rr-head"><h3>' + item.title + '</h3><span class="engine-pill">' + item.engine + '</span></div>' +
+      '<div class="flow-chips">' + item.flow.map(function (step, index) {
+        return '<span class="fc">' + step + '</span>' + (index < item.flow.length - 1 ? '<span class="arrow">→</span>' : "");
+      }).join("") + '</div>' +
+      '<div class="rr-meta">' + item.meta.map(function (row) {
+        return '<div><span>' + row[0] + '</span><b>' + row[1] + '</b></div>';
+      }).join("") + '</div>' +
+      '<p class="rr-note">' + item.note + '</p>';
+  }
+
+  /* ------------------------------------------------------------- rules demo */
+  var ruleType = $("#ruleType");
+  var ruleMin = $("#ruleMin");
+  var ruleMax = $("#ruleMax");
+  var folderOut = $("#folderOut");
+  var folderHint = $("#folderHint");
+  function trimAmount(value) {
+    var number = Number(value);
+    if (!isFinite(number)) return "";
+    return String(Number(number.toFixed(2)));
+  }
+  function updateFolder() {
+    if (!ruleType || !folderOut) return;
+    var type = (ruleType.value || "票种").trim() || "票种";
+    var minText = ruleMin ? ruleMin.value.trim() : "";
+    var maxText = ruleMax ? ruleMax.value.trim() : "";
+    var min = minText === "" ? null : Number(minText);
+    var max = maxText === "" ? null : Number(maxText);
+    var name = type;
+    var hint = "不填金额时直接使用票种名作为目录。";
+    if (min !== null && max !== null) {
+      name = type + "-" + trimAmount(min) + "-" + trimAmount(max);
+      hint = "同时有下限和上限：目录使用「票种-下限-上限」。";
+      if (min > max) hint = "下限大于上限，规则可能无法命中，请调整金额范围。";
+    } else if (min !== null) {
+      name = type + "-" + trimAmount(min) + "以上";
+      hint = "只有下限：目录使用「票种-下限以上」。";
+    } else if (max !== null) {
+      name = type + "-" + trimAmount(max) + "以下";
+      hint = "只有上限：目录使用「票种-上限以下」。";
+    }
+    folderOut.textContent = name + "/";
+    if (folderHint) folderHint.textContent = hint;
+  }
+  [ruleType, ruleMin, ruleMax].forEach(function (input) {
+    if (input) input.addEventListener("input", updateFolder);
+  });
+  var folderCopy = $("#folderCopy");
+  if (folderCopy) {
+    folderCopy.addEventListener("click", function () {
+      copyText(folderOut ? folderOut.textContent : "").then(function (ok) {
+        toast(ok ? "已复制文件夹名" : "复制失败，请手动选择");
+      });
+    });
+  }
+  updateFolder();
+
+  /* ----------------------------------------------------------- pairing demo */
+  var DOC_ORIGINAL = [
+    { kind: "ride-invoice", icon: "🧾", name: "0312-滴滴-发票_45.50.pdf" },
+    { kind: "ride-itinerary", icon: "🗺️", name: "行程单_45.50.pdf" },
+    { kind: "hotel-invoice", icon: "🏨", name: "住宿发票_888.00.pdf" },
+    { kind: "hotel-folio", icon: "📄", name: "酒店水单_888.00.pdf" }
+  ];
+  var PAIRED_NAMES = {
+    "ride-invoice": "0312-滴滴-01-发票_45.50元.pdf",
+    "ride-itinerary": "0312-滴滴-01-行程单_45.50元.pdf",
+    "hotel-invoice": "20260310-住宿-01-发票_888.00元.pdf",
+    "hotel-folio": "20260310-住宿-01-水单_888.00元.pdf"
+  };
+  var docList = $("#docList");
+  var pairedList = $("#pairedList");
+  var pairedHint = $("#pairedHint");
+  var pairRun = $("#pairRun");
+  var pairReset = $("#pairReset");
+  var originalDocsHTML = docList ? docList.innerHTML : "";
+  function runPairing() {
+    if (!docList || !pairedList || pairRun.disabled) return;
+    pairRun.disabled = true;
+    $$(".doc", docList).forEach(function (doc) {
+      var newName = PAIRED_NAMES[doc.getAttribute("data-kind")];
+      if (!newName) return;
+      doc.classList.add("paired");
+      var span = document.createElement("span");
+      span.className = "doc-new";
+      span.textContent = newName;
+      doc.appendChild(span);
+    });
+    var groups = [
+      { icon: "🚕", names: [PAIRED_NAMES["ride-invoice"], PAIRED_NAMES["ride-itinerary"]] },
+      { icon: "🏨", names: [PAIRED_NAMES["hotel-invoice"], PAIRED_NAMES["hotel-folio"]] }
+    ];
+    pairedList.innerHTML = "";
+    groups.forEach(function (group, index) {
+      window.setTimeout(function () {
+        var row = document.createElement("div");
+        row.className = "doc paired";
+        row.innerHTML = '<span class="doc-ico" aria-hidden="true">' + group.icon + '</span><div>' +
+          group.names.map(function (name) { return '<div class="doc-new" style="display:block">' + name + '</div>'; }).join("") +
+          '</div>';
+        pairedList.appendChild(row);
+      }, 260 * (index + 1));
+    });
+    if (pairedHint) pairedHint.remove();
+    window.setTimeout(function () { pairRun.disabled = false; }, 800);
+  }
+  function resetPairing() {
+    if (!docList || !pairedList) return;
+    docList.innerHTML = originalDocsHTML;
+    pairedList.innerHTML = '<p class="hint" id="pairedHint">点击「运行撮合」，查看配对后的并排命名。</p>';
+    pairRun.disabled = false;
+  }
+  if (pairRun) pairRun.addEventListener("click", runPairing);
+  if (pairReset) pairReset.addEventListener("click", resetPairing);
+
+  /* ------------------------------------------------------------- excel tabs */
+  $$(".xlsx-tab").forEach(function (tab) {
+    tab.addEventListener("click", function () {
+      $$(".xlsx-tab").forEach(function (item) {
+        item.setAttribute("aria-selected", item === tab ? "true" : "false");
+      });
+      ["summary", "success", "error"].forEach(function (name) {
+        var sheet = $("#sheet-" + name);
+        if (sheet) sheet.hidden = tab.getAttribute("data-sheet") !== name;
+      });
+    });
+  });
+
+  /* ---------------------------------------------------------- generic tabs */
+  function setupTabs(attribute, panelPrefix) {
+    var tabs = $$("[" + attribute + "]");
+    if (!tabs.length) return;
+    tabs.forEach(function (tab) {
+      tab.addEventListener("click", function () {
+        var key = tab.getAttribute(attribute);
+        tabs.forEach(function (item) { item.setAttribute("aria-selected", item === tab ? "true" : "false"); });
+        $$('[id^="' + panelPrefix + '"]').forEach(function (panel) {
+          if (panel.getAttribute("role") === "tabpanel") {
+            panel.hidden = panel.id !== panelPrefix + key;
+          }
+        });
+      });
+    });
+  }
+  setupTabs("data-mode-tab", "panel-");
+  setupTabs("data-start-tab", "start-");
+
+  /* ---------------------------------------------------------------- funnel */
+  var FUNNEL_DETAIL = [
+    "域名白名单：命中 12306、铁路、滴滴、高德、万豪、华住、国旅运通等差旅域名的邮件优先进入候选；非白名单邮件仍可凭主题、正文或二维码信号进入，但优先级更低。",
+    "主题关键词：标题中的发票、行程单、水单、报销等信号用于判断邮件意图，减少营销邮件进入下一步。",
+    "正文检测：正文中的发票号、金额、下载入口与平台特征帮助区分「真发票通知」与「产品推广」。",
+    "二维码 / 其余：票面或小票中的开票二维码作为补充入口；低置信度邮件仍保留候选机会，不会被直接丢弃。"
+  ];
+  $$("#funnel .funnel-layer").forEach(function (layer, index) {
+    layer.addEventListener("click", function () {
+      $$("#funnel .funnel-layer").forEach(function (item) { item.classList.remove("active"); });
+      layer.classList.add("active");
+      var detail = $("#funnelDetail");
+      if (detail) detail.innerHTML = "<b>" + layer.querySelector("b").textContent + "：</b>" + FUNNEL_DETAIL[index].replace(/^[^：]+：/, "");
+    });
+  });
+
+  /* ------------------------------------------------------------------ nav */
+  var navLinks = $$("[data-nav]");
+  var SECTION_ALIAS = { position: "overview" };
+  var observedSections = $$("main .section[id]");
+  function setActiveNav(id) {
+    var activeId = SECTION_ALIAS[id] || id;
+    var matched = null;
+    navLinks.forEach(function (link) {
+      var isActive = link.getAttribute("href") === "#" + activeId;
+      link.classList.toggle("active", isActive);
+      if (isActive) matched = link;
+    });
+    if (matched) {
+      var label = matched.textContent.trim();
+      var crumb = $("#crumbCurrent");
+      if (crumb) crumb.textContent = label;
+    }
+  }
+  if ("IntersectionObserver" in window) {
+    var spy = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) setActiveNav(entry.target.id);
+      });
+    }, { rootMargin: "-30% 0px -60% 0px", threshold: 0 });
+    observedSections.forEach(function (section) { spy.observe(section); });
+  }
+
+  /* -------------------------------------------------------------- mobile nav */
+  var menuBtn = $("#menuBtn");
+  var scrim = $("#scrim");
+  function closeNav() {
+    document.body.classList.remove("nav-open");
+    if (menuBtn) menuBtn.setAttribute("aria-expanded", "false");
+  }
+  if (menuBtn) {
+    menuBtn.addEventListener("click", function () {
+      var open = document.body.classList.toggle("nav-open");
+      menuBtn.setAttribute("aria-expanded", open ? "true" : "false");
+    });
+  }
+  if (scrim) scrim.addEventListener("click", closeNav);
+  navLinks.forEach(function (link) { link.addEventListener("click", closeNav); });
+
+  /* ------------------------------------------------------- progress + toTop */
+  var progress = $("#progress");
+  var toTop = $("#toTop");
+  function onScroll() {
+    var doc = document.documentElement;
+    var max = doc.scrollHeight - window.innerHeight;
+    var ratio = max > 0 ? Math.min(1, Math.max(0, doc.scrollTop / max)) : 0;
+    if (progress) progress.style.width = (ratio * 100).toFixed(2) + "%";
+    if (toTop) toTop.classList.toggle("show", doc.scrollTop > 700);
+  }
+  document.addEventListener("scroll", onScroll, { passive: true });
+  onScroll();
+  if (toTop) toTop.addEventListener("click", function () { window.scrollTo({ top: 0, behavior: reducedMotion ? "auto" : "smooth" }); });
+
+  /* ------------------------------------------------------------- counters */
+  function animateCounter(element) {
+    var target = Number(element.getAttribute("data-count"));
+    var suffix = element.getAttribute("data-suffix") || "";
+    if (!isFinite(target)) return;
+    if (reducedMotion) {
+      element.textContent = target.toLocaleString("en-US") + suffix;
+      return;
+    }
+    var duration = 950;
+    var startTime = performance.now();
+    function tick(now) {
+      var progressValue = Math.min(1, (now - startTime) / duration);
+      var eased = 1 - Math.pow(1 - progressValue, 3);
+      element.textContent = Math.round(target * eased).toLocaleString("en-US") + suffix;
+      if (progressValue < 1) window.requestAnimationFrame(tick);
+    }
+    window.requestAnimationFrame(tick);
+  }
+  if ("IntersectionObserver" in window) {
+    var counterObserver = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) {
+          animateCounter(entry.target);
+          counterObserver.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.4 });
+    $$("[data-count]").forEach(function (element) { counterObserver.observe(element); });
+  } else {
+    $$("[data-count]").forEach(animateCounter);
+  }
+
+  /* --------------------------------------------------------------- reveal */
+  if ("IntersectionObserver" in window) {
+    var revealObserver = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add("in");
+          revealObserver.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.12 });
+    $$(".reveal").forEach(function (element) { revealObserver.observe(element); });
+  } else {
+    $$(".reveal").forEach(function (element) { element.classList.add("in"); });
+  }
+
+  /* ----------------------------------------------------------- copy blocks */
+  $$(".code-copy").forEach(function (button) {
+    button.addEventListener("click", function () {
+      var block = button.closest(".code-block");
+      var pre = block ? block.querySelector("pre") : null;
+      if (!pre) return;
+      copyText(pre.textContent).then(function (ok) { toast(ok ? "代码已复制" : "复制失败，请手动选择"); });
+    });
+  });
+
+  /* ------------------------------------------------------------- print/key */
+  var printBtn = $("#printBtn");
+  if (printBtn) printBtn.addEventListener("click", function () { window.print(); });
+
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape") {
+      closeModal();
+      closeNav();
+    }
+    if (event.key === "/" && searchInput && document.activeElement !== searchInput &&
+        !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) {
+      event.preventDefault();
+      searchInput.focus();
+    }
+    if (event.key === "Enter" && document.activeElement === searchInput) {
+      var featuresSection = $("#features");
+      if (featuresSection) featuresSection.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth" });
+    }
+  });
+
+  /* ------------------------------------------------------------------ init */
+  renderFeatures();
+  renderStepper();
+  renderRecognition();
+})();
+</script>
+</body>
+</html>
