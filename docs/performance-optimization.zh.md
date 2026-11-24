@@ -86,3 +86,43 @@
 ## 6. 回滚
 
 每个批次独立提交，可单独 `git revert`；状态文件保持向后兼容，无 schema 变更。
+
+## 7. 第二批（E1–E6）
+
+### 7.1 提交清单
+
+| 提交 | 内容 |
+|---|---|
+| `ed4ba0a` | 清理 380 行不可达旧实现、2 个死导出、2 个恒 success 重试占位 |
+| `376a929` | fetch-only 增量抓取：`fetch_state` v2、UIDVALIDITY 校验、UID 跳过、批级检查点 |
+| `cb8227d` | `get_results_delta` 增量游标、前端游标追加、legacy→store 同步短路 |
+| `aba48d7` | 证据 inventory 按 size+mtime 复用 capture 摘要，变更文件自动重算 |
+| `1236145` | 导出逻辑移出 `app_api` → `app_services/exports.py`，插件引擎清单同步 |
+| `cf4fa8d` | 设置/规则桥接移出 → `app_services/settings_rules.py` |
+| `6d57302` | 诊断/事件发射移出 → `app_services/diagnostics.py` |
+| `daca753` | 运行准入/依赖装配移出 → `app_services/admission.py` |
+| `1dbe960` | 可选 OCR 进程运行时（默认 thread，`TIDYINVOICE_OCR_RUNTIME=process` 开启） |
+
+### 7.2 结构与行为变化
+
+- `app_api.py` 从约 6519 行降到 3336 行；`InvoiceAppAPI` 仍作为 js_api 门面，公开/私有方法名不变。
+- 新增 `app_services/` 包（admission / diagnostics / errors / exports / settings_rules），插件 `prepare-engine.mjs` 已加入对应 vendored 源文件。
+- `fetch_state.json` 升级为 v2：`uidvalidity + last_uid`；v1 状态安全降级为“不跳过”。
+- 结果页轮询改为 `get_results_delta`；`run_id` 变化或游标越界时自动重置。
+- 证据 inventory 复用只在 capture 后 `size+mtime` 未变时生效；validator 仍全量复核。
+- OCR 默认仍是线程软超时；进程模式超时会 terminate 子进程并在下次调用重启。
+
+### 7.3 验证
+
+- 全量：**1425 passed, 2 skipped, 1 deselected, 120 subtests passed**（约 124 s）。
+- `ruff check .`、前端 `--check`、品牌门禁：通过。
+- 插件：`npm test`（24 passed）、`npm run test:package`（layout/privacy ok）。
+- 基准（同机 `--count 20`）：探测 p95 2.6 ms、文本识别 p95 2.6 ms、假 OCR p95 54.6 ms、状态 1000 次 669 ms、摘要约 1.25 GB/s，全部在预算内。
+
+### 7.4 仍未完成
+
+- 状态 store 在每次变更时仍整份深拷贝（O(n)），E3 只短路了轮询回灌。
+- 主邮件模式尚未使用 UID 检查点（E2 只覆盖 fetch-only）。
+- 证据 schema 未升级；复用统计未写入证据契约。
+- OCR 进程模式未在 Windows 冻结包与插件 headless 环境做真实 ONNX 压测，默认保持关闭。
+- `app_api` 仍含窗口/路径桥接与结果聚合，未拆到更细的 facade 服务。
