@@ -81,6 +81,7 @@
     "build": "tsc -p tsconfig.json",
     "clean": "node scripts/clean.mjs",
     "prepare-engine": "node scripts/prepare-engine.mjs",
+    "check-engine": "node scripts/prepare-engine.mjs --check",
     "pretest": "npm run build",
     "test": "node --test tests/*.test.mjs",
     "pretest:package": "npm run prepare-engine",

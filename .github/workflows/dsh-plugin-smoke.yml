@@ -4,11 +4,19 @@ on:
   pull_request:
     paths:
       - 'plugins/dsh-invoice-downloader/**'
+      - '*.py'
+      - 'app_services/**'
+      - 'expense_rules/**'
+      - 'builtin/**'
       - '.github/workflows/dsh-plugin-smoke.yml'
   push:
     branches: [main]
     paths:
       - 'plugins/dsh-invoice-downloader/**'
+      - '*.py'
+      - 'app_services/**'
+      - 'expense_rules/**'
+      - 'builtin/**'
       - '.github/workflows/dsh-plugin-smoke.yml'
   workflow_dispatch:
 
@@ -39,6 +47,9 @@ jobs:
           npm ci
           mkdir -p "$GITHUB_WORKSPACE/.runtime/dsh-plugin-artifact"
           npm test
+          npm run prepare-engine
+          npm run check-engine
+          npm run test:package
           npm pack --pack-destination "$GITHUB_WORKSPACE/.runtime/dsh-plugin-artifact"
 
       - name: Install the tarball into an isolated DSH Web profile

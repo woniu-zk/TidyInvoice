@@ -1,4 +1,4 @@
-import { cpSync, existsSync, lstatSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -8,6 +8,9 @@ const projectRoot = resolve(packageRoot, '..', '..')
 const runtimeRoot = resolve(packageRoot, 'runtime')
 const engineRoot = resolve(runtimeRoot, 'engine')
 const sourceRoot = projectRoot
+const checkMode = process.argv.includes('--check')
+const engineDataFiles = ['builtin/categories.yaml']
+const engineInitContent = '"""Bundled Invoice Downloader engine source."""\n'
 const engineSourceFiles = [
   'app_api.py',
   'app_services/__init__.py',
@@ -98,6 +101,71 @@ for (const required of [
   }
 }
 
+function engineCheckErrors() {
+  const errors = []
+  if (!existsSync(engineRoot)) {
+    return ['runtime/engine is missing; run npm run prepare-engine']
+  }
+  const engineSource = join(engineRoot, 'src', 'invoice_engine')
+  for (const file of [...engineSourceFiles, ...engineDataFiles]) {
+    const source = join(sourceRoot, file)
+    const target = join(engineSource, file)
+    if (!existsSync(target)) {
+      errors.push(`missing generated file: ${relative(packageRoot, target)}`)
+      continue
+    }
+    if (!readFileSync(source).equals(readFileSync(target))) {
+      errors.push(`stale generated file: ${relative(packageRoot, target)}`)
+    }
+  }
+
+  const initTarget = join(engineSource, '__init__.py')
+  if (!existsSync(initTarget) || readFileSync(initTarget, 'utf8') !== engineInitContent) {
+    errors.push('stale generated file: runtime/engine/src/invoice_engine/__init__.py')
+  }
+
+  const protocolSource = join(packageRoot, 'engine-adapter', 'ipc', 'protocol.py')
+  const protocolTarget = join(engineSource, 'ipc', 'protocol.py')
+  if (
+    !existsSync(protocolTarget) ||
+    !readFileSync(protocolSource).equals(readFileSync(protocolTarget))
+  ) {
+    errors.push('stale generated file: runtime/engine/src/invoice_engine/ipc/protocol.py')
+  }
+
+  const manifestPath = join(engineRoot, 'MANIFEST.json')
+  if (!existsSync(manifestPath)) {
+    errors.push('missing generated file: runtime/engine/MANIFEST.json')
+  } else {
+    try {
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+      const expectedSourceFiles = [...engineSourceFiles, 'ipc/protocol.py'].sort()
+      const actualSourceFiles = [...(manifest.sourceFiles || [])].sort()
+      const actualDataFiles = [...(manifest.dataFiles || [])].sort()
+      if (JSON.stringify(actualSourceFiles) !== JSON.stringify(expectedSourceFiles)) {
+        errors.push('MANIFEST sourceFiles do not match engineSourceFiles')
+      }
+      if (JSON.stringify(actualDataFiles) !== JSON.stringify([...engineDataFiles].sort())) {
+        errors.push('MANIFEST dataFiles do not match engineDataFiles')
+      }
+    } catch (exc) {
+      errors.push(`MANIFEST.json is invalid: ${exc.message}`)
+    }
+  }
+  return errors
+}
+
+if (checkMode) {
+  const errors = engineCheckErrors()
+  if (errors.length > 0) {
+    console.error('[prepare-engine] check failed:')
+    for (const error of errors) console.error(`- ${error}`)
+    process.exit(1)
+  }
+  console.log('[prepare-engine] generated engine is up to date')
+  process.exit(0)
+}
+
 rmSync(engineRoot, { recursive: true, force: true })
 mkdirSync(join(engineRoot, 'src', 'invoice_engine'), { recursive: true })
 
@@ -105,7 +173,6 @@ for (const file of engineSourceFiles) {
   copyFile(join(sourceRoot, file), join(engineRoot, 'src', 'invoice_engine', file))
 }
 
-const engineDataFiles = ['builtin/categories.yaml']
 for (const file of engineDataFiles) {
   copyFile(join(sourceRoot, file), join(engineRoot, 'src', 'invoice_engine', file))
 }
@@ -114,7 +181,7 @@ copyFile(
   join(packageRoot, 'engine-adapter', 'ipc', 'protocol.py'),
   join(engineRoot, 'src', 'invoice_engine', 'ipc', 'protocol.py'),
 )
-writeFileSync(join(engineRoot, 'src', 'invoice_engine', '__init__.py'), '"""Bundled Invoice Downloader engine source."""\n')
+writeFileSync(join(engineRoot, 'src', 'invoice_engine', '__init__.py'), engineInitContent)
 
 const sourceSha = execFileSync('git', ['-C', sourceRoot, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
 writeFileSync(
