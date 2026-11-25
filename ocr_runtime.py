@@ -98,9 +98,15 @@ def _process_worker(connection: Any, factory: Callable[[], Any]) -> None:
     try:
         engine = factory()
     except BaseException as exc:  # pragma: no cover - depends on the child env
-        connection.send(("init_error", str(exc)))
+        try:
+            connection.send(("init_error", str(exc)))
+        except (BrokenPipeError, OSError):
+            return
         return
-    connection.send(("ready", None))
+    try:
+        connection.send(("ready", None))
+    except (BrokenPipeError, OSError):
+        return
     while True:
         try:
             image_bytes = connection.recv()
@@ -109,9 +115,17 @@ def _process_worker(connection: Any, factory: Callable[[], Any]) -> None:
         if image_bytes is None:
             return
         try:
-            connection.send(("ok", engine(image_bytes)))
+            result = engine(image_bytes)
         except BaseException as exc:  # pragma: no cover - engine failure
-            connection.send(("error", str(exc)))
+            try:
+                connection.send(("error", str(exc)))
+            except (BrokenPipeError, OSError):
+                return
+        else:
+            try:
+                connection.send(("ok", result))
+            except (BrokenPipeError, OSError):
+                return
 
 
 class ProcessOcrRuntime:
@@ -151,7 +165,7 @@ class ProcessOcrRuntime:
         self._process = process
         self._connection = parent
 
-    def _stop_locked(self) -> None:
+    def _stop_locked(self, *, force: bool = False) -> None:
         connection, process = self._connection, self._process
         self._connection = None
         self._process = None
@@ -165,10 +179,19 @@ class ProcessOcrRuntime:
             except Exception:
                 pass
         if process is not None:
+            if force and process.is_alive():
+                process.terminate()
             process.join(2)
             if process.is_alive():
                 process.terminate()
                 process.join(2)
+
+    def start(self) -> None:
+        """Start the child eagerly (used by benchmarks and health checks)."""
+        with self._lock:
+            if self._process is None or not self._process.is_alive():
+                self._stop_locked()
+                self._start_locked()
 
     def infer(
         self,
@@ -181,21 +204,21 @@ class ProcessOcrRuntime:
             raise OcrRuntimeError("process OCR runtime cannot use an injected engine")
         with self._lock:
             if self._process is None or not self._process.is_alive():
-                self._stop_locked()
+                self._stop_locked(force=True)
                 self._start_locked()
             connection = self._connection
             try:
                 connection.send(image_bytes)
             except (BrokenPipeError, OSError) as exc:
-                self._stop_locked()
+                self._stop_locked(force=True)
                 raise OcrRuntimeError("ocr process send failed") from exc
             if not connection.poll(max(0.05, float(timeout))):
-                self._stop_locked()
+                self._stop_locked(force=True)
                 raise OcrTimeout(f"ocr process exceeded {timeout:.1f}s")
             try:
                 status, payload = connection.recv()
             except EOFError as exc:
-                self._stop_locked()
+                self._stop_locked(force=True)
                 raise OcrRuntimeError("ocr process exited") from exc
         if status == "ok":
             return payload
