@@ -119,10 +119,72 @@
 - 插件：`npm test`（24 passed）、`npm run test:package`（layout/privacy ok）。
 - 基准（同机 `--count 20`）：探测 p95 2.6 ms、文本识别 p95 2.6 ms、假 OCR p95 54.6 ms、状态 1000 次 669 ms、摘要约 1.25 GB/s，全部在预算内。
 
-### 7.4 仍未完成
+### 7.4 第二轮结束时的遗留（已在第 8 节更新）
 
 - 状态 store 在每次变更时仍整份深拷贝（O(n)），E3 只短路了轮询回灌。
 - 主邮件模式尚未使用 UID 检查点（E2 只覆盖 fetch-only）。
 - 证据 schema 未升级；复用统计未写入证据契约。
 - OCR 进程模式未在 Windows 冻结包与插件 headless 环境做真实 ONNX 压测，默认保持关闭。
 - `app_api` 仍含窗口/路径桥接与结果聚合，未拆到更细的 facade 服务。
+
+## 8. 第三轮（S1–S4）：收尾决策与实测
+
+| 提交 | 内容 |
+|---|---|
+| `16a73b8` | 状态快照改为浅视图 + 写时复制，热路径不再整份深拷贝 |
+| `ea8d585` | 新增真实 OCR 压测；进程模式超时改为强杀并立即重启 |
+| `3963625` | 插件引擎 `--check` 与 CI 触发范围 |
+| 本节文档 | 主邮件 UID、schema、vendored engine 的结论 |
+
+### 8.1 状态深拷贝：替代方案与结论
+
+可选方案包括：不可变记录 + 结构共享、copy-on-write + 浅快照、delta/事件 sink、删除 legacy 镜像改为单一数据源、只在序列化边界复制。本轮采用 **copy-on-write + 浅视图 sink**：
+
+- `RunStateStore._notify_locked()` 在只有 state_sink 时返回 `dict(self._state)` 浅视图；有 event sink 时仍深拷贝。
+- 追加日志/发票/错误改为发布新列表，已发出的快照不会被后续写入修改。
+- `app_api._apply_run_state_snapshot()` 直接采纳列表引用，不再 `list()/dict()` 复制。
+- `snapshot()` 仍深拷贝，外部快照隔离语义不变。
+
+**是否全面**：热路径已全面（每张发票的状态更新不再 O(n) 复制）；`snapshot()`、`get_results()`、`slice()` 仍按需复制，这是有意的冷边界隔离，不是遗漏。实测 1000 次 `add_processed` 从约 **669 ms** 降到 **约 3.5 ms**。
+
+### 8.2 主邮件 UID 检查点：有什么用、为什么暂不做
+
+- 用处：主模式默认按近 30 天窗口重扫，文档级摘要只能防止重复归档，不能避免重复下载与 OCR；检查点可让第二次运行只拉新 UID。1000 封 × 1 MB 约 1 GB 网络，扫描件 OCR 更贵。
+- 暂不做：只有“一封邮件的全部文档都已归档/重复/无附件”才能推进；人工复核、失败、URL 未恢复必须阻塞；规则变更、输出目录变更、UIDVALIDITY 变更都要失效。任一条件处理错就会静默漏票，风险高于收益。
+- 若后续实现，必须同时具备：opt-in 开关、连续成功前缀、规则指纹、UIDVALIDITY 校验、全量重扫入口、失败/复核邮件不推进。
+
+### 8.3 schema：作用与必要性
+
+- `run_evidence.schema_version = 1` 是证据文件的格式契约，validator 只接受 1；stat 复用不改变输出字段与 `evidence_digest` 语义，因此**不升级**。升版本会让旧 validator/QA 工具拒绝新证据。
+- `fetch_state.version = 2` 是磁盘状态的迁移标记：v1 无 `last_uid`，读取时安全降级为不跳过；v2 才有 UIDVALIDITY/检查点。
+- 只有新增/删除/改变证据字段时才需要 bump；复用条数属于诊断信息，不写入证据契约。
+
+### 8.4 真实 OCR 压测结果
+
+同机 Windows / Python 3.12 / `rapidocr_onnxruntime`，2 页合成发票，10 次热调用：
+
+| 指标 | thread | process |
+|---|---|---|
+| 冷启动首次 2 页识别 | 4.12 s | 4.55 s |
+| 单页热调用 p50 / p95 | 1.11 / 1.16 s | 1.13 / 1.15 s |
+| 2 worker 并发总耗时 | 2.19 s | 2.25 s |
+| 超时检测（子进程强杀） | — | 0.52 s |
+| 超时后重启 | — | 0.44 s |
+| 父进程 RSS（未含子进程） | 154 MB | 157 MB |
+| 遗留子进程 | 0 | 0 |
+
+结论：进程模式热路径与线程模式基本持平，冷启动多约 0.4 s，能硬杀卡死推理且不泄漏子进程；**但尚未在 Windows 冻结包与插件 headless 环境做真实 ONNX 集成压测，默认仍关闭**（`TIDYINVOICE_OCR_RUNTIME=process` 才启用）。
+
+### 8.5 插件 vendored engine：不必要入库
+
+- `npm pack` 的 `prepack` 会执行 `test:package`，其 `pretest:package` 先运行 `prepare-engine.mjs` 从仓库根生成引擎；`verify-package.mjs` 再校验清单。因此 tarball 一定包含最新引擎，git 不需要跟踪生成物。
+- 本轮修正了真正的缺口：插件 CI 的 `paths` 现在覆盖根目录 `*.py`、`app_services/**`、`expense_rules/**`、`builtin/**`，并显式执行 `prepare-engine`、`check-engine`、`test:package`。
+- 新增 `npm run check-engine`：对比生成物与源文件哈希/清单；缺失或过期退出 1（已在“删除生成文件”场景验证）。
+- 只有未来要求“git clone 后不装 Node/npm 直接可用”或需要逐行审计引擎差异时，才改为跟踪并配合 `--check`。
+
+### 8.6 仍未做
+
+- 主邮件 UID 检查点（按 8.2 的决策暂不实现）。
+- 证据 schema 升级（无必要）。
+- OCR 进程模式在冻结包/插件 headless 的真实 ONNX 集成压测与默认启用。
+- `app_api` 剩余窗口/路径桥接与结果聚合的更细拆分。
