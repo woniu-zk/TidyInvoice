@@ -45,7 +45,7 @@ BUDGETS = {
     "probe_p95_ms": 250.0,
     "recognize_p95_ms": 500.0,
     "ocr_recognize_p95_ms": 1000.0,
-    "state_update_1000_ms": 3000.0,
+    "state_update_1000_ms": 500.0,
     "digest_mb_per_s_min": 50.0,
 }
 

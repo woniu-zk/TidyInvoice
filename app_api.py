@@ -886,14 +886,14 @@ class InvoiceAppAPI(AdmissionMixin, SettingsRulesMixin, DiagnosticsMixin):
         previous_state = getattr(self, "run_state", "idle")
         self.progress = int(snapshot.get("progress", 0) or 0)
         self.status_text = str(snapshot.get("status_text", ""))
-        # RunStateStore hands this sink a private snapshot, so adopt its
-        # references instead of deep-copying every list a second time on each
-        # update (the former double copy was O(n) per processed invoice).
-        self.logs = list(snapshot.get("logs", []))
+        # RunStateStore hands this sink a read-only shallow view; records are
+        # immutable after ingest and sequence updates publish new lists, so the
+        # bridge can adopt the references without per-invoice copying.
+        self.logs = snapshot.get("logs", [])
         self.discovered_categories = set(snapshot.get("new_categories", []))
-        self.stats = dict(snapshot.get("stats", {}))
-        self.processed_invoices = list(snapshot.get("processed_invoices", []))
-        self.error_invoices = list(snapshot.get("error_invoices", []))
+        self.stats = snapshot.get("stats", {})
+        self.processed_invoices = snapshot.get("processed_invoices", [])
+        self.error_invoices = snapshot.get("error_invoices", [])
         self._is_running = bool(snapshot.get("is_running", False))
         self.run_state = str(snapshot.get("run_state", "idle"))
         self.last_error = str(snapshot.get("last_error", ""))

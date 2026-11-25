@@ -24,10 +24,10 @@ class RunStateStore:
 
     The store now keeps a single private state dict and applies copy-on-write:
     a field is deep-copied only when its content actually changed. Appending to a
-    list only copies the new tail. Unchanged polls are comparison-only no-ops.
-    Everything handed to callers is still a fully independent deep copy, so the
-    public semantics (snapshot isolation, monotonic progress, terminal lock-out)
-    are unchanged.
+    list publishes a new list (never mutates a published one). A ``state_sink``
+    (the bridge mirror) receives a read-only shallow view; every other caller of
+    :meth:`snapshot` still gets a fully independent deep copy, so the public
+    snapshot-isolation semantics are unchanged.
     """
 
     def __init__(
@@ -74,7 +74,14 @@ class RunStateStore:
 
         if self._event_sink is None and self._state_sink is None:
             return None
-        snapshot = copy.deepcopy(self._state)
+        # A state sink is the bridge's read-only mirror: records are immutable
+        # after ingest and every sequence update publishes a new list, so a
+        # shallow view is safe and avoids copying every invoice on each append.
+        # Event consumers keep the historical deep-copy contract.
+        if self._event_sink is not None:
+            snapshot = copy.deepcopy(self._state)
+        else:
+            snapshot = dict(self._state)
         state_sink = self._state_sink
         if state_sink is not None:
             # If an event sink also needs this snapshot, isolate them from each
@@ -242,14 +249,14 @@ class RunStateStore:
         with self._lock:
             if self._terminal:
                 return
-            self._state["logs"].append(
-                {
-                    "time": time.strftime("[%H:%M:%S]"),
-                    "type": str(level),
-                    "color": str(color),
-                    "msg": str(message),
-                }
-            )
+            entry = {
+                "time": time.strftime("[%H:%M:%S]"),
+                "type": str(level),
+                "color": str(color),
+                "msg": str(message),
+            }
+            # Publish a new list so snapshots already handed out stay stable.
+            self._state["logs"] = self._state["logs"] + [entry]
             snapshot = self._notify_locked()
         self._emit(snapshot)
 
@@ -257,7 +264,9 @@ class RunStateStore:
         with self._lock:
             if self._terminal:
                 return
-            self._state["processed_invoices"].append(copy.deepcopy(dict(item)))
+            self._state["processed_invoices"] = self._state[
+                "processed_invoices"
+            ] + [copy.deepcopy(dict(item))]
             snapshot = self._notify_locked()
         self._emit(snapshot)
 
@@ -265,7 +274,9 @@ class RunStateStore:
         with self._lock:
             if self._terminal:
                 return
-            self._state["error_invoices"].append(copy.deepcopy(dict(item)))
+            self._state["error_invoices"] = self._state["error_invoices"] + [
+                copy.deepcopy(dict(item))
+            ]
             snapshot = self._notify_locked()
         self._emit(snapshot)
 
@@ -299,7 +310,7 @@ class RunStateStore:
             self._state["status_text"] = str(status_text)
             self._state["last_error"] = str(last_error)
             if logs:
-                self._state["logs"].extend(copy.deepcopy(list(logs)))
+                self._state["logs"] = self._state["logs"] + copy.deepcopy(list(logs))
             if statistics is not None:
                 self._state["stats"] = copy.deepcopy(dict(statistics))
             self._terminal_reason = str(reason_code or "")
