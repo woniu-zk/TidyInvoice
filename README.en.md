@@ -19,7 +19,7 @@
 
 **Turn PDF, OFD, and XML e-invoices from your mailbox, plus supported invoice download links, into organized files and an Excel reimbursement summary.**
 
-Designed for individuals, freelancers, and small teams that manually collect multiple e-invoices each month. Connect your own QQ Mail, 163 Mail, or 88 Mail account to collect invoices in batches, parse and OCR them locally, archive them by category, and create a summary while retaining unclear results for human review.
+Designed for individuals, freelancers, and small teams that manually collect multiple e-invoices each month. Connect your own mailbox to collect invoices in batches, parse and OCR them locally, archive them by category, and create a summary while retaining unclear results for human review.
 
 Download: [latest Windows installer / portable package and macOS (Apple Silicon) installer](https://github.com/woniu-zk/tidyinvoice/releases/latest)
 
@@ -40,7 +40,7 @@ dsh plugin --profile web add @woniu-zk/dsh-invoice-downloader
 dsh web --profile web
 ```
 
-Open **Invoice Downloader** from the right-side entry, choose an output directory, install the local engine once, and enter a QQ Mail, 163 Mail, or 88 Mail IMAP authorization code. First-time setup needs network access to download Python dependencies and Chromium; the `rapidocr-onnxruntime` pip wheel includes the default PP-OCRv3 models, so no separate manual model download is required. Invoice files and recognized text are processed entirely on this machine; the plugin needs no model or API key. The plugin supports Windows x64 and macOS Apple Silicon. The DSH credential service stores authorization codes, never plugin settings or scan logs.
+Open **Invoice Downloader** from the right-side entry, choose an output directory, install the local engine once, and enter your mailbox IMAP authorization code. First-time setup needs network access to download Python dependencies and Chromium; the `rapidocr-onnxruntime` pip wheel includes the default PP-OCRv3 models, so no separate manual model download is required. Invoice files and recognized text are processed entirely on this machine; the plugin needs no model or API key. The plugin supports Windows x64 and macOS Apple Silicon. The DSH credential service stores authorization codes, never plugin settings or scan logs.
 
 ---
 
@@ -65,7 +65,7 @@ Open **Invoice Downloader** from the right-side entry, choose an output director
 
 ```mermaid
 flowchart LR
-    A["📧 QQ / 163 / 88\nMailbox IMAP"] --> B["📥 Email Fetching\nEmailFetcher"]
+    A["📧 Supported mailbox\nIMAP"] --> B["📥 Email Fetching\nEmailFetcher"]
     B --> C{"🔍 Four-layer\nSmart Funnel"}
     C -->|"Pass"| D["📎 Attachment Extraction\nZIP Recursive Unpack"]
     C -->|"Discard"| X["🗑️ Non-invoice Emails"]
@@ -204,7 +204,33 @@ Each `manifest.jsonl` line records one attachment's source (`sha256`, relative p
 
 > Only needs to be configured once on first use (email address and authorization code); after that, just click run for each scan. The recognition engine is built in — no model or API key required.
 
-### Step 1 · Enable 163 Mailbox IMAP
+### Supported Mailboxes
+
+| Service | Domains | IMAP server | Credential |
+|---------|---------|-------------|------------|
+| QQ Mail | `qq.com` / `vip.qq.com` / `foxmail.com` | `imap.qq.com` | Authorization code |
+| 163 / 126 / 188 Mail | `163.com` / `126.com` / `188.com` | `imap.163.com` / `imap.126.com` / `imap.188.com` | Authorization code |
+| Yeah Mail | `yeah.net` | `imap.yeah.net` | Authorization code |
+| NetEase Enterprise Mail | `qiye.163.com` | `imap.qiye.163.com` | Client-specific password |
+| 88 Mail | `88.com` | `imap.88.com` | Dedicated password |
+| Tencent Exmail | `exmail.qq.com` | `imap.exmail.qq.com` | Client-specific password |
+| Sina Mail | `sina.com` / `sina.cn` | `imap.sina.com` | Client authorization code |
+| Sohu Mail | `sohu.com` | `imap.sohu.com` | Authorization code |
+| 21CN Mail | `21cn.com` | `imap.21cn.com` | Authorization code |
+| 263 Mail | `263.net` | `imap.263.net` | Client password |
+| 189 / 139 Mail | `189.cn` / `139.com` | `imap.189.cn` / `imap.139.com` | Authorization code |
+| Aliyun Mail | `aliyun.com` / `qiye.aliyun.com` | `imap.aliyun.com` / `imap.qiye.aliyun.com` | Dedicated password |
+| Gmail | `gmail.com` / `googlemail.com` | `imap.gmail.com` | App password (2-Step Verification required) |
+| iCloud Mail | `icloud.com` / `me.com` / `mac.com` | `imap.mail.me.com` | App-specific password (two-factor authentication required) |
+| Yahoo Mail | `yahoo.com` / `ymail.com` | `imap.mail.yahoo.com` | App password |
+| Zoho / Yandex / GMX / AOL / Fastmail | `zoho.com` / `yandex.com` / `gmx.net` / `gmx.com` / `aol.com` / `fastmail.com` | `imap.zoho.com` / `imap.yandex.com` / `imap.gmx.net` / `imap.gmx.com` / `imap.aol.com` / `imap.fastmail.com` | App password |
+
+- Every mailbox uses port `993` over SSL/TLS.
+- NetEase mailboxes (163, 126, 188, yeah.net, NetEase Enterprise Mail) and 88 Mail handle the IMAP ID command automatically; no manual setup is needed.
+- International mailboxes require two-step or two-factor authentication to be enabled first, then an app-specific/app password; the account login password never works.
+- Outlook.com, Hotmail, Microsoft 365 / Exchange enterprise mail, Proton Mail, and Tutanota are not supported — see the FAQ for why. Custom corporate domains can point the CLI at their IMAP server with `--imap-host`.
+
+### Example · 163 Mailbox
 
 <details>
 <summary>📖 Click to expand detailed steps for 163 mailbox</summary>
@@ -235,7 +261,7 @@ Each `manifest.jsonl` line records one attachment's source (`sha256`, relative p
 
 ---
 
-### Step 2 · Enable QQ Mailbox IMAP
+### Example · QQ Mailbox
 
 <details>
 <summary>📖 Click to expand detailed steps for QQ mailbox</summary>
@@ -266,7 +292,7 @@ Each `manifest.jsonl` line records one attachment's source (`sha256`, relative p
 
 ---
 
-### Step 3 · Enable 88 Mailbox IMAP
+### Example · 88 Mailbox
 
 <details>
 <summary>📖 Click to expand detailed steps for 88 mailbox</summary>
@@ -300,13 +326,13 @@ Each `manifest.jsonl` line records one attachment's source (`sha256`, relative p
 
 1. Installer: run `TidyInvoice-*-windows-x64-setup.exe`. Portable: extract `TidyInvoice-*-windows-x64-portable.zip` to a regular folder (avoid cloud-sync directories) and keep `_internal` beside `TidyInvoice.exe`.
 2. Double-click `TidyInvoice.exe`; the settings interface appears on first launch.
-3. Enter your email address and authorization code (QQ, 163, or 88), then click "Start Scanning". Recognition runs offline on this machine — scans and images are handled by the bundled OCR, with no network or API key needed. Invoices are archived to the "Invoice Organizer" folder on your desktop.
+3. Enter your email address and authorization code (any supported mailbox), then click "Start Scanning". Recognition runs offline on this machine — scans and images are handled by the bundled OCR, with no network or API key needed. Invoices are archived to the "Invoice Organizer" folder on your desktop.
 
 ### macOS (Apple Silicon)
 
 1. Open `TidyInvoice-*-macos-arm64.dmg` and drag `TidyInvoice` to Applications.
 2. The settings interface appears on first launch. This build is unsigned and not notarized; if macOS blocks it, confirm opening it in **System Settings → Privacy & Security**.
-3. Enter your email address and authorization code (QQ, 163, or 88), then click "Start Scanning". Recognition runs offline on this machine — scans and images are handled by the bundled OCR, with no network or API key needed.
+3. Enter your email address and authorization code (any supported mailbox), then click "Start Scanning". Recognition runs offline on this machine — scans and images are handled by the bundled OCR, with no network or API key needed.
 
 ---
 
@@ -354,10 +380,19 @@ Invoice Organizer/
 <details>
 <summary>Q: Authentication failure after entering the authorization code?</summary>
 
-- **QQ Mailbox**: Must be obtained through "Manage Service → Generate Authorization Code" — it is **not your QQ password**
-- **163 Mailbox**: Must be generated from the "Enable IMAP Service" popup — it is **not your mailbox login password**, and it is case-sensitive
-- **88 Mailbox**: Use the dedicated password generated under "Settings → POP Settings → Add Dedicated Password" — it is **not your mailbox login password**
+- **QQ Mail / Foxmail / Tencent Exmail**: QQ and Foxmail codes must come from "Manage Service → Generate Authorization Code" — it is **not your QQ password**; Tencent Exmail uses a client-specific password
+- **163 / 126 / 188 / yeah.net**: Must be generated from the "Enable IMAP Service" popup — it is **not your mailbox login password**, and it is case-sensitive
+- **NetEase Enterprise Mail (`qiye.163.com`) and 88 Mail**: use the client-specific/dedicated password generated in the mailbox settings, **not your mailbox login password**
+- **Sina, Sohu, 21CN, 263, 139, 189, Aliyun Mail**: Sina uses a client authorization code, Sohu, 21CN, 139 (China Mobile), and 189 (China Telecom) use authorization codes, 263 uses a client password, and Aliyun Mail uses a dedicated password
+- **Gmail, iCloud, Yahoo, Zoho, Yandex, GMX, AOL, Fastmail**: an app-specific or app password is mandatory (Gmail requires 2-Step Verification first, iCloud requires two-factor authentication first); the account login password never works
 - The QQ authorization code must be regenerated after changing your QQ password
+
+</details>
+
+<details>
+<summary>Q: Can I connect Outlook, enterprise Exchange, or another mailbox?</summary>
+
+Outlook.com, Hotmail, Live, and MSN mailboxes, as well as Microsoft 365 / Exchange enterprise mail, are not supported: those services require OAuth2 modern authentication and cannot be reached with an authorization code. Proton Mail needs a local Bridge and Tutanota does not offer IMAP, so neither can be connected directly. Domains outside the supported list are reported as unsupported instead of being pointed at another provider's server; custom corporate domains can point the CLI at their IMAP server with `--imap-host`.
 
 </details>
 
@@ -438,9 +473,26 @@ By using this software, you acknowledge and accept the following terms.
 
 | Service | Purpose | Provider |
 |---------|---------|----------|
-| QQ Mailbox IMAP | Email reading | Tencent Technology (Shenzhen) Co., Ltd. |
-| 163 Mailbox IMAP | Email reading | NetEase (Hangzhou) Network Co., Ltd. |
-| 88 Mailbox IMAP | Email reading | Perfect World |
+| Tencent mail IMAP (QQ Mail, Foxmail, Tencent Exmail) | Email reading | Tencent |
+| NetEase mail IMAP (163, 126, 188, yeah.net, NetEase Enterprise Mail) | Email reading | NetEase |
+| 88 Mail IMAP | Email reading | Perfect World |
+| Aliyun Mail IMAP | Email reading | Alibaba Cloud |
+| Sina Mail IMAP | Email reading | Sina |
+| Sohu Mail IMAP | Email reading | Sohu |
+| 21CN Mail IMAP | Email reading | 21CN |
+| 263 Mail IMAP | Email reading | 263 |
+| 139 Mail IMAP | Email reading | China Mobile |
+| 189 Mail IMAP | Email reading | China Telecom |
+| Gmail IMAP | Email reading | Google |
+| iCloud Mail IMAP | Email reading | Apple |
+| Yahoo Mail IMAP | Email reading | Yahoo |
+| Zoho Mail IMAP | Email reading | Zoho |
+| Yandex Mail IMAP | Email reading | Yandex |
+| GMX Mail IMAP | Email reading | GMX |
+| AOL Mail IMAP | Email reading | AOL |
+| Fastmail IMAP | Email reading | Fastmail |
+
+These services are accessed through IMAP in **read-only** mode only: no emails are sent, deleted, or modified.
 
 ---
 

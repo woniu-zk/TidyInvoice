@@ -1401,6 +1401,9 @@ class EmailFetcher:
         channel = resolve_channel(email_address)
         self.imap_server = imap_server or channel["imap_host"]
         self.imap_port = channel["imap_port"] if imap_port is None else imap_port
+        # Unknown domains resolve to a neutral channel with no server; connect()
+        # refuses to open a socket instead of silently falling back to QQ Mail.
+        self.unsupported_mailbox = not self.imap_server
         self.staging_dir = os.path.abspath(staging_dir)
         self.monitoring_dir = os.path.abspath(monitoring_dir) if monitoring_dir else ""
         self.progress_callback = progress_callback
@@ -1600,9 +1603,14 @@ class EmailFetcher:
         self.certificate_error = False
         self.timeout_error = False
         self.connection_error = None
+        self.unsupported_mailbox = not self.imap_server
         try:
             if self._abort_requested:
                 raise ConnectionAbortedError("IMAP connection cancelled")
+            if self.unsupported_mailbox:
+                self.connection_error = ValueError("unsupported mailbox domain")
+                logging.error("Refusing to connect: unsupported mailbox domain")
+                return False
             logging.info(f"Connecting to IMAP server: {self.imap_server}:{self.imap_port}")
             self.mail = imaplib.IMAP4_SSL(
                 self.imap_server,
@@ -1615,7 +1623,7 @@ class EmailFetcher:
             self.mail.login(self.email_address, self.auth_code)
             if self._abort_requested:
                 raise ConnectionAbortedError("IMAP connection cancelled")
-            # 163/88 等 Coremail 邮箱要求登录后发送 RFC 2971 ID 命令
+            # 163/126/188/yeah/企业邮/88 等 Coremail 邮箱要求登录后发送 RFC 2971 ID 命令
             channel = resolve_channel(self.email_address)
             if channel.get("requires_id_cmd"):
                 self._send_imap_id_command()

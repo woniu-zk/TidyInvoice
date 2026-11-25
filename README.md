@@ -19,7 +19,7 @@
 
 **把邮箱中的 PDF、OFD、XML 电子发票和部分发票下载链接，整理成分类文件与 Excel 报销汇总。**
 
-面向每月需要手工收集多张电子发票的个人、自由职业者和小团队。连接自己的 QQ、163 或 88 邮箱后，可批量收集发票、本地解析与 OCR 识别、分类归档并生成汇总；无法可靠识别的内容保留给用户人工复核。
+面向每月需要手工收集多张电子发票的个人、自由职业者和小团队。连接自己的常用邮箱后，可批量收集发票、本地解析与 OCR 识别、分类归档并生成汇总；无法可靠识别的内容保留给用户人工复核。
 
 下载：[最新 Windows（安装版 / 免安装版）与 macOS（Apple Silicon）安装包](https://github.com/woniu-zk/tidyinvoice/releases/latest)
 
@@ -40,7 +40,7 @@ dsh plugin --profile web add @woniu-zk/dsh-invoice-downloader
 dsh web --profile web
 ```
 
-打开右侧的“发票下载”入口，选择保存位置，安装一次本地引擎后填写 QQ、163 或 88 邮箱的 IMAP 授权码。首次安装需要联网下载 Python 依赖和 Chromium；`rapidocr-onnxruntime` 的 pip wheel 自带默认 PP-OCRv3 模型，无需额外手动下载模型。发票文件与识别文本均在本机处理，插件不需要模型或 API Key。插件支持 Windows x64 和 macOS Apple Silicon，授权码由 DSH 凭据服务保存，不写入插件设置或扫描日志。
+打开右侧的“发票下载”入口，选择保存位置，安装一次本地引擎后填写常用邮箱的 IMAP 授权码。首次安装需要联网下载 Python 依赖和 Chromium；`rapidocr-onnxruntime` 的 pip wheel 自带默认 PP-OCRv3 模型，无需额外手动下载模型。发票文件与识别文本均在本机处理，插件不需要模型或 API Key。插件支持 Windows x64 和 macOS Apple Silicon，授权码由 DSH 凭据服务保存，不写入插件设置或扫描日志。
 
 ---
 
@@ -65,7 +65,7 @@ dsh web --profile web
 
 ```mermaid
 flowchart LR
-    A["📧 QQ / 163 / 88\n邮箱 IMAP"] --> B["📥 邮件抓取\nEmailFetcher"]
+    A["📧 常用邮箱\nIMAP"] --> B["📥 邮件抓取\nEmailFetcher"]
     B --> C{"🔍 四层\n智能漏斗"}
     C -->|"通过"| D["📎 附件提取\nZIP 递归解包"]
     C -->|"丢弃"| X["🗑️ 非发票邮件"]
@@ -203,7 +203,33 @@ python organize_cli.py fetch --email you@qq.com --auth-code env:QQ_AUTH_CODE --o
 
 > 首次使用只需配置一次（邮箱地址与授权码），之后每次扫描直接点击运行；识别引擎已内置，无需模型或 API Key。
 
-### 第一步 · 开启 163 邮箱 IMAP
+### 支持的邮箱
+
+| 服务 | 域名 | IMAP 服务器 | 授权方式 |
+|------|------|-------------|----------|
+| QQ 邮箱 | `qq.com` / `vip.qq.com` / `foxmail.com` | `imap.qq.com` | 授权码 |
+| 163 / 126 / 188 邮箱 | `163.com` / `126.com` / `188.com` | `imap.163.com` / `imap.126.com` / `imap.188.com` | 授权码 |
+| Yeah 邮箱 | `yeah.net` | `imap.yeah.net` | 授权码 |
+| 网易企业邮 | `qiye.163.com` | `imap.qiye.163.com` | 客户端专用密码 |
+| 88 邮箱 | `88.com` | `imap.88.com` | 专用密码 |
+| 腾讯企业邮 | `exmail.qq.com` | `imap.exmail.qq.com` | 客户端专用密码 |
+| 新浪邮箱 | `sina.com` / `sina.cn` | `imap.sina.com` | 客户端授权码 |
+| 搜狐邮箱 | `sohu.com` | `imap.sohu.com` | 授权码 |
+| 21CN 邮箱 | `21cn.com` | `imap.21cn.com` | 授权码 |
+| 263 邮箱 | `263.net` | `imap.263.net` | 客户端密码 |
+| 189 / 139 邮箱 | `189.cn` / `139.com` | `imap.189.cn` / `imap.139.com` | 授权码 |
+| 阿里邮箱 | `aliyun.com` / `qiye.aliyun.com` | `imap.aliyun.com` / `imap.qiye.aliyun.com` | 专用密码 |
+| Gmail | `gmail.com` / `googlemail.com` | `imap.gmail.com` | 应用专用密码（需先开启两步验证） |
+| iCloud 邮箱 | `icloud.com` / `me.com` / `mac.com` | `imap.mail.me.com` | App 专用密码（需先开启双重认证） |
+| Yahoo 邮箱 | `yahoo.com` / `ymail.com` | `imap.mail.yahoo.com` | 应用密码 |
+| Zoho / Yandex / GMX / AOL / Fastmail | `zoho.com` / `yandex.com` / `gmx.net` / `gmx.com` / `aol.com` / `fastmail.com` | `imap.zoho.com` / `imap.yandex.com` / `imap.gmx.net` / `imap.gmx.com` / `imap.aol.com` / `imap.fastmail.com` | 应用密码 |
+
+- 全部邮箱统一使用 `993` 端口与 SSL/TLS 加密连接。
+- 网易系邮箱（163、126、188、yeah.net、网易企业邮）与 88 邮箱会自动处理 IMAP ID 命令，无需手工设置。
+- 国际邮箱需要先在邮箱后台开启两步验证或双重认证，再用生成的应用专用密码/应用密码登录，不能填账户登录密码。
+- Outlook.com、Hotmail、Microsoft 365 / Exchange 企业邮，以及 Proton Mail、Tutanota 暂不支持，原因见常见问题；自定义企业域可在命令行用 `--imap-host` 指定 IMAP 服务器。
+
+### 示例 · 163 邮箱
 
 <details>
 <summary>📖 点击展开 163 邮箱详细步骤</summary>
@@ -234,7 +260,7 @@ python organize_cli.py fetch --email you@qq.com --auth-code env:QQ_AUTH_CODE --o
 
 ---
 
-### 第二步 · 开启 QQ 邮箱 IMAP
+### 示例 · QQ 邮箱
 
 <details>
 <summary>📖 点击展开 QQ 邮箱详细步骤</summary>
@@ -265,7 +291,7 @@ python organize_cli.py fetch --email you@qq.com --auth-code env:QQ_AUTH_CODE --o
 
 ---
 
-### 第三步 · 开启 88 邮箱 IMAP
+### 示例 · 88 邮箱
 
 <details>
 <summary>📖 点击展开 88 邮箱详细步骤</summary>
@@ -299,13 +325,13 @@ python organize_cli.py fetch --email you@qq.com --auth-code env:QQ_AUTH_CODE --o
 
 1. 安装版：运行 `TidyInvoice-*-windows-x64-setup.exe`；免安装版：解压 `TidyInvoice-*-windows-x64-portable.zip` 到普通文件夹（避免云盘同步目录），并保持 `_internal` 文件夹与 `TidyInvoice.exe` 同级。
 2. 双击 `TidyInvoice.exe`；首次启动会自动弹出设置界面。
-3. 填入邮箱地址与授权码（QQ、163 或 88），保存后点击「开始扫描」。识别在本机离线运行，扫描件与图片由内置 OCR 处理，无需联网或 API Key；发票会自动归档到桌面「发票整理」文件夹。
+3. 填入邮箱地址与授权码（常用邮箱），保存后点击「开始扫描」。识别在本机离线运行，扫描件与图片由内置 OCR 处理，无需联网或 API Key；发票会自动归档到桌面「发票整理」文件夹。
 
 ### macOS（Apple Silicon）
 
 1. 打开 `TidyInvoice-*-macos-arm64.dmg`，将 `TidyInvoice` 拖入“应用程序”文件夹。
 2. 首次启动会自动弹出设置界面。此版本未签名、未公证；若 macOS 阻止打开，请在“系统设置 → 隐私与安全性”中确认仍要打开。
-3. 填入邮箱地址与授权码（QQ、163 或 88），保存后点击「开始扫描」。识别在本机离线运行，扫描件与图片由内置 OCR 处理，无需联网或 API Key。
+3. 填入邮箱地址与授权码（常用邮箱），保存后点击「开始扫描」。识别在本机离线运行，扫描件与图片由内置 OCR 处理，无需联网或 API Key。
 
 ---
 
@@ -353,10 +379,19 @@ python organize_cli.py fetch --email you@qq.com --auth-code env:QQ_AUTH_CODE --o
 <details>
 <summary>Q：授权码填写后提示认证失败？</summary>
 
-- **QQ 邮箱**：须从「管理服务 → 生成授权码」流程中获取，**不是 QQ 密码**
-- **163 邮箱**：须从「开启 IMAP 服务」弹窗中生成，**不是邮箱登录密码**，注意大小写
-- **88 邮箱**：须使用「设置 → POP 设置 → 新增专用密码」生成的专用密码，**不是邮箱登录密码**
+- **QQ 邮箱 / Foxmail / 腾讯企业邮**：QQ 与 Foxmail 须从「管理服务 → 生成授权码」流程获取，**不是 QQ 密码**；腾讯企业邮使用客户端专用密码
+- **163 / 126 / 188 / yeah.net**：须从「开启 IMAP 服务」弹窗中生成，**不是邮箱登录密码**，注意大小写
+- **网易企业邮（`qiye.163.com`）与 88 邮箱**：使用邮箱后台生成的客户端专用密码/专用密码，**不是邮箱登录密码**
+- **新浪、搜狐、21CN、263、139、189、阿里邮箱**：新浪用客户端授权码，搜狐、21CN、139（移动）、189（电信）用授权码，263 用客户端密码，阿里邮箱用专用密码
+- **Gmail、iCloud、Yahoo、Zoho、Yandex、GMX、AOL、Fastmail**：必须使用应用专用密码（Gmail 需先开启两步验证，iCloud 需先开启双重认证），账户登录密码一律无效
 - QQ 修改密码后需重新生成授权码
+
+</details>
+
+<details>
+<summary>Q：Outlook、企业 Exchange 或其他邮箱能连吗？</summary>
+
+暂不支持 Outlook.com、Hotmail、Live、MSN 邮箱，以及 Microsoft 365 / Exchange 企业邮：这些服务要求 OAuth2 现代认证，无法用授权码方式连接。Proton Mail 需要在本机运行 Bridge、Tutanota 不提供 IMAP，同样无法直接连接。未在支持列表中的域名会明确提示不支持，不会尝试连接其他邮箱服务器；自定义企业域可在命令行用 `--imap-host` 指定 IMAP 服务器。
 
 </details>
 
@@ -437,9 +472,26 @@ python organize_cli.py fetch --email you@qq.com --auth-code env:QQ_AUTH_CODE --o
 
 | 服务 | 用途 | 服务方 |
 |------|------|--------|
-| QQ 邮箱 IMAP | 邮件读取 | 腾讯科技（深圳）有限公司 |
-| 163 邮箱 IMAP | 邮件读取 | 网易（杭州）网络有限公司 |
-| 88 完美邮箱 IMAP | 邮件读取 | 完美世界 |
+| 腾讯系邮箱 IMAP（QQ 邮箱、Foxmail、腾讯企业邮） | 邮件读取 | 腾讯 |
+| 网易系邮箱 IMAP（163、126、188、yeah.net、网易企业邮） | 邮件读取 | 网易 |
+| 88 邮箱 IMAP | 邮件读取 | 完美世界 |
+| 阿里邮箱 IMAP | 邮件读取 | 阿里云 |
+| 新浪邮箱 IMAP | 邮件读取 | 新浪 |
+| 搜狐邮箱 IMAP | 邮件读取 | 搜狐 |
+| 21CN 邮箱 IMAP | 邮件读取 | 21CN |
+| 263 邮箱 IMAP | 邮件读取 | 263 |
+| 139 邮箱 IMAP | 邮件读取 | 中国移动 |
+| 189 邮箱 IMAP | 邮件读取 | 中国电信 |
+| Gmail IMAP | 邮件读取 | Google |
+| iCloud 邮箱 IMAP | 邮件读取 | Apple |
+| Yahoo 邮箱 IMAP | 邮件读取 | Yahoo |
+| Zoho 邮箱 IMAP | 邮件读取 | Zoho |
+| Yandex 邮箱 IMAP | 邮件读取 | Yandex |
+| GMX 邮箱 IMAP | 邮件读取 | GMX |
+| AOL 邮箱 IMAP | 邮件读取 | AOL |
+| Fastmail IMAP | 邮件读取 | Fastmail |
+
+以上服务仅通过 IMAP 以只读方式读取邮件，不发送、不删除、不修改任何邮件。
 
 ---
 

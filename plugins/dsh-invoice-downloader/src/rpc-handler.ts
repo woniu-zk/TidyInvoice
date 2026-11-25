@@ -37,6 +37,43 @@ const internal = (message: string): RpcResult => ({
   error: { code: 'internal', message, details: {} },
 })
 
+// Mirrors email_channel.EMAIL_CHANNELS domains; the engine resolves the actual
+// IMAP server so this allowlist only gates obviously unsupported domains early.
+const SUPPORTED_IMAP_DOMAINS = new Set([
+  'qq.com',
+  'vip.qq.com',
+  'foxmail.com',
+  '163.com',
+  '126.com',
+  '188.com',
+  'yeah.net',
+  'qiye.163.com',
+  '88.com',
+  'exmail.qq.com',
+  'sina.com',
+  'sina.cn',
+  'sohu.com',
+  '21cn.com',
+  '263.net',
+  '189.cn',
+  '139.com',
+  'aliyun.com',
+  'qiye.aliyun.com',
+  'gmail.com',
+  'googlemail.com',
+  'icloud.com',
+  'me.com',
+  'mac.com',
+  'yahoo.com',
+  'ymail.com',
+  'zoho.com',
+  'yandex.com',
+  'gmx.net',
+  'gmx.com',
+  'aol.com',
+  'fastmail.com',
+])
+
 export function createInvoiceRpcHandler(
   context: InvoiceRpcContext,
 ): (endpoint: string, payload: unknown, signal: AbortSignal) => Promise<RpcResult> {
@@ -159,8 +196,8 @@ async function testEmailAuth(
   const request = asObject(payload)
   const email = stringValue(request.email)
   const authCode = stringValue(request.authCode) || await resolveCredential(context.credentials, IMAP_AUTH_CODE_REF)
-  const server = imapServer(email)
-  if (!server || !authCode) return badRequest('请填写 QQ、163 或 88 邮箱与 IMAP 授权码。')
+  if (!authCode) return badRequest('请填写有效的邮箱地址与 IMAP 授权码。')
+  if (!isSupportedImapEmail(email)) return badRequest('暂不支持该邮箱域名，请更换为受支持的常用邮箱。')
   const status = getRuntimeStatus(context.runtime)
   if (!status.installed) return badRequest('请先安装本地引擎。')
 
@@ -171,7 +208,7 @@ async function testEmailAuth(
     'from invoice_engine.email_fetcher import EmailFetcher',
     'cfg = json.loads(sys.stdin.readline())',
     'try:',
-    '  fetcher = EmailFetcher(cfg["email"], cfg["authCode"], imap_server=cfg["server"])',
+    '  fetcher = EmailFetcher(cfg["email"], cfg["authCode"])',
     '  fetcher.connect()',
     '  fetcher.disconnect()',
     '  print(json.dumps({"ok": True}))',
@@ -181,11 +218,11 @@ async function testEmailAuth(
   const result = await runPython(
     context,
     script,
-    JSON.stringify({ email, authCode, server }),
+    JSON.stringify({ email, authCode }),
     signal,
   )
   const success = result.exitCode === 0 && parseHealth(result.stdout).ok
-  return ok({ ok: success, message: success ? '邮箱连接成功。' : '邮箱连接失败，请检查授权码和 IMAP 设置。' })
+  return ok({ ok: success, message: success ? '邮箱连接成功。' : '邮箱连接失败，请检查授权码、IMAP 设置或应用专用密码。' })
 }
 
 async function getSettings(context: InvoiceRpcContext): Promise<RpcResult> {
@@ -227,9 +264,9 @@ async function startScan(context: InvoiceRpcContext, payload: unknown): Promise<
   if (!isValidDateRange(settings.dateFrom, settings.dateTo)) {
     return badRequest('请选择有效且按时间顺序排列的日期范围。')
   }
-  const server = imapServer(settings.email)
-  if (!server) return badRequest('目前仅支持 QQ 邮箱、163 邮箱和 88 邮箱。')
-  void server
+  if (!isSupportedImapEmail(settings.email)) {
+    return badRequest('暂不支持该邮箱域名，请更换为受支持的常用邮箱。')
+  }
   const output = context.artifacts.validateSavePath(settings.savePath)
   if (!output.ok) return badRequest(output.errorMessage)
   const authCode = stringValue(request.authCode) || await resolveCredential(context.credentials, IMAP_AUTH_CODE_REF)
@@ -394,12 +431,10 @@ function stringValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-function imapServer(email: string): string | null {
-  const domain = email.toLowerCase().split('@')[1]
-  if (domain === 'qq.com') return 'imap.qq.com'
-  if (domain === '163.com') return 'imap.163.com'
-  if (domain === '88.com') return 'imap.88.com'
-  return null
+function isSupportedImapEmail(email: string): boolean {
+  const at = email.lastIndexOf('@')
+  const domain = at >= 0 ? email.slice(at + 1).trim().toLowerCase() : ''
+  return SUPPORTED_IMAP_DOMAINS.has(domain)
 }
 
 function isValidDateRange(first: string, last: string): boolean {

@@ -2255,11 +2255,13 @@ class InvoiceAppAPI(AdmissionMixin, SettingsRulesMixin, DiagnosticsMixin):
         )
 
         # 邮箱连接测试（仅在填写授权码时执行）
+        channel = resolve_channel(email)
+        if email and not channel["supported"]:
+            return {"success": False, "message": "暂不支持该邮箱域名，请更换为受支持的常用邮箱。"}
         if auth_code:
             fetcher = None
             try:
                 from email_fetcher import EmailFetcher
-                channel = resolve_channel(email)
                 fetcher = EmailFetcher(
                     email,
                     auth_code,
@@ -2271,7 +2273,10 @@ class InvoiceAppAPI(AdmissionMixin, SettingsRulesMixin, DiagnosticsMixin):
                         return {"success": False, "message": ImapCertificateError.user_message}
                     if getattr(fetcher, "timeout_error", False):
                         return {"success": False, "message": ImapTimeoutError.user_message}
-                    return {"success": False, "message": "邮箱 IMAP 登录验证失败"}
+                    return {
+                        "success": False,
+                        "message": f"邮箱 IMAP 登录验证失败，请确认已开启 IMAP 并使用{channel['auth_hint']}",
+                    }
             except Exception:
                 return {"success": False, "message": "邮箱连接异常，请检查授权码、IMAP 设置或网络"}
             finally:
@@ -2334,9 +2339,11 @@ class InvoiceAppAPI(AdmissionMixin, SettingsRulesMixin, DiagnosticsMixin):
         if not email_address or not auth_code:
             return {"success": False, "message": "请先填写邮箱地址和授权码"}
         from email_fetcher import EmailFetcher
+        channel = resolve_channel(email_address)
+        if not channel["supported"]:
+            return {"success": False, "message": "暂不支持该邮箱域名，请更换为受支持的常用邮箱。"}
         fetcher = None
         try:
-            channel = resolve_channel(email_address)
             fetcher = EmailFetcher(
                 email_address,
                 auth_code,
@@ -2348,7 +2355,10 @@ class InvoiceAppAPI(AdmissionMixin, SettingsRulesMixin, DiagnosticsMixin):
                     return {"success": False, "message": ImapCertificateError.user_message}
                 if getattr(fetcher, "timeout_error", False):
                     return {"success": False, "message": ImapTimeoutError.user_message}
-                return {"success": False, "message": "邮箱授权验证失败，请检查授权码、IMAP 设置或网络"}
+                return {
+                    "success": False,
+                    "message": f"邮箱授权验证失败，请确认已开启 IMAP 并使用{channel['auth_hint']}",
+                }
             return {"success": True, "message": "邮箱授权验证成功"}
         except Exception:
             return {"success": False, "message": "邮箱授权验证失败，请检查授权码、IMAP 设置或网络"}

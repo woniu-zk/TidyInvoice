@@ -267,6 +267,18 @@ class FetchOnlyRunner:
             return FetchOnlyResult(
                 ok=False, message="请填写邮箱地址和授权码", error_reason="MISSING_CREDENTIALS"
             )
+        from email_channel import is_supported_email
+
+        if (
+            self._fetcher_factory is None
+            and not request.imap_host
+            and not is_supported_email(request.email_address)
+        ):
+            return FetchOnlyResult(
+                ok=False,
+                message="暂不支持该邮箱域名；如需自定义 IMAP 服务器，请使用 --imap-host。",
+                error_reason="UNSUPPORTED_MAILBOX",
+            )
         output_dir = os.path.abspath(request.output_dir or "")
         if not output_dir:
             return FetchOnlyResult(

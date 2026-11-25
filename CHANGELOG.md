@@ -6,6 +6,7 @@
 
 ### Added
 
+- 新增常用邮箱通道：网易（163 / 126 / 188 / yeah.net / 网易企业邮）、88 邮箱、腾讯企业邮、新浪、搜狐、21CN、263、139 / 189、阿里邮箱，以及 Gmail、iCloud、Yahoo、Zoho、Yandex、GMX、AOL、Fastmail；未知域名改为明确提示不支持，不再静默回落到 QQ 邮箱。
 - 新增品牌单一事实源 `brand.json` 与生成器 `tools/brand/generate.mjs`，一次生成 Python 常量与桌面端品牌清单。
 - 新增品牌泄漏检查 `tools/brand/check.mjs` 与一致性测试 `tests/test_brand_consistency.py`。
 - 新增 [`docs/UPSTREAM.md`](docs/UPSTREAM.md)：上游来源、许可证义务与向上游回馈的方式。
@@ -15,6 +16,7 @@
 
 ### Changed
 
+- 桌面端邮箱地址改为完整地址输入并即时校验；文档补充支持的邮箱列表与各邮箱授权码差异。
 - 产品更名为 **整票（TidyInvoice）**：仓库迁至 `woniu-zk/tidyinvoice`，npm 包改为 `@woniu-zk/dsh-invoice-downloader`，安装包与 DMG 资产名同步更新。
 - 应用数据目录改为 `%APPDATA%\TidyInvoice`（macOS 为 `~/Library/Application Support/TidyInvoice`），旧的 `InvoiceFlowAI` 目录会作为迁移来源自动读取。
 - 环境变量前缀统一改为 `TIDYINVOICE_*`；单实例互斥量、临时文件、IMAP 客户端标识与线程名同步更名。

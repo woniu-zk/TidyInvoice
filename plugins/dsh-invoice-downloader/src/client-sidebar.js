@@ -350,12 +350,13 @@ window.__ModuleLoader__.load({
                 e('input', {
                   style: styles.input,
                   type: 'email',
-                  placeholder: 'name@qq.com、name@163.com 或 name@88.com',
+                  placeholder: 'name@qq.com',
                   disabled,
                   value: settings.email,
                   onInput: event => update('email', event.target.value),
                 }),
               ),
+              e('div', { style: styles.help }, '支持 QQ、网易、88、腾讯企业邮、阿里、新浪、搜狐、移动、电信及 Gmail、iCloud、Yahoo 等常见邮箱；国际邮箱请使用应用专用密码。'),
               e('div', { style: styles.field },
                 e('label', { style: styles.label }, 'IMAP 授权码'),
                 e('input', {

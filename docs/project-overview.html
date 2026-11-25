@@ -735,7 +735,7 @@ body.nav-open .scrim{opacity:1; pointer-events:auto}
     <div class="hero-copy">
       <p class="eyebrow">项目功能总览 · 本地优先</p>
       <h1>把散落的电子发票<br><span class="grad">变成可复核的报销资料</span></h1>
-      <p class="hero-lead">InvoiceFlowAI 连接 <strong>QQ / 163 / 88</strong> 邮箱或任意本地文件夹，批量收集 PDF、OFD、XML 电子发票与下载链接，在本机完成识别、分类、归档，并生成 Excel 报销明细。<strong>识别不联网，邮箱只读，不需要 API Key。</strong></p>
+      <p class="hero-lead">InvoiceFlowAI 连接 <strong>常用邮箱</strong>或任意本地文件夹，批量收集 PDF、OFD、XML 电子发票与下载链接，在本机完成识别、分类、归档，并生成 Excel 报销明细。<strong>识别不联网，邮箱只读，不需要 API Key。</strong></p>
       <div class="badges">
         <span class="badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>本地处理</span>
         <span class="badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m2 7 10 6L22 7"/></svg>邮箱只读</span>
@@ -779,7 +779,7 @@ body.nav-open .scrim{opacity:1; pointer-events:auto}
       <article class="card reveal">
         <span class="num">01</span>
         <h3>收集：邮箱与文件夹</h3>
-        <p>IMAP 只读读取 QQ / 163 / 88 邮箱，或扫描手机导出、微信/支付宝下载、拍照发票所在的任意文件夹。附件、ZIP、链接都进入同一条流水线。</p>
+        <p>IMAP 只读读取常用邮箱，或扫描手机导出、微信/支付宝下载、拍照发票所在的任意文件夹。附件、ZIP、链接都进入同一条流水线。</p>
       </article>
       <article class="card reveal">
         <span class="num">02</span>
@@ -1261,7 +1261,7 @@ body.nav-open .scrim{opacity:1; pointer-events:auto}
     <div class="panel" id="start-gui" role="tabpanel">
       <div class="grid grid-2">
         <div class="card"><h3>四步完成一次整理</h3><ul class="checks" style="margin-top:4px"><li><span>1. 选择任务模式与输出目录。</span></li><li><span>2. 填写邮箱地址与 IMAP 授权码，可先测试连接。</span></li><li><span>3. 选择日期范围（首次建议覆盖 180 天以上），开始处理。</span></li><li><span>4. 在结果分析页查看汇总、处理待复核项并导出 Excel。</span></li></ul></div>
-        <div class="card"><h3>首次配置提示</h3><p>QQ / 163 / 88 的授权码不是登录密码；修改邮箱密码后授权码可能失效。识别引擎已内置，无需填写 API Key。图片与扫描件由本地 OCR 处理。</p></div>
+        <div class="card"><h3>首次配置提示</h3><p>各邮箱的授权码/专用密码不是登录密码；修改邮箱密码后授权码可能失效。识别引擎已内置，无需填写 API Key。图片与扫描件由本地 OCR 处理。</p></div>
       </div>
     </div>
     <div class="panel" id="start-cli" role="tabpanel" hidden>
@@ -1295,7 +1295,7 @@ dsh web --profile web</pre></div>
     <p class="lead">本地离线识别换来了隐私与零 API 成本，也带来明确的能力边界；正确使用方式是「自动整理 + 人工复核」。</p>
     <div class="limit-grid">
       <div class="limit"><span class="l-ico" aria-hidden="true">⚖️</span><div><b>识别是辅助，不是结论</b><p>不保证票面数据或归档结果 100% 正确；报销、入账、税务判断必须人工复核。</p></div></div>
-      <div class="limit"><span class="l-ico" aria-hidden="true">📮</span><div><b>只支持三种邮箱</b><p>QQ、163、88；其他邮箱需要扩展通道注册表。</p></div></div>
+      <div class="limit"><span class="l-ico" aria-hidden="true">📮</span><div><b>自定义企业域暂不支持</b><p>邮箱通道覆盖常用邮箱域名，其他域名会明确提示不支持；确需连接可用 CLI --imap-host 指定服务器。</p></div></div>
       <div class="limit"><span class="l-ico" aria-hidden="true">🧐</span><div><b>待复核是正常路径</b><p>图片模糊、非标准票据、加密 PDF、金额勾稽异常都会进入待人工复核。</p></div></div>
       <div class="limit"><span class="l-ico" aria-hidden="true">📁</span><div><b>本地整理默认原地</b><p>会改变文件夹结构；建议先在副本上试运行（CLI 支持 --dry-run），重要目录先备份。</p></div></div>
       <div class="limit"><span class="l-ico" aria-hidden="true">🔁</span><div><b>规则修改不回迁旧文件</b><p>新归档进入新文件夹，旧文件不会自动搬家。</p></div></div>
@@ -1307,7 +1307,7 @@ dsh web --profile web</pre></div>
     <div class="faq">
       <details><summary><span class="q-mark">Q</span>识别需要联网或填写 API Key 吗？<span class="chev">›</span></summary><div class="a">不需要。文本层 PDF、OFD、XML 直接解析，扫描件与图片由内置本地 OCR 识别；模型随依赖提供，识别过程不联网、不调用模型服务。</div></details>
       <details><summary><span class="q-mark">Q</span>为什么有发票进入「待人工复核」？<span class="chev">›</span></summary><div class="a">当本地解析与规则校验无法可靠确认时（图片模糊、非标准票据、加密 PDF、金额勾稽不平、未命中归类规则等），系统会放入待人工复核目录，由用户确认，而不是硬猜。</div></details>
-      <details><summary><span class="q-mark">Q</span>支持哪些邮箱？授权码是什么？<span class="chev">›</span></summary><div class="a">支持 QQ、163、88。授权码是邮箱后台生成的第三方客户端专用密码，不是登录密码；QQ 修改密码后授权码可能失效，需要重新生成。</div></details>
+      <details><summary><span class="q-mark">Q</span>支持哪些邮箱？授权码是什么？<span class="chev">›</span></summary><div class="a">支持 QQ、网易（163/126/188/yeah.net/企业邮）、88、腾讯企业邮、阿里、新浪、搜狐、21CN、263、139/189，以及 Gmail、iCloud、Yahoo 等国际邮箱，统一 993 SSL/TLS。授权码/专用密码是邮箱后台生成的第三方客户端专用密码，不是登录密码；国际邮箱必须使用应用专用密码。Outlook 与 Exchange 企业邮需要 OAuth2 现代认证，暂不支持。</div></details>
       <details><summary><span class="q-mark">Q</span>本地文件夹整理会移动或删除原文件吗？<span class="chev">›</span></summary><div class="a">默认原地整理时，原件按原文件名、原内容、原相对路径保留在「整理前发票/」，不删除；分类结果以副本形式放入分类目录。重复件移入 duplicates/。</div></details>
       <details><summary><span class="q-mark">Q</span>修改归类规则后，旧文件会自动搬家吗？<span class="chev">›</span></summary><div class="a">不会。规则修改只影响之后的新归档；已有文件保持原位置。</div></details>
       <details><summary><span class="q-mark">Q</span>为什么第一次扫描发票很少？<span class="chev">›</span></summary><div class="a">部分邮箱默认只拉取近 30 天邮件。把起始日期调整到 180 天以上，并在邮箱 IMAP 设置里选择收取全部邮件。</div></details>
@@ -1417,9 +1417,9 @@ dsh web --profile web</pre></div>
   var FEATURES = [
     {
       id: "mail", cat: "collect", icon: "📧", title: "邮箱批量提取",
-      desc: "IMAP 只读读取 QQ / 163 / 88 邮箱，按日期范围批量扫描，附件与链接进入同一流水线。",
-      tags: ["QQ / 163 / 88", "IMAP 只读", "日期范围"],
-      detail: "支持三种国内常用邮箱，自动处理 163/88 的 IMAP ID 命令；邮件正文中的平台回执也会被解析成候选记录。",
+      desc: "IMAP 只读读取常用邮箱，按日期范围批量扫描，附件与链接进入同一流水线。",
+      tags: ["常用邮箱", "IMAP 只读", "日期范围"],
+      detail: "覆盖国内常用邮箱与 Gmail、iCloud、Yahoo 等国际邮箱，自动处理网易系与 88 的 IMAP ID 命令；邮件正文中的平台回执也会被解析成候选记录。",
       outcome: "一次配置后，每月点击运行即可拉取多平台发票，不需要手工翻邮箱。",
       modules: ["email_channel.py", "mailbox_scanner.py", "email_fetcher.py"],
       evidence: "邮箱通道注册表 + 扫描/抓取模块；附件按 RFC822 分段读取并做大小上限保护。"

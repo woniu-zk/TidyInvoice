@@ -141,17 +141,8 @@ const TASK_MODE_OPTIONS = [{
   ...APP_VISIBLE_COPY.taskModes.local
 }];
 const TASK_MODE_VALUES = new Set(TASK_MODE_OPTIONS.map(option => option.value));
-const EMAIL_DOMAIN_OPTIONS = [{
-  value: "qq.com",
-  label: "qq.com"
-}, {
-  value: "163.com",
-  label: "163.com"
-}, {
-  value: "88.com",
-  label: "88.com"
-}];
-const SUPPORTED_EMAIL_DOMAINS = new Set(EMAIL_DOMAIN_OPTIONS.map(option => option.value));
+const EMAIL_PROVIDER_DOMAINS = ["qq.com", "vip.qq.com", "foxmail.com", "163.com", "126.com", "188.com", "yeah.net", "qiye.163.com", "88.com", "exmail.qq.com", "sina.com", "sina.cn", "sohu.com", "21cn.com", "263.net", "189.cn", "139.com", "aliyun.com", "qiye.aliyun.com", "gmail.com", "googlemail.com", "icloud.com", "me.com", "mac.com", "yahoo.com", "ymail.com", "zoho.com", "yandex.com", "gmx.net", "gmx.com", "aol.com", "fastmail.com"];
+const SUPPORTED_EMAIL_DOMAINS = new Set(EMAIL_PROVIDER_DOMAINS);
 const LOCAL_ENGINE_ITEMS = [{
   key: "pdf-text",
   icon: "description",
@@ -718,13 +709,21 @@ async function callApi(method, ...args) {
   const callTarget = await waitForApiMethod(method);
   return callTarget(...args);
 }
+function emailDomainOf(email) {
+  const value = String(email || "").trim();
+  const separatorIndex = value.lastIndexOf("@");
+  return separatorIndex >= 0 ? value.slice(separatorIndex + 1).toLowerCase() : "";
+}
 function validateEmail(email) {
   const value = String(email || "").trim();
   if (!value) {
     return "请输入邮箱地址。";
   }
-  if (!/@(qq|163|88)\.com$/i.test(value)) {
-    return "当前支持 QQ 邮箱、163 邮箱和 88 邮箱。";
+  if (!/^[^\s@]+@[^\s@]+$/.test(value)) {
+    return "邮箱地址格式不正确。";
+  }
+  if (!SUPPORTED_EMAIL_DOMAINS.has(emailDomainOf(value))) {
+    return "暂不支持该邮箱域名，请更换为受支持的常用邮箱。";
   }
   return "";
 }
@@ -922,17 +921,6 @@ function toneFromAsyncStatus(status) {
   if (status === "error") return "error";
   if (status === "testing") return "info";
   return "info";
-}
-function splitEmailAddress(email) {
-  const value = String(email || "").trim();
-  const separatorIndex = value.lastIndexOf("@");
-  const username = separatorIndex >= 0 ? value.slice(0, separatorIndex) : value;
-  const rawDomain = separatorIndex >= 0 ? value.slice(separatorIndex + 1).toLowerCase() : "";
-  const domain = SUPPORTED_EMAIL_DOMAINS.has(rawDomain) ? rawDomain : "qq.com";
-  return {
-    username,
-    domain
-  };
 }
 function resolveGroupTone(groupKey) {
   if (groupKey === "manual_review") return "group-chip--warning";
@@ -1507,11 +1495,13 @@ function SettingsPage({
   const localOutputDir = String(settings.local_output_dir || "").trim();
   const localSplitByCategory = settings.local_split_by_category !== false;
   const activeTaskMode = TASK_MODE_OPTIONS.find(option => option.value === taskMode) || TASK_MODE_OPTIONS[0];
-  const emailParts = splitEmailAddress(settings.email);
+  const emailError = validateEmail(settings.email);
+  const emailDomain = emailDomainOf(settings.email);
+  const emailSupported = !emailError && !!emailDomain;
   const dateError = validateDateRange(runSettings.date_from, runSettings.date_to);
   const startButtonLabel = isLocalMode ? "开始整理" : isFetchMode ? "开始提取" : "开始处理";
   const startButtonIcon = "play_arrow";
-  const canStart = isLocalMode ? !!localInputDir : !validateEmail(settings.email) && !!settings.auth_code && (isFetchMode || !!String(settings.company || "").trim()) && !!String(settings.save_path || "").trim() && !dateError;
+  const canStart = isLocalMode ? !!localInputDir : !emailError && !!settings.auth_code && (isFetchMode || !!String(settings.company || "").trim()) && !!String(settings.save_path || "").trim() && !dateError;
   const rulesIssues = normalizeRuleIssues(rulesStatus && rulesStatus.issues);
   const rulesLibraryAvailable = !!(rulesStatus && rulesStatus.library_available);
   useEffect(() => {
@@ -1802,37 +1792,18 @@ function SettingsPage({
   }, /*#__PURE__*/React.createElement("label", {
     className: "field-label"
   }, "\u90AE\u7BB1\u5730\u5740"), /*#__PURE__*/React.createElement("div", {
-    className: "field-row"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "field-shell",
-    style: {
-      flex: 1
-    }
+    className: "field-shell"
   }, /*#__PURE__*/React.createElement("span", {
     className: "field-icon material-symbols-outlined"
   }, "alternate_email"), /*#__PURE__*/React.createElement("input", {
     type: "text",
     className: "field-input",
-    placeholder: "\u90AE\u7BB1\u7528\u6237\u540D",
-    value: emailParts.username,
-    onChange: event => {
-      const username = event.target.value.replace(/@/g, "");
-      updateSetting("email", username ? `${username}@${emailParts.domain}` : "");
-    }
-  })), /*#__PURE__*/React.createElement("span", {
-    className: "u-text-muted"
-  }, "@"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      width: 136
-    }
-  }, /*#__PURE__*/React.createElement(DarkSelect, {
-    value: emailParts.domain,
-    options: EMAIL_DOMAIN_OPTIONS,
-    ariaLabel: "\u90AE\u7BB1\u57DF\u540D",
-    onChange: domain => updateSetting("email", emailParts.username ? `${emailParts.username}@${domain}` : "")
-  }))), /*#__PURE__*/React.createElement("p", {
+    placeholder: "name@qq.com",
+    value: settings.email,
+    onChange: event => updateSetting("email", event.target.value)
+  })), /*#__PURE__*/React.createElement("p", {
     className: "field-help"
-  }, "\u5F53\u524D\u652F\u6301 QQ\u3001163 \u4E0E 88 \u90AE\u7BB1\uFF0C\u57DF\u540D\u4F1A\u51B3\u5B9A\u90AE\u7BB1\u7684\u8FDE\u63A5\u65B9\u5F0F\u3002")), /*#__PURE__*/React.createElement("div", {
+  }, emailSupported ? `${emailDomain} 属于受支持的邮箱域名。` : "支持 QQ、网易 163/126/188/yeah、88、腾讯企业邮、阿里邮箱、新浪、搜狐、21CN、263、139/189 及 Gmail、iCloud、Yahoo 等常用邮箱；国际邮箱请使用应用专用密码。")), /*#__PURE__*/React.createElement("div", {
     className: "field-block"
   }, /*#__PURE__*/React.createElement("label", {
     className: "field-label"

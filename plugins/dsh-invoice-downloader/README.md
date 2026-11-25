@@ -2,7 +2,7 @@
 
 中文 | [English](#english)
 
-在 DeepSeek Harness 的右侧边栏中运行本地 IMAP 发票下载：读取 QQ 邮箱、163 邮箱或 88 邮箱、下载发票附件、在本机解析与 OCR 识别、按规则归档并生成 Excel 汇总。识别全部在本机完成，不需要模型或 API Key。
+在 DeepSeek Harness 的右侧边栏中运行本地 IMAP 发票下载：读取常用邮箱、下载发票附件、在本机解析与 OCR 识别、按规则归档并生成 Excel 汇总。识别全部在本机完成，不需要模型或 API Key。
 
 ## 安装
 
@@ -22,6 +22,20 @@ dsh plugin --profile web add "file:$PWD/woniu-zk-dsh-invoice-downloader-0.2.0.tg
 - macOS Apple Silicon
 
 首次运行需要可用的 Python 3.10+。插件将可变的本地运行时安装在自己的 DSH profile 状态目录中；安装包内的引擎资源保持只读，扫描结果只写入你选择的输出目录。
+
+## 支持的邮箱
+
+- **腾讯**：QQ 邮箱（`qq.com`、`vip.qq.com`、`foxmail.com`）、腾讯企业邮（`exmail.qq.com`）
+- **网易**：163、126、188、yeah.net、网易企业邮（`qiye.163.com`）
+- **完美世界**：88 邮箱（`88.com`）
+- **阿里**：`aliyun.com`、`qiye.aliyun.com`
+- **新浪**：`sina.com`、`sina.cn`；**搜狐**：`sohu.com`；**21CN**：`21cn.com`；**263**：`263.net`
+- **中国移动**：139 邮箱（`139.com`）；**中国电信**：189 邮箱（`189.cn`）
+- **国际**：Gmail（`gmail.com`、`googlemail.com`）、iCloud（`icloud.com`、`me.com`、`mac.com`）、Yahoo（`yahoo.com`、`ymail.com`）、Zoho（`zoho.com`）、Yandex（`yandex.com`）、GMX（`gmx.net`、`gmx.com`）、AOL（`aol.com`）、Fastmail（`fastmail.com`）
+
+全部邮箱统一使用 `993` 端口与 SSL/TLS；网易系与 88 邮箱会自动处理 IMAP ID 命令。国际邮箱必须使用应用专用密码（Gmail 需先开启两步验证，iCloud 需先开启双重认证），不能填账户登录密码。
+
+暂不支持 Outlook.com、Hotmail、Live、MSN 邮箱，以及 Microsoft 365 / Exchange 企业邮（需要 OAuth2 现代认证）；Proton Mail 需要本地 Bridge、Tutanota 不提供 IMAP。自定义企业域可在命令行用 `--imap-host` 指定 IMAP 服务器。
 
 ## 本地 OCR 依赖
 
@@ -59,6 +73,20 @@ dsh plugin --profile web add "file:$PWD/woniu-zk-dsh-invoice-downloader-0.2.0.tg
 Plugin version 0.2.0 supports DeepSeek Harness `0.2.2-rc.1` and `0.2.1-rc.5`. Run DSH Web on a loopback address with no remote trusted hosts.
 
 The package supports Windows x64 and macOS Apple Silicon. Use the panel to install its local Python runtime, choose an output directory, and configure IMAP. Credentials are stored through the DSH credential service rather than plugin settings; recognition is local and needs no model or API key.
+
+## Supported mailboxes
+
+- **Tencent**: QQ Mail (`qq.com`, `vip.qq.com`, `foxmail.com`) and Tencent Exmail (`exmail.qq.com`)
+- **NetEase**: 163, 126, 188, yeah.net, and NetEase Enterprise Mail (`qiye.163.com`)
+- **Perfect World**: 88 Mail (`88.com`)
+- **Alibaba**: `aliyun.com`, `qiye.aliyun.com`
+- **Sina**: `sina.com`, `sina.cn`; **Sohu**: `sohu.com`; **21CN**: `21cn.com`; **263**: `263.net`
+- **China Mobile**: 139 Mail (`139.com`); **China Telecom**: 189 Mail (`189.cn`)
+- **International**: Gmail (`gmail.com`, `googlemail.com`), iCloud (`icloud.com`, `me.com`, `mac.com`), Yahoo (`yahoo.com`, `ymail.com`), Zoho (`zoho.com`), Yandex (`yandex.com`), GMX (`gmx.net`, `gmx.com`), AOL (`aol.com`), Fastmail (`fastmail.com`)
+
+Every mailbox uses port `993` over SSL/TLS, and NetEase mailboxes plus 88 Mail handle the IMAP ID command automatically. International mailboxes require an app-specific password (enable 2-Step Verification for Gmail or two-factor authentication for iCloud first); the account login password never works.
+
+Outlook.com, Hotmail, Live, and MSN mailboxes, as well as Microsoft 365 / Exchange enterprise mail, are not supported because they require OAuth2 modern authentication. Proton Mail needs a local Bridge and Tutanota does not offer IMAP. Custom corporate domains can point the CLI at their IMAP server with `--imap-host`.
 
 ## Local OCR dependency
 

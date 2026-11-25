@@ -23,7 +23,7 @@ from app_services.errors import (
     RemoteAuthError,
 )
 from brand_generated import TEMP_DIR_PREFIX, THREAD_NAME_WORKER
-from email_channel import resolve_channel
+from email_channel import is_supported_email, resolve_channel
 from frontend_run_context import ensure_run_context_dirs, load_run_context
 from glm_runtime import DEEPSEEK_PROVIDER, normalize_provider
 from report_service import ReportService
@@ -688,6 +688,8 @@ class AdmissionMixin:
 
         email_text = str(email_address or "")
         email_domain = email_text.rsplit("@", 1)[-1].lower() if "@" in email_text else ""
+        if not is_supported_email(email_text):
+            return None, None, "暂不支持该邮箱域名，请更换为受支持的常用邮箱。"
         candidate = _RunAdmissionCandidate(
             rules_text=str(rules_text or ""),
             requested_save_path=requested_save_path,
@@ -695,7 +697,7 @@ class AdmissionMixin:
             date_from=effective_date_from,
             date_to=effective_date_to,
             account_id=stable_hash(email_text)[:12],
-            channel_id=email_domain.split(".", 1)[0] or "email",
+            channel_id=resolve_channel(email_text)["channel_id"] or "email",
             email_domain=email_domain,
             run_context_json=json.dumps(run_context, ensure_ascii=False, sort_keys=True),
             started_at=time.strftime("%Y-%m-%d %H:%M:%S"),

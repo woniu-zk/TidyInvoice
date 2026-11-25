@@ -163,7 +163,7 @@ def _build_parser() -> argparse.ArgumentParser:
     fetch.add_argument("--since", default="", help="起始日期 YYYY-MM-DD（默认近 30 天）")
     fetch.add_argument("--before", default="", help="结束日期 YYYY-MM-DD（含当天）")
     fetch.add_argument("--mailbox", default="INBOX", help="邮箱文件夹（默认 INBOX）")
-    fetch.add_argument("--imap-host", default="", help="IMAP 服务器（默认按邮箱域名识别）")
+    fetch.add_argument("--imap-host", default="", help="IMAP 服务器（默认按邮箱域名识别；自定义域名服务器可显式指定）")
     fetch.add_argument("--imap-port", type=int, default=0, help="IMAP 端口")
     fetch.add_argument("--json", action="store_true", help="以 JSON 输出结果")
     return parser

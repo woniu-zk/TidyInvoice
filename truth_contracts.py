@@ -14,7 +14,41 @@ from typing import Any, Mapping
 
 
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
-_CHANNELS = {"qq.com": "qq", "163.com": "163", "88.com": "88"}
+# Mirrors email_channel.EMAIL_CHANNELS[*]["channel_id"]; tests keep them in sync.
+_CHANNELS = {
+    "qq.com": "qq",
+    "vip.qq.com": "qq",
+    "foxmail.com": "qq",
+    "exmail.qq.com": "exmail",
+    "163.com": "163",
+    "126.com": "126",
+    "188.com": "188",
+    "yeah.net": "yeah",
+    "qiye.163.com": "qiye163",
+    "88.com": "88",
+    "sina.com": "sina",
+    "sina.cn": "sina",
+    "sohu.com": "sohu",
+    "21cn.com": "21cn",
+    "263.net": "263",
+    "189.cn": "189",
+    "139.com": "139",
+    "aliyun.com": "aliyun",
+    "qiye.aliyun.com": "aliyun",
+    "gmail.com": "gmail",
+    "googlemail.com": "gmail",
+    "icloud.com": "icloud",
+    "me.com": "icloud",
+    "mac.com": "icloud",
+    "yahoo.com": "yahoo",
+    "ymail.com": "yahoo",
+    "zoho.com": "zoho",
+    "yandex.com": "yandex",
+    "gmx.net": "gmx",
+    "gmx.com": "gmx",
+    "aol.com": "aol",
+    "fastmail.com": "fastmail",
+}
 _PAIR_ROLES = {
     "invoice": "invoice",
     "hotel_folio": "companion",
