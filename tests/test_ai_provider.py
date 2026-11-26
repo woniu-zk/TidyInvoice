@@ -226,16 +226,23 @@ def test_admission_persists_deepseek_key_without_overwriting_glm_key(
     assert api._active_ai_provider == "glm"
 
 
-def test_frontend_offers_88_mailbox_and_local_engine_block():
+def test_frontend_offers_88_mailbox_without_local_engine_block():
     source = (ROOT / "templates" / "index_app.js").read_text(encoding="utf-8")
 
     assert '"88.com"' in source
     assert "EMAIL_PROVIDER_DOMAINS" in source
-    # The product now recognizes invoices locally: no model provider switch and
-    # no API-key field may be offered in the settings UI.
-    assert "本地识别引擎" in source
-    assert "LOCAL_ENGINE_ITEMS" in source
-    assert "DEEPSEEK_PLATFORM_URL" not in source
-    assert "deepseek_api_key" not in source
-    assert "EMAIL_DOMAIN_OPTIONS" not in source
-    assert "splitEmailAddress" not in source
+    # The settings UI no longer advertises a local recognition engine card, and
+    # no model provider switch or API-key field may be offered.
+    for removed in (
+        "本地识别引擎",
+        "LOCAL_ENGINE_ITEMS",
+        "engine-item",
+        "PDF 文本解析",
+        "OFD 解析",
+        "本地 OCR",
+        "DEEPSEEK_PLATFORM_URL",
+        "deepseek_api_key",
+        "EMAIL_DOMAIN_OPTIONS",
+        "splitEmailAddress",
+    ):
+        assert removed not in source, f"frontend still references removed UI {removed!r}"

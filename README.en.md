@@ -116,7 +116,7 @@ Expense categories are no longer hard-coded. Built-in rules provide factory defa
 
 Example: create target type "酒店", then a rule with keyword "酒店住宿" and amount 100–200; it archives to `酒店-100-200/`. A 150-yuan hotel invoice goes there, while a 90-yuan one still goes to `住宿发票/` by its recognized type. The rule decides the folder; the file name still carries the document type.
 
-UI entry: **Settings → Expense classification rules**. CLI:
+UI entry: **Settings → Rules**. CLI:
 
 ```powershell
 python organize_cli.py rules list
@@ -325,14 +325,14 @@ Each `manifest.jsonl` line records one attachment's source (`sha256`, relative p
 ### Windows (installer / portable)
 
 1. Installer: run `TidyInvoice-*-windows-x64-setup.exe`. Portable: extract `TidyInvoice-*-windows-x64-portable.zip` to a regular folder (avoid cloud-sync directories) and keep `_internal` beside `TidyInvoice.exe`.
-2. Double-click `TidyInvoice.exe`; the settings interface appears on first launch.
-3. Enter your email address and authorization code (any supported mailbox), then click "Start Scanning". Recognition runs offline on this machine — scans and images are handled by the bundled OCR, with no network or API key needed. Invoices are archived to the "Invoice Organizer" folder on your desktop.
+2. Double-click `TidyInvoice.exe`; the home workspace appears on first launch.
+3. Enter your email address and authorization code on the Settings tab (any supported mailbox), then return to Home and click "Fetch & Organize". Recognition runs offline on this machine — scans and images are handled by the bundled OCR, with no network or API key needed. Invoices are archived to the "Invoice Organizer" folder on your desktop.
 
 ### macOS (Apple Silicon)
 
 1. Open `TidyInvoice-*-macos-arm64.dmg` and drag `TidyInvoice` to Applications.
-2. The settings interface appears on first launch. This build is unsigned and not notarized; if macOS blocks it, confirm opening it in **System Settings → Privacy & Security**.
-3. Enter your email address and authorization code (any supported mailbox), then click "Start Scanning". Recognition runs offline on this machine — scans and images are handled by the bundled OCR, with no network or API key needed.
+2. The home workspace appears on first launch. This build is unsigned and not notarized; if macOS blocks it, confirm opening it in **System Settings → Privacy & Security**.
+3. Enter your email address and authorization code on the Settings tab (any supported mailbox), then return to Home and click "Fetch & Organize". Recognition runs offline on this machine — scans and images are handled by the bundled OCR, with no network or API key needed.
 
 ---
 
@@ -413,7 +413,7 @@ This is normal. When local parsing and rule checks cannot confirm a result relia
 <details>
 <summary>Q: Why does an invoice say "no classification rule matched"?</summary>
 
-When no expense category rule matches, the invoice is marked unclassified and moved to Manual Review instead of being silently filed under "Other". Add a seller/item keyword, invoice type, or amount rule under **Settings → Expense classification rules**, save it, move the file back into the invoice folder, and organize again.
+When no expense category rule matches, the invoice is marked unclassified and moved to Manual Review instead of being silently filed under "Other". Add a seller/item keyword, invoice type, or amount rule under **Settings → Rules**, save it, move the file back into the invoice folder, and organize again.
 
 </details>
 

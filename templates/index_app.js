@@ -1,6 +1,6 @@
 const { useEffect, useMemo, useRef, useState } = React;
 const { createRoot } = ReactDOM;
-const { MemoryRouter, Routes, Route, useNavigate } = ReactRouterDOM;
+const { MemoryRouter, Routes, Route, useNavigate, useLocation } = ReactRouterDOM;
 
 function isoDate(date) {
     const year = date.getFullYear();
@@ -66,6 +66,7 @@ if (!window.__APP_BRAND__) {
 
 const APP_BRAND = Object.freeze({
     name: window.__APP_BRAND__.name,
+    nameEn: window.__APP_BRAND__.nameEn,
     subtitle: window.__APP_BRAND__.subtitle,
 });
 
@@ -76,20 +77,20 @@ const APP_VISIBLE_COPY = {
     githubLabel: window.__APP_BRAND__.githubLabel,
     githubUrl: window.__APP_BRAND__.githubUrl,
     taskModes: {
-        mail: {
-            label: "邮箱提取并整理",
-            description: "连接邮箱提取附件，识别后按分类与命名规则归档。",
-            badge: "识别后归档",
-        },
         fetch: {
-            label: "仅提取到 inbox",
+            label: "邮箱提取",
             description: "只把邮箱附件保存到 inbox 文件夹并生成清单，不做识别和归档。",
             badge: "只保存附件",
         },
         local: {
-            label: "本地文件夹整理",
-            description: "读取本机文件夹中的发票文件，直接在该文件夹内离线识别并自动分类归档，不需要邮箱和网络。",
+            label: "本地整理",
+            description: "读取本机发票文件夹，离线识别后按分类与命名规则归档，不需要邮箱和网络。",
             badge: "本机离线整理",
+        },
+        mail: {
+            label: "邮箱提取并整理",
+            description: "连接邮箱提取附件，识别后按分类与命名规则归档。",
+            badge: "识别后归档",
         },
     },
     resultBanners: {
@@ -122,9 +123,9 @@ const APP_VISIBLE_COPY = {
 };
 
 const TASK_MODE_OPTIONS = [
-    { value: "mail", ...APP_VISIBLE_COPY.taskModes.mail },
     { value: "fetch", ...APP_VISIBLE_COPY.taskModes.fetch },
     { value: "local", ...APP_VISIBLE_COPY.taskModes.local },
+    { value: "mail", ...APP_VISIBLE_COPY.taskModes.mail },
 ];
 const TASK_MODE_VALUES = new Set(TASK_MODE_OPTIONS.map((option) => option.value));
 
@@ -163,11 +164,6 @@ const EMAIL_PROVIDER_DOMAINS = [
     "fastmail.com",
 ];
 const SUPPORTED_EMAIL_DOMAINS = new Set(EMAIL_PROVIDER_DOMAINS);
-const LOCAL_ENGINE_ITEMS = [
-    { key: "pdf-text", icon: "description", title: "PDF 文本解析", description: "直接读取电子发票的版式文本与明细。" },
-    { key: "ofd", icon: "picture_as_pdf", title: "OFD 解析", description: "解析国标版式文件中的票面信息。" },
-    { key: "ocr", icon: "document_scanner", title: "本地 OCR", description: "扫描件与图片在本机离线识别。" },
-];
 
 const DISCLAIMER_SOFTWARE_ITEMS = [
     "本软件用于票据整理、归档与复核辅助处理。",
@@ -197,44 +193,73 @@ const UI_COPY = {
         windowSubtitle: "桌面工作区",
     },
     navigation: [
-        { key: "settings", label: "启动配置", description: "邮箱、识别与日期", icon: "tune", path: "/" },
-        { key: "processing", label: "处理中心", description: "进度与日志", icon: "data_thresholding", path: "/processing" },
-        { key: "analysis", label: "结果分析", description: "总览与导出", icon: "assessment", path: "/analysis" },
-        { key: "rules", label: "归类规则", description: "目标票种、关键词与金额", icon: "rule", path: "/rules" },
+        { key: "home", label: "首页", description: "提取与整理", icon: "space_dashboard", path: "/" },
+        { key: "results", label: "结果", description: "汇总与导出", icon: "assessment", path: "/results" },
+        { key: "settings", label: "设置", description: "邮箱与规则", icon: "settings", path: "/settings" },
     ],
     pages: {
-        settings: {
-            eyebrow: "Step 1",
-            title: "启动配置",
-            footerText: "当前页: 启动配置",
-            bootstrapTitle: "启动配置",
+        home: {
+            eyebrow: "工作台",
+            title: "首页",
+            description: "确认提取时间与输出位置，然后开始邮箱提取或本地整理。",
+            bootstrapTitle: "正在载入",
             bootstrapDescription: "正在初始化本地设置。",
             bootstrapMessage: "正在连接桌面接口并加载本地设置，请稍候。",
             errorDescription: "本地设置初始化失败。",
+            errorMessage: "本地设置初始化失败，请重启应用。",
             controlledNotice: "受控复跑已锁定输出目录与日期窗口。",
-        },
-        processing: {
-            eyebrow: "Step 2",
-            title: "处理中心",
-            footerText: "当前页: 处理中心",
-            closeHint: "关闭程序会直接结束当前窗口与任务进程，请仅在确认后执行。",
-            statusWaiting: "等待任务状态",
+            readonlyBadge: "只读",
+            emailLabel: "提取邮箱",
+            companyLabel: "公司配置",
+            unconfigured: "尚未配置",
+            goSettings: "前往设置",
+            readonlyHint: "邮箱、授权码与公司名称在设置页维护，此处仅展示当前配置。",
+            outputTitle: "输出目录设置",
+            outputHint: "邮箱提取与邮箱提取并整理会把附件和归档写入该目录；本地整理使用下方归档目录。",
+            browseDirectory: "浏览目录",
+            pathLocked: "路径已锁定",
+            dateTitle: "提取时间",
+            dateHint: "确认起止日期后开始提取，日期范围会随任务一起提交。",
+            localTitle: "本地整理",
+            localInputLabel: "本地发票文件夹",
+            localOutputLabel: "归档目录",
+            chooseFolder: "选择文件夹",
+            chooseOther: "选择其他目录",
+            resetLocalOutput: "恢复默认（发票文件夹）",
+            splitByCategory: "按分类分目录",
+            splitHelpOn: "按发票类型建立 餐饮/充电 等子目录归档；原件按原文件名原样保留在「整理前发票」文件夹。",
+            splitHelpOff: "不建分类子目录：整理后的发票直接放在该文件夹里，文件名仍带类型；原件按原文件名原样保留在「整理前发票」文件夹。",
+            localHint: "本地整理会读取该文件夹并在归档目录生成分类结果，不需要邮箱和网络。",
+            actionsTitle: "开始处理",
+            actionHint: "邮箱提取只保存附件；本地整理在本机完成识别归档；邮箱提取并整理会提取附件后按规则归档。",
+            progressTitle: "处理进度",
+            statusWaiting: "等待任务开始",
             currentOperation: "当前操作",
             progressLabel: "完成度",
-            liveRefresh: "进度与日志保持实时刷新。",
+            liveRefresh: "进度与处理信息保持实时刷新。",
             stopPending: "已收到安全停止指令。",
             stopDetail: "系统将在当前文件处理完成后安全停止。",
-            processingDetail: "邮件抓取、票据恢复与本地识别将依次执行。",
+            processingDetail: "邮件抓取、票据识别与归档整理将依次执行。",
             processingDetailFetch: "本轮只提取邮箱附件，不会进行识别与归档。",
             processingDetailLocal: "本地文件扫描、票据识别与归档整理将依次执行。",
             scanEmailsLabel: "已扫描邮件",
             scanFilesLabel: "已扫描文件",
             stopNotice: "已收到安全停止指令，当前邮件或当前文件处理完成后将结束任务。",
+            runEmpty: "尚未开始处理。完成配置后点击上方按钮开始。",
+            runInfoTitle: "处理信息",
+            runInfoEmpty: "暂无运行信息。",
+            startTimeLabel: "开始时间",
+            elapsedLabel: "已运行",
+            updatedLabel: "最近更新",
+            viewResults: "查看结果",
+            stop: "停止运行",
+            stopping: "正在停止...",
+            footerMeta: "任务运行时可以安全停止，当前邮件或当前文件处理完成后结束。",
         },
         analysis: {
-            eyebrow: "Step 3",
+            eyebrow: "处理汇总",
             title: "结果分析",
-            footerText: "当前页: 结果分析",
+            footerText: "当前页: 结果",
             statusSummary: "运行结果",
             resultTitle: "本次处理完成",
             reviewTitle: "待人工复核",
@@ -243,6 +268,19 @@ const UI_COPY = {
             reviewIdle: "结果明细仍可导出查看，输出目录会保留本轮成功归档结果。",
             classificationTitle: "分类汇总",
             classificationEmpty: "本轮还没有可统计的分类结果。",
+        },
+        settings: {
+            eyebrow: "基础配置",
+            title: "设置",
+            description: "邮箱、公司与归类规则都在这里维护；规则保存后在下一次整理时生效。",
+            footerText: "当前页: 设置",
+            emailSection: "邮箱配置",
+            rulesSection: "规则设置",
+            emailCardTitle: "邮箱源配置",
+            companyCardTitle: "公司配置",
+            controlledNotice: "受控复跑已锁定输出目录与日期窗口，相关配置不可修改。",
+            remember: "自动记住当前配置",
+            savedHint: "配置保存在本机。",
         },
         rules: {
             title: "归类规则",
@@ -989,6 +1027,175 @@ function toneFromAsyncStatus(status) {
     return "info";
 }
 
+function pad2(value) {
+    return `${value}`.padStart(2, "0");
+}
+
+function formatClock(timestamp) {
+    const value = Number(timestamp || 0);
+    if (!value) return "—";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "—";
+    return `${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
+}
+
+function formatDuration(totalSeconds) {
+    const value = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+    const minutes = Math.floor(value / 60);
+    const seconds = value % 60;
+    if (minutes > 0) return `${minutes}分${pad2(seconds)}秒`;
+    return `${seconds}秒`;
+}
+
+const THEME_STORAGE_KEY = `${BRAND_SESSION_PREFIX}.theme`;
+
+function readStoredTheme() {
+    try {
+        if (typeof window !== "undefined" && window.localStorage) {
+            const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
+            if (stored === "light" || stored === "dark") return stored;
+        }
+    } catch (error) {
+        // Local storage can be unavailable in restricted webviews.
+    }
+    try {
+        if (typeof window !== "undefined" && typeof window.matchMedia === "function") {
+            if (window.matchMedia("(prefers-color-scheme: light)").matches) return "light";
+        }
+    } catch (error) {
+        // Fall back to the dark workspace when the media query is unavailable.
+    }
+    return "dark";
+}
+
+function applyTheme(theme) {
+    try {
+        if (typeof document !== "undefined" && document && document.documentElement) {
+            document.documentElement.dataset.theme = theme;
+        }
+    } catch (error) {
+        // Theme application is best effort; the default palette stays usable.
+    }
+}
+
+const INITIAL_THEME = readStoredTheme();
+applyTheme(INITIAL_THEME);
+
+function persistTheme(theme) {
+    try {
+        if (typeof window !== "undefined" && window.localStorage) {
+            window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+        }
+    } catch (error) {
+        // Remembering the theme is optional.
+    }
+}
+
+function useTheme() {
+    const [theme, setTheme] = useState(INITIAL_THEME);
+
+    useEffect(() => {
+        applyTheme(theme);
+    }, [theme]);
+
+    function toggleTheme() {
+        setTheme((current) => {
+            const next = current === "dark" ? "light" : "dark";
+            persistTheme(next);
+            return next;
+        });
+    }
+
+    return { theme, toggleTheme };
+}
+
+function useShellSettings() {
+    const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+    const [runSettings, setRunSettings] = useState(DEFAULT_RUN_SETTINGS);
+    const [runContext, setRunContext] = useState({ controlled_run: false, explicit_run_context: false });
+    const [rulesStatus, setRulesStatus] = useState({});
+    const [bootstrapState, setBootstrapState] = useState("bootstrapping");
+    const [bootstrapError, setBootstrapError] = useState("");
+    const saveTimerRef = useRef(null);
+    const settingsRef = useRef(DEFAULT_SETTINGS);
+    const runSettingsRef = useRef(DEFAULT_RUN_SETTINGS);
+    const runContextRef = useRef({ controlled_run: false, explicit_run_context: false });
+
+    useEffect(() => {
+        let active = true;
+        (async () => {
+            try {
+                const state = await loadShellState();
+                if (!active) return;
+                settingsRef.current = state.settings;
+                runSettingsRef.current = state.runSettings;
+                runContextRef.current = state.runContext;
+                setSettings(state.settings);
+                setRunSettings(state.runSettings);
+                setRunContext(state.runContext);
+                setRulesStatus(state.rulesStatus || {});
+                setBootstrapError("");
+                setBootstrapState("bootstrapped");
+            } catch (error) {
+                if (!active) return;
+                setBootstrapError(error.message || UI_COPY.pages.home.errorMessage);
+                setBootstrapState("bootstrap_failed");
+            }
+        })();
+        return () => {
+            active = false;
+            if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+        };
+    }, []);
+
+    useEffect(() => {
+        if (bootstrapState !== "bootstrapped") return undefined;
+        if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = setTimeout(() => {
+            persistNow().catch((error) => {
+                console.error("Failed to save settings", error);
+            });
+        }, 400);
+        return () => {
+            if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+        };
+    }, [bootstrapState, settings, runSettings, runContext]);
+
+    function updateSetting(key, value) {
+        setSettings((current) => {
+            const next = { ...current, [key]: value };
+            settingsRef.current = next;
+            return next;
+        });
+    }
+
+    function setDateValue(field, value) {
+        setRunSettings((current) => {
+            const next = { ...current, [field]: value, quick_range: "custom" };
+            runSettingsRef.current = next;
+            return next;
+        });
+    }
+
+    async function persistNow(overrides) {
+        const nextSettings = (overrides && overrides.settings) || settingsRef.current;
+        const nextRunSettings = (overrides && overrides.runSettings) || runSettingsRef.current;
+        return persistUserSettings(nextSettings, nextRunSettings, runContextRef.current);
+    }
+
+    return {
+        settings,
+        runSettings,
+        runContext,
+        rulesStatus,
+        bootstrapState,
+        bootstrapError,
+        updateSetting,
+        setDateValue,
+        persistNow,
+    };
+}
+
 function resolveGroupTone(groupKey) {
     if (groupKey === "manual_review") return "group-chip--warning";
     if (groupKey === "retained_record") return "group-chip--info";
@@ -996,13 +1203,32 @@ function resolveGroupTone(groupKey) {
     return "";
 }
 
-function resolveLogToneClass(log) {
+const LOG_KIND_LABELS = {
+    error: "异常",
+    warning: "提醒",
+    success: "成功",
+    info: "信息",
+};
+
+function resolveLogTone(log) {
     const sample = `${String(log && log.color || "")} ${String(log && log.type || "")}`.toLowerCase();
-    if (sample.includes("error") || sample.includes("red")) return "terminal-kind terminal-kind--error";
-    if (sample.includes("warning") || sample.includes("warn") || sample.includes("amber") || sample.includes("orange")) return "terminal-kind terminal-kind--warning";
-    if (sample.includes("success") || sample.includes("green") || sample.includes("emerald")) return "terminal-kind terminal-kind--success";
-    if (sample.includes("info") || sample.includes("blue") || sample.includes("cyan")) return "terminal-kind terminal-kind--info";
-    return "terminal-kind";
+    if (sample.includes("error") || sample.includes("red")) return "error";
+    if (sample.includes("warning") || sample.includes("warn") || sample.includes("amber") || sample.includes("orange")) return "warning";
+    if (sample.includes("success") || sample.includes("green") || sample.includes("emerald")) return "success";
+    if (sample.includes("info") || sample.includes("blue") || sample.includes("cyan")) return "info";
+    return "";
+}
+
+function resolveLogToneClass(log) {
+    const tone = resolveLogTone(log);
+    return tone ? `run-log__kind run-log__kind--${tone}` : "run-log__kind";
+}
+
+// 日志级别是后端字段；界面上按中文呈现，未识别的级别原样回退。
+function resolveLogKindLabel(log) {
+    const tone = resolveLogTone(log);
+    if (tone) return LOG_KIND_LABELS[tone];
+    return safeText(log && log.type, "日志");
 }
 
 function NoticeBox({ tone = "info", className = "", children }) {
@@ -1013,7 +1239,7 @@ function InlineStatus({ tone = "info", children }) {
     const icon = tone === "success" ? "task_alt" : tone === "error" ? "error" : tone === "warning" ? "warning" : "info";
     return (
         <div className={joinClasses("inline-status", `inline-status--${tone}`)}>
-            <span className="material-symbols-outlined inline-status__icon">{icon}</span>
+            <span aria-hidden="true" className="material-symbols-outlined inline-status__icon">{icon}</span>
             <span className="inline-status__text">{children}</span>
         </div>
     );
@@ -1022,17 +1248,16 @@ function InlineStatus({ tone = "info", children }) {
 function StatusPill({ tone = "neutral", icon, children }) {
     return (
         <span className={joinClasses("status-pill", tone !== "neutral" && `status-pill--${tone}`)}>
-            {icon && <span className="material-symbols-outlined" style={{ fontSize: 16 }}>{icon}</span>}
+            {icon && <span aria-hidden="true" className="material-symbols-outlined" style={{ fontSize: 16 }}>{icon}</span>}
             <span>{children}</span>
         </span>
     );
 }
 
-function SectionHeader({ icon, title, indicator }) {
+function SectionHeader({ title, indicator }) {
     return (
         <div className="section-header">
             <div className="section-title">
-                <span className="section-title__icon material-symbols-outlined">{icon}</span>
                 <span>{title}</span>
             </div>
             {indicator ? <div className="u-text-muted" style={{ fontSize: 12 }}>{indicator}</div> : null}
@@ -1040,11 +1265,10 @@ function SectionHeader({ icon, title, indicator }) {
     );
 }
 
-function PageHeader({ eyebrow, title, description, badge }) {
+function PageHeader({ title, description, badge }) {
     return (
         <div className="page-header-shell">
             <div>
-                {eyebrow ? <p className="page-eyebrow">{eyebrow}</p> : null}
                 <h1 className="page-title">{title}</h1>
                 {description ? <p className="page-description">{description}</p> : null}
             </div>
@@ -1107,7 +1331,7 @@ function DarkSelect({ value, options, onChange, disabled = false, ariaLabel }) {
                 disabled={disabled}
             >
                 <span className="field-dropdown-trigger__label">{activeOption.label}</span>
-                <span className="material-symbols-outlined field-dropdown-trigger__icon">{open ? "expand_less" : "expand_more"}</span>
+                <span aria-hidden="true" className="material-symbols-outlined field-dropdown-trigger__icon">{open ? "expand_less" : "expand_more"}</span>
             </button>
             {open ? (
                 <div className="field-dropdown-menu" role="listbox" aria-label={ariaLabel}>
@@ -1119,7 +1343,7 @@ function DarkSelect({ value, options, onChange, disabled = false, ariaLabel }) {
                             onClick={() => handleSelect(option.value)}
                         >
                             <span>{option.label}</span>
-                            {option.value === activeOption.value ? <span className="material-symbols-outlined">check</span> : null}
+                            {option.value === activeOption.value ? <span aria-hidden="true" className="material-symbols-outlined">check</span> : null}
                         </button>
                     ))}
                 </div>
@@ -1128,7 +1352,7 @@ function DarkSelect({ value, options, onChange, disabled = false, ariaLabel }) {
     );
 }
 
-function DateField({ label, value, onChange, disabled = false }) {
+function DateField({ label, value, onChange, disabled = false, id = "date-field" }) {
     const inputRef = useRef(null);
 
     function openPicker() {
@@ -1147,9 +1371,10 @@ function DateField({ label, value, onChange, disabled = false }) {
 
     return (
         <div className="field-block" style={{ flex: 1 }}>
-            <label className="field-label">{label}</label>
+            <label className="field-label" htmlFor={id}>{label}</label>
             <div className={joinClasses("field-shell", "field-shell--date", disabled && "field-shell--readonly")}>
                 <input
+                    id={id}
                     ref={inputRef}
                     type="date"
                     className="field-input field-input--date"
@@ -1159,7 +1384,7 @@ function DateField({ label, value, onChange, disabled = false }) {
                     disabled={disabled}
                 />
                 <button type="button" className="field-shell-button" onClick={openPicker} disabled={disabled} aria-label={`${label}日历`}>
-                    <span className="material-symbols-outlined">calendar_month</span>
+                    <span aria-hidden="true" className="material-symbols-outlined">calendar_month</span>
                 </button>
             </div>
         </div>
@@ -1217,55 +1442,95 @@ function AppWindowChrome({ active }) {
     }
 
     return (
-        <div className="window-chrome">
-            <div className="window-drag-region">
-                <div className="window-title-stack">
-                    <span className="window-title">{APP_BRAND.name}</span>
-                    <span className="window-subtitle">{(activeItem && activeItem.label) || UI_COPY.shell.windowSubtitle}</span>
-                </div>
-            </div>
-            <div className="window-controls">
-                <button
-                    type="button"
-                    className="window-traffic-button window-traffic-button--minimize"
-                    onClick={handleMinimize}
-                    disabled={minimizing || maximizing || closing}
-                    aria-label={minimizing ? UI_COPY.shell.minimizing : UI_COPY.shell.minimize}
-                    title={minimizing ? UI_COPY.shell.minimizing : UI_COPY.shell.minimize}
-                >
-                    <span className="window-traffic-button__glyph"></span>
-                </button>
-                <button
-                    type="button"
-                    className="window-traffic-button window-traffic-button--maximize"
-                    onClick={handleMaximize}
-                    disabled={minimizing || maximizing || closing}
-                    aria-label={maximizing ? UI_COPY.shell.maximizing : UI_COPY.shell.maximize}
-                    title={maximizing ? UI_COPY.shell.maximizing : UI_COPY.shell.maximize}
-                >
-                    <span className="window-traffic-button__glyph"></span>
-                </button>
-                <button
-                    type="button"
-                    className="window-traffic-button window-traffic-button--close"
-                    onClick={handleClose}
-                    disabled={minimizing || maximizing || closing}
-                    aria-label={closing ? UI_COPY.shell.closing : UI_COPY.shell.close}
-                    title={closing ? UI_COPY.shell.closing : UI_COPY.shell.close}
-                >
-                    <span className="window-traffic-button__glyph"></span>
-                </button>
-            </div>
+        <div className="window-controls">
+            <button
+                type="button"
+                className="window-traffic-button window-traffic-button--minimize"
+                onClick={handleMinimize}
+                disabled={minimizing || maximizing || closing}
+                aria-label={minimizing ? UI_COPY.shell.minimizing : UI_COPY.shell.minimize}
+                title={minimizing ? UI_COPY.shell.minimizing : UI_COPY.shell.minimize}
+            >
+                <span className="window-traffic-button__glyph"></span>
+            </button>
+            <button
+                type="button"
+                className="window-traffic-button window-traffic-button--maximize"
+                onClick={handleMaximize}
+                disabled={minimizing || maximizing || closing}
+                aria-label={maximizing ? UI_COPY.shell.maximizing : UI_COPY.shell.maximize}
+                title={maximizing ? UI_COPY.shell.maximizing : UI_COPY.shell.maximize}
+            >
+                <span className="window-traffic-button__glyph"></span>
+            </button>
+            <button
+                type="button"
+                className="window-traffic-button window-traffic-button--close"
+                onClick={handleClose}
+                disabled={minimizing || maximizing || closing}
+                aria-label={closing ? UI_COPY.shell.closing : UI_COPY.shell.close}
+                title={closing ? UI_COPY.shell.closing : UI_COPY.shell.close}
+            >
+                <span className="window-traffic-button__glyph"></span>
+            </button>
         </div>
     );
 }
 
-function AppShell({ active, onOpenDisclaimer, children, footerLeft, footerRight, contentClassName = "", contentScrollable = true }) {
+function AppSidebar({ active, theme, onToggleTheme, onOpenDisclaimer }) {
+    const navigate = useNavigate();
+    const githubUrl = APP_VISIBLE_COPY.githubUrl;
+    const themeLabel = theme === "dark" ? "浅色模式" : "深色模式";
+    const themeActionLabel = theme === "dark" ? "切换到浅色模式" : "切换到深色模式";
+
+    return (
+        <aside className="app-sidebar">
+            <div className="sidebar-brand pywebview-drag-region">
+                <span className="sidebar-brand__name">{APP_BRAND.name}</span>
+            </div>
+
+            <nav className="sidebar-nav" aria-label="主导航">
+                {UI_COPY.navigation.map((item) => (
+                    <button
+                        key={item.key}
+                        type="button"
+                        className={joinClasses("sidebar-tab", active === item.key && "is-active")}
+                        aria-current={active === item.key ? "page" : undefined}
+                        onClick={() => navigate(item.path)}
+                    >
+                        <span aria-hidden="true" className="sidebar-tab__icon material-symbols-outlined">{item.icon}</span>
+                        <span>{item.label}</span>
+                    </button>
+                ))}
+            </nav>
+
+            <div className="sidebar-spacer pywebview-drag-region"></div>
+
+            <div className="sidebar-foot">
+                <button type="button" className="sidebar-action" onClick={onToggleTheme} aria-label={themeActionLabel} title={themeActionLabel}>
+                    <span aria-hidden="true" className="material-symbols-outlined">{theme === "dark" ? "light_mode" : "dark_mode"}</span>
+                    <span>{themeLabel}</span>
+                </button>
+                <button type="button" className="sidebar-action" onClick={onOpenDisclaimer}>
+                    <span aria-hidden="true" className="material-symbols-outlined">balance</span>
+                    <span>免责声明</span>
+                </button>
+                <button type="button" className="sidebar-action" onClick={() => openExternalUrl(githubUrl)}>
+                    <span aria-hidden="true" className="material-symbols-outlined">code</span>
+                    <span>{APP_VISIBLE_COPY.githubLabel}</span>
+                </button>
+            </div>
+
+            <AppWindowChrome active={active} />
+        </aside>
+    );
+}
+
+function AppShell({ active, theme, onToggleTheme, onOpenDisclaimer, children, footerLeft, footerRight, contentClassName = "", contentScrollable = true }) {
     return (
         <div className="app-shell">
-            <Sidebar active={active} onOpenDisclaimer={onOpenDisclaimer} />
+            <AppSidebar active={active} theme={theme} onToggleTheme={onToggleTheme} onOpenDisclaimer={onOpenDisclaimer} />
             <main className="app-main">
-                <AppWindowChrome active={active} />
                 <div className={joinClasses("page-scroll", !contentScrollable && "page-scroll--locked", contentClassName)}>{children}</div>
                 <PageFooter left={footerLeft} right={footerRight} />
             </main>
@@ -1273,9 +1538,9 @@ function AppShell({ active, onOpenDisclaimer, children, footerLeft, footerRight,
     );
 }
 
-function BootstrapStatePage({ active, onOpenDisclaimer, eyebrow, title, description, tone, message, footerText }) {
+function BootstrapStatePage({ active, theme, onToggleTheme, onOpenDisclaimer, eyebrow, title, description, tone, message, footerText }) {
     return (
-        <AppShell active={active} onOpenDisclaimer={onOpenDisclaimer} footerRight={<p className="footer-meta">{footerText}</p>}>
+        <AppShell active={active} theme={theme} onToggleTheme={onToggleTheme} onOpenDisclaimer={onOpenDisclaimer} footerRight={<p className="footer-meta">{footerText}</p>}>
             <div className="page-wrap page-wrap--narrow">
                 <PageHeader eyebrow={eyebrow} title={title} description={description} />
                 <NoticeBox tone={tone}>{message}</NoticeBox>
@@ -1287,7 +1552,7 @@ function BootstrapStatePage({ active, onOpenDisclaimer, eyebrow, title, descript
 function SummaryField({ span = 6, label, value, helper, icon, tone = "", mono = false, truncate = false }) {
     return (
         <div className={joinClasses("summary-item", tone)} style={{ gridColumn: `span ${span} / span ${span}` }}>
-            <div className="summary-item__icon"><span className="material-symbols-outlined">{icon}</span></div>
+            <div className="summary-item__icon"><span aria-hidden="true" className="material-symbols-outlined">{icon}</span></div>
             <div className="summary-item__copy">
                 <p className="summary-item__label">{label}</p>
                 <p className={joinClasses("summary-item__value", mono && "u-mono", truncate && "u-truncate")}>{value}</p>
@@ -1298,27 +1563,36 @@ function SummaryField({ span = 6, label, value, helper, icon, tone = "", mono = 
 }
 
 function DisclaimerDialog({ open, onClose }) {
+    const cardRef = useRef(null);
+    const titleId = "disclaimer-dialog-title";
+
     useEffect(() => {
         if (!open) return undefined;
+        const previouslyFocused = document.activeElement;
         function handleKeydown(event) {
             if (event.key === "Escape") onClose();
         }
         window.addEventListener("keydown", handleKeydown);
-        return () => window.removeEventListener("keydown", handleKeydown);
+        if (cardRef.current && cardRef.current.focus) cardRef.current.focus();
+        return () => {
+            window.removeEventListener("keydown", handleKeydown);
+            // 关闭后把焦点还给触发它的按钮，键盘用户不会丢失位置。
+            if (previouslyFocused && previouslyFocused.focus) previouslyFocused.focus();
+        };
     }, [open, onClose]);
 
     if (!open) return null;
 
     return (
         <div className="modal-overlay" onClick={onClose}>
-            <div className="modal-card" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} ref={cardRef} onClick={(event) => event.stopPropagation()}>
                 <div className="modal-head">
                     <div>
                         <p className="page-eyebrow" style={{ marginBottom: 10 }}>免责声明</p>
-                        <h2 className="page-title" style={{ fontSize: 28 }}>使用前请确认以下事项</h2>
+                        <h2 id={titleId} className="sheet-title">使用前请确认以下事项</h2>
                     </div>
-                    <button type="button" className="btn btn--ghost btn--sm" onClick={onClose}>
-                        <span className="material-symbols-outlined">close</span>
+                    <button type="button" className="btn btn--ghost btn--sm" onClick={onClose} aria-label="关闭免责声明">
+                        <span aria-hidden="true" className="material-symbols-outlined">close</span>
                     </button>
                 </div>
                 <div className="modal-body">
@@ -1343,146 +1617,94 @@ function DisclaimerDialog({ open, onClose }) {
     );
 }
 
-function Sidebar({ active, onOpenDisclaimer }) {
+const SETTINGS_SECTION_OPTIONS = [
+    { value: "email", label: UI_COPY.pages.settings.emailSection, icon: "mail" },
+    { value: "rules", label: UI_COPY.pages.settings.rulesSection, icon: "rule" },
+];
+
+function HomePage({ shell, theme, onToggleTheme, onOpenDisclaimer }) {
     const navigate = useNavigate();
-    const githubUrl = APP_VISIBLE_COPY.githubUrl;
-
-    return (
-        <aside className="app-sidebar">
-            <div className="sidebar-top">
-                <div className="sidebar-logo">IF</div>
-                <div>
-                    <p className="sidebar-title">{APP_BRAND.name}</p>
-                    <p className="sidebar-subtitle">{APP_VISIBLE_COPY.topSubtitle}</p>
-                </div>
-            </div>
-
-            <nav className="sidebar-nav">
-                {UI_COPY.navigation.map((item) => (
-                    <button
-                        key={item.key}
-                        type="button"
-                        className={joinClasses("sidebar-nav__item", active === item.key && "is-active")}
-                        onClick={() => navigate(item.path)}
-                    >
-                        <span className="sidebar-nav__item-icon material-symbols-outlined">{item.icon}</span>
-                        <span className="sidebar-nav__item-copy">
-                            <strong>{item.label}</strong>
-                            <span>{item.description}</span>
-                        </span>
-                    </button>
-                ))}
-            </nav>
-
-            <div className="sidebar-footer">
-                <button type="button" className="sidebar-foot-button" onClick={() => navigate("/")}>
-                    <span className="material-symbols-outlined">restart_alt</span>
-                    <span className="sidebar-foot-button__label">回到首页</span>
-                </button>
-                <button type="button" className="sidebar-foot-button" onClick={onOpenDisclaimer}>
-                    <span className="material-symbols-outlined">balance</span>
-                    <span className="sidebar-foot-button__label">免责声明</span>
-                </button>
-                <div className="sidebar-link-row">
-                    <button type="button" className="sidebar-foot-chip sidebar-foot-chip--single" onClick={() => openExternalUrl(githubUrl)}>
-                        <span className="material-symbols-outlined">code</span>
-                        <span>{APP_VISIBLE_COPY.githubLabel}</span>
-                    </button>
-                </div>
-                <div className="sidebar-brand">
-                    <span className="sidebar-brand__dot"></span>
-                    <div>
-                        <p className="sidebar-brand__name">{APP_VISIBLE_COPY.footerVersion}</p>
-                        <p className="sidebar-brand__sub">{APP_VISIBLE_COPY.footerStamp}</p>
-                    </div>
-                </div>
-            </div>
-        </aside>
-    );
-}
-
-function SettingsPage({ onOpenDisclaimer }) {
-    const navigate = useNavigate();
-    const [settings, setSettings] = useState(DEFAULT_SETTINGS);
-    const [runSettings, setRunSettings] = useState(DEFAULT_RUN_SETTINGS);
-    const [runContext, setRunContext] = useState({ controlled_run: false, explicit_run_context: false });
-    const [showAuthCode, setShowAuthCode] = useState(false);
-    const [pageError, setPageError] = useState("");
-    const [emailStatus, setEmailStatus] = useState({ status: "idle", message: "" });
-    const [bootstrapState, setBootstrapState] = useState("bootstrapping");
-    const [bootstrapError, setBootstrapError] = useState("");
+    const { settings, runSettings, runContext, updateSetting, setDateValue, persistNow } = shell;
     const [starting, setStarting] = useState(false);
-    const [rulesStatus, setRulesStatus] = useState({});
-    const saveTimerRef = useRef(null);
+    const [pageError, setPageError] = useState("");
+    const [progressState, setProgressState] = useState(DEFAULT_PROGRESS);
+    const [pollNonce, setPollNonce] = useState(0);
+    const [nowTick, setNowTick] = useState(Date.now());
+    const [lastUpdatedAt, setLastUpdatedAt] = useState(0);
+    const progressRef = useRef(null);
+    const progressStateRef = useRef(DEFAULT_PROGRESS);
+    const runStartedAtRef = useRef(0);
+    const runFinishedAtRef = useRef(0);
     const autostartTimerRef = useRef(null);
     const autostartTriggeredRef = useRef(false);
 
-    useEffect(() => {
-        let active = true;
-        (async () => {
-            try {
-                const state = await loadShellState();
-                if (!active) return;
-                setSettings(state.settings);
-                setRunSettings(state.runSettings);
-                setRunContext(state.runContext);
-                setRulesStatus(state.rulesStatus || {});
-                setBootstrapError("");
-                setBootstrapState("bootstrapped");
-            } catch (error) {
-                if (active) {
-                    setBootstrapError(error.message || "初始化设置失败，请重启应用。");
-                    setBootstrapState("bootstrap_failed");
-                }
-            }
-        })();
-        return () => {
-            active = false;
-            if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-            if (autostartTimerRef.current) clearTimeout(autostartTimerRef.current);
-        };
-    }, []);
-
-    useEffect(() => {
-        if (bootstrapState !== "bootstrapped") return undefined;
-        if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-        saveTimerRef.current = setTimeout(() => {
-            persistUserSettings(settings, runSettings, runContext).catch((error) => {
-                console.error("Failed to save settings", error);
-            });
-        }, 400);
-        return () => {
-            if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-        };
-    }, [bootstrapState, settings, runSettings, runContext]);
-
+    const copy = UI_COPY.pages.home;
     const controlledRun = hasExplicitQaRunContext(runContext);
-    const taskMode = normalizeTaskMode(settings.task_mode);
-    const isMailMode = taskMode === "mail";
-    const isFetchMode = taskMode === "fetch";
-    const isLocalMode = taskMode === "local";
+    const emailValue = String(settings.email || "").trim();
+    const companyValue = String(settings.company || "").trim();
     const localInputDir = String(settings.local_input_dir || "").trim();
     const localOutputDir = String(settings.local_output_dir || "").trim();
     const localSplitByCategory = settings.local_split_by_category !== false;
-    const activeTaskMode = TASK_MODE_OPTIONS.find((option) => option.value === taskMode) || TASK_MODE_OPTIONS[0];
-    const emailError = validateEmail(settings.email);
-    const emailDomain = emailDomainOf(settings.email);
-    const emailSupported = !emailError && !!emailDomain;
-    const dateError = validateDateRange(runSettings.date_from, runSettings.date_to);
-    const startButtonLabel = isLocalMode ? "开始整理" : isFetchMode ? "开始提取" : "开始处理";
-    const startButtonIcon = "play_arrow";
-    const canStart = isLocalMode
-        ? !!localInputDir
-        : !emailError
-            && !!settings.auth_code
-            && (isFetchMode || !!String(settings.company || "").trim())
-            && !!String(settings.save_path || "").trim()
-            && !dateError;
-    const rulesIssues = normalizeRuleIssues(rulesStatus && rulesStatus.issues);
-    const rulesLibraryAvailable = !!(rulesStatus && rulesStatus.library_available);
+    const taskOptions = useMemo(
+        () => TASK_MODE_OPTIONS.map((option) => ({
+            ...option,
+            icon: option.value === "fetch" ? "download" : option.value === "local" ? "folder_open" : "mail",
+            primary: option.value === "mail",
+        })),
+        []
+    );
 
     useEffect(() => {
-        if (bootstrapState !== "bootstrapped" || starting || autostartTriggeredRef.current || !shouldAutostartControlledRun(runContext)) return undefined;
+        progressStateRef.current = progressState;
+    }, [progressState]);
+
+    useEffect(() => {
+        let active = true;
+        let timer = null;
+        const tick = async () => {
+            try {
+                const data = await callApi("get_progress");
+                if (!active || !data) return;
+                const next = {
+                    ...DEFAULT_PROGRESS,
+                    ...data,
+                    stats: Object.assign({}, DEFAULT_PROGRESS.stats, data.stats || {}),
+                };
+                const previous = progressStateRef.current;
+                if (next.is_running && !previous.is_running) {
+                    if (!runStartedAtRef.current) runStartedAtRef.current = Date.now();
+                    runFinishedAtRef.current = 0;
+                }
+                if (!next.is_running && previous.is_running && ["completed", "failed"].includes(next.run_state)) {
+                    runFinishedAtRef.current = Date.now();
+                }
+                progressStateRef.current = next;
+                setProgressState(next);
+                setLastUpdatedAt(Date.now());
+            } catch (error) {
+                if (!active) return;
+                setProgressState((current) => ({ ...current, last_error: error.message || "获取进度失败。" }));
+            }
+            if (!active) return;
+            const delay = progressStateRef.current.is_running ? 1000 : 5000;
+            timer = setTimeout(tick, delay);
+        };
+        tick();
+        return () => {
+            active = false;
+            if (timer) clearTimeout(timer);
+        };
+    }, [pollNonce]);
+
+    useEffect(() => {
+        if (!progressState.is_running) return undefined;
+        setNowTick(Date.now());
+        const timer = setInterval(() => setNowTick(Date.now()), 1000);
+        return () => clearInterval(timer);
+    }, [progressState.is_running]);
+
+    useEffect(() => {
+        if (shell.bootstrapState !== "bootstrapped" || starting || autostartTriggeredRef.current || !shouldAutostartControlledRun(runContext)) return undefined;
         if (isControlledAutostartConsumed(runContext)) {
             autostartTriggeredRef.current = true;
             return undefined;
@@ -1491,21 +1713,20 @@ function SettingsPage({ onOpenDisclaimer }) {
         autostartTimerRef.current = setTimeout(() => {
             autostartTriggeredRef.current = true;
             markControlledAutostartConsumed(runContext);
-            handleStart();
+            startTask(normalizeTaskMode(settings.task_mode));
         }, delayMs);
         return () => {
             if (autostartTimerRef.current) clearTimeout(autostartTimerRef.current);
         };
-    }, [bootstrapState, runContext, starting, settings, runSettings]);
+    }, [shell.bootstrapState, runContext, starting, settings, runSettings]);
 
-    function updateSetting(key, value) {
-        setSettings((current) => ({ ...current, [key]: value }));
+    function updateSettingAndClear(key, value) {
+        updateSetting(key, value);
         setPageError("");
-        if (key === "email" || key === "auth_code") setEmailStatus({ status: "idle", message: "" });
     }
 
-    function setDateValue(field, value) {
-        setRunSettings((current) => ({ ...current, [field]: value, quick_range: "custom" }));
+    function setDateValueAndClear(field, value) {
+        setDateValue(field, value);
         setPageError("");
     }
 
@@ -1513,7 +1734,7 @@ function SettingsPage({ onOpenDisclaimer }) {
         if (controlledRun) return;
         try {
             const result = await callApi("choose_directory");
-            if (result && result.success && result.path) updateSetting("save_path", result.path);
+            if (result && result.success && result.path) updateSettingAndClear("save_path", result.path);
         } catch (error) {
             setPageError(error.message || "选择目录失败。");
         }
@@ -1522,7 +1743,7 @@ function SettingsPage({ onOpenDisclaimer }) {
     async function handleChooseInputDirectory() {
         try {
             const result = await callApi("choose_directory");
-            if (result && result.success && result.path) updateSetting("local_input_dir", result.path);
+            if (result && result.success && result.path) updateSettingAndClear("local_input_dir", result.path);
         } catch (error) {
             setPageError(error.message || "选择文件夹失败。");
         }
@@ -1532,7 +1753,7 @@ function SettingsPage({ onOpenDisclaimer }) {
         if (controlledRun) return;
         try {
             const result = await callApi("choose_directory");
-            if (result && result.success && result.path) updateSetting("local_output_dir", result.path);
+            if (result && result.success && result.path) updateSettingAndClear("local_output_dir", result.path);
         } catch (error) {
             setPageError(error.message || "选择目录失败。");
         }
@@ -1540,13 +1761,399 @@ function SettingsPage({ onOpenDisclaimer }) {
 
     function handleResetLocalOutputDirectory() {
         if (controlledRun) return;
-        updateSetting("local_output_dir", "");
+        updateSettingAndClear("local_output_dir", "");
+    }
+
+    function validateTask(mode) {
+        if (mode === "local") {
+            if (!localInputDir) return "请选择要整理的本地发票文件夹。";
+            return "";
+        }
+        const emailError = validateEmail(settings.email);
+        if (emailError) return emailError;
+        if (!settings.auth_code) return "请先在设置中填写邮箱授权码。";
+        if (!String(settings.save_path || "").trim()) return "请先选择输出目录。";
+        const dateError = validateDateRange(runSettings.date_from, runSettings.date_to);
+        if (dateError) return dateError;
+        if (mode === "mail" && !companyValue) return "请先在设置中填写公司名称。";
+        return "";
+    }
+
+    async function startTask(mode) {
+        if (starting) return;
+        if (progressStateRef.current.is_running) {
+            setPageError("任务正在运行，请等待结束或先停止当前任务。");
+            return;
+        }
+        const taskError = validateTask(mode);
+        if (taskError) {
+            setPageError(taskError);
+            return;
+        }
+        setPageError("");
+        setStarting(true);
+        try {
+            const nextSettings = { ...settings, task_mode: mode };
+            updateSetting("task_mode", mode);
+            await persistNow({ settings: nextSettings });
+            let result = null;
+            if (mode === "local") {
+                const inputDir = String(settings.local_input_dir || "").trim();
+                const outputDir = String(settings.local_output_dir || "").trim() || inputDir;
+                result = await callApi("start_local_organize", inputDir, outputDir, false, localSplitByCategory);
+            } else if (mode === "fetch") {
+                result = await callApi("start_fetch_only", settings.save_path, runSettings.date_from, runSettings.date_to, String(settings.email).trim(), settings.auth_code);
+            } else {
+                result = await callApi("start_processing", "", settings.save_path, runSettings.date_from, runSettings.date_to, String(settings.email).trim(), settings.auth_code);
+            }
+            if (!result || !result.success) {
+                setPageError((result && result.message) || "任务启动失败。");
+                return;
+            }
+            runStartedAtRef.current = Date.now();
+            runFinishedAtRef.current = 0;
+            setPollNonce((current) => current + 1);
+            if (progressRef.current && progressRef.current.scrollIntoView) {
+                progressRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
+            }
+        } catch (error) {
+            setPageError(error.message || "任务启动失败。");
+        } finally {
+            setStarting(false);
+        }
+    }
+
+    async function handleStop() {
+        if (!progressState.can_stop) return;
+        try {
+            const result = await callApi("stop_processing");
+            if (!result || !result.success) window.alert((result && result.message) || "停止指令发送失败。");
+        } catch (error) {
+            window.alert(error.message || "停止指令发送失败。");
+        }
+    }
+
+    const stats = progressState.stats || DEFAULT_PROGRESS.stats;
+    const logs = (progressState.logs || []).slice(-6);
+    const progressTaskMode = normalizeTaskMode(progressState.task_mode);
+    const progressModeOption = TASK_MODE_OPTIONS.find((option) => option.value === progressTaskMode) || TASK_MODE_OPTIONS[0];
+    const isLocalTask = progressTaskMode === "local";
+    const statusTone = progressState.run_state === "failed" ? "error" : progressState.run_state === "completed" ? "success" : progressState.is_running ? "info" : "neutral";
+    const statusLabel = progressState.run_state === "failed" ? "处理失败" : progressState.run_state === "completed" ? "处理完成" : progressState.is_running ? "正在运行" : copy.statusWaiting;
+    const processingDetail = progressState.stop_requested
+        ? copy.stopDetail
+        : progressTaskMode === "fetch"
+            ? copy.processingDetailFetch
+            : isLocalTask
+                ? copy.processingDetailLocal
+                : copy.processingDetail;
+    const startedAt = runStartedAtRef.current;
+    const endedAt = progressState.is_running ? nowTick : (runFinishedAtRef.current || nowTick);
+    const elapsedLabel = startedAt ? formatDuration((endedAt - startedAt) / 1000) : "—";
+    const hasRunData = progressState.is_running || progressState.run_state !== "idle" || logs.length > 0 || Number(progressState.progress || 0) > 0;
+    const canViewResults = !progressState.is_running && ["completed", "failed"].includes(progressState.run_state);
+    const activeTaskMode = normalizeTaskMode(settings.task_mode);
+    const activeTaskOption = taskOptions.find((option) => option.value === activeTaskMode) || taskOptions[0];
+
+    return (
+        <AppShell
+            active="home"
+            theme={theme}
+            onToggleTheme={onToggleTheme}
+            onOpenDisclaimer={onOpenDisclaimer}
+            footerLeft={<p className="footer-meta">{controlledRun ? copy.controlledNotice : copy.footerMeta}</p>}
+            footerRight={canViewResults
+                ? <button type="button" className="btn btn--secondary btn--sm" onClick={() => navigate("/results")}><span aria-hidden="true" className="material-symbols-outlined">arrow_forward</span><span>{copy.viewResults}</span></button>
+                : null}
+        >
+            <div className="page-wrap page-wrap--home">
+                <PageHeader
+                    title={copy.title}
+                    description={copy.description}
+                    badge={controlledRun ? <StatusPill tone="info">受控前端复跑</StatusPill> : null}
+                />
+                {pageError ? <NoticeBox tone="error">{pageError}</NoticeBox> : null}
+                {controlledRun ? <p className="page-inline-note">{copy.controlledNotice}</p> : null}
+
+                <section className="surface-card">
+                    <div className="card-stack card-stack--compact">
+                        <div className="mode-picker" role="radiogroup" aria-label={copy.actionsTitle} aria-describedby="task-mode-help">
+                            {taskOptions.map((option) => (
+                                <button
+                                    key={option.value}
+                                    type="button"
+                                    role="radio"
+                                    aria-checked={activeTaskMode === option.value}
+                                    className={joinClasses("mode-option", activeTaskMode === option.value && "is-selected")}
+                                    onClick={() => updateSettingAndClear("task_mode", option.value)}
+                                    disabled={starting || progressState.is_running}
+                                >
+                                    <span className="mode-option__label">{option.label}</span>
+                                </button>
+                            ))}
+                        </div>
+                        <p className="field-help" id="task-mode-help">{activeTaskOption.description}</p>
+                        <div className="run-band__actions">
+                            <button
+                                type="button"
+                                className="btn btn--primary"
+                                onClick={() => startTask(activeTaskMode)}
+                                disabled={starting || progressState.is_running}
+                            >
+                                <span aria-hidden="true" className="material-symbols-outlined">play_arrow</span>
+                                <span>{starting ? "启动中..." : copy.actionsTitle}</span>
+                            </button>
+                        </div>
+                    </div>
+                </section>
+
+                <section className="surface-card" ref={progressRef}>
+                    <SectionHeader
+                        icon="monitor_heart"
+                        title={copy.progressTitle}
+                        indicator={<StatusPill tone={statusTone}>{statusLabel}</StatusPill>}
+                    />
+                    <div className="run-progress" aria-live="polite">
+                        {hasRunData ? (
+                            <>
+                                <div className="run-progress__head">
+                                    <div>
+                                        <p className="progress-kicker">{progressModeOption.label} · {copy.currentOperation}</p>
+                                        <h2 className="progress-title">{progressState.status_text || copy.statusWaiting}</h2>
+                                        <p className="progress-meta">{processingDetail}</p>
+                                    </div>
+                                    <div className="progress-value"><strong className="u-tabular">{progressState.progress}%</strong><span>{copy.progressLabel}</span></div>
+                                </div>
+                                <div
+                                    className="progress-track"
+                                    role="progressbar"
+                                    aria-label={copy.progressLabel}
+                                    aria-valuemin={0}
+                                    aria-valuemax={100}
+                                    aria-valuenow={Math.max(0, Math.min(100, Number(progressState.progress) || 0))}
+                                ><div className="progress-fill" style={{ width: `${progressState.progress}%` }}></div></div>
+                                <div className="run-progress__meta">
+                                    <span><strong>{copy.startTimeLabel}</strong>{formatClock(startedAt)}</span>
+                                    <span><strong>{copy.elapsedLabel}</strong>{elapsedLabel}</span>
+                                    <span><strong>{copy.updatedLabel}</strong>{formatClock(lastUpdatedAt)}</span>
+                                </div>
+                                <div className="run-stats">
+                                    <div className="summary-item summary-item--accent">
+                                        <div className="summary-item__copy">
+                                            <p className="summary-item__label">{isLocalTask ? copy.scanFilesLabel : copy.scanEmailsLabel}</p>
+                                            <p className="summary-item__value u-tabular">{stats.emails || 0}</p>
+                                        </div>
+                                    </div>
+                                    <div className="summary-item summary-item--success">
+                                        <div className="summary-item__copy">
+                                            <p className="summary-item__label">已识别发票</p>
+                                            <p className="summary-item__value u-tabular">{stats.invoices || 0}</p>
+                                        </div>
+                                    </div>
+                                    <div className="summary-item summary-item--warning">
+                                        <div className="summary-item__copy">
+                                            <p className="summary-item__label">异常处理</p>
+                                            <p className="summary-item__value u-tabular">{stats.errors || 0}</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                {progressState.last_error && progressState.run_state === "failed" ? <NoticeBox tone="error">{progressState.last_error}</NoticeBox> : null}
+                                {progressState.quota_exhausted && progressState.quota_message ? <NoticeBox tone="warning">{progressState.quota_message}</NoticeBox> : null}
+                                {progressState.stop_requested && progressState.run_state !== "failed" ? <NoticeBox tone="warning">{copy.stopNotice}</NoticeBox> : null}
+                                <div className="run-log">
+                                    <div className="run-log__head"><span aria-hidden="true" className="material-symbols-outlined">info</span><span>{copy.runInfoTitle}</span></div>
+                                    {logs.length > 0 ? logs.map((log, index) => (
+                                        <div key={`${log.time || "log"}-${index}`} className="run-log__line">
+                                            <span className="run-log__time">{safeText(log.time, "[实时]")}</span>
+                                            <span className={resolveLogToneClass(log)}>{resolveLogKindLabel(log)}</span>
+                                            <span className="run-log__text">{safeText(log.msg, "-")}</span>
+                                        </div>
+                                    )) : <p className="run-log__empty">{copy.runInfoEmpty}</p>}
+                                </div>
+                                <div className="footer-cluster">
+                                    {progressState.is_running || progressState.can_stop ? (
+                                        <button type="button" className="btn btn--danger" onClick={handleStop} disabled={!progressState.can_stop}>
+                                            <span aria-hidden="true" className="material-symbols-outlined">{progressState.stop_requested ? "sync" : "close"}</span>
+                                            <span>{progressState.stop_requested ? copy.stopping : copy.stop}</span>
+                                        </button>
+                                    ) : null}
+                                    {canViewResults ? (
+                                        <button type="button" className="btn btn--secondary" onClick={() => navigate("/results")}>
+                                            <span aria-hidden="true" className="material-symbols-outlined">arrow_forward</span>
+                                            <span>{copy.viewResults}</span>
+                                        </button>
+                                    ) : null}
+                                </div>
+                            </>
+                        ) : (
+                            <div className="run-empty">
+                                <span aria-hidden="true" className="material-symbols-outlined">play_circle</span>
+                                <p>{copy.runEmpty}</p>
+                            </div>
+                        )}
+                    </div>
+                </section>
+
+                <div className="settings-grid settings-grid--fit">
+                    <div className="settings-column">
+                        <section className="surface-card">
+                            <SectionHeader
+                                icon="alternate_email"
+                                title="邮箱与公司"
+                            />
+                            <div className="card-stack card-stack--compact">
+                                <div className="field-block">
+                                    <label className="field-label" htmlFor="field-2">{copy.emailLabel}</label>
+                                    <div className="field-shell field-shell--readonly">
+                                        <span aria-hidden="true" className="field-icon material-symbols-outlined">alternate_email</span>
+                                        <input id="field-2" type="text" readOnly className="field-input u-mono" value={emailValue} placeholder={copy.unconfigured} title={emailValue || copy.unconfigured} />
+                                    </div>
+                                    {!emailValue ? <p className="field-help field-help--subtle">{copy.unconfigured}</p> : null}
+                                </div>
+                                <div className="field-block">
+                                    <label className="field-label" htmlFor="field-3">{copy.companyLabel}</label>
+                                    <div className="field-shell field-shell--readonly">
+                                        <span aria-hidden="true" className="field-icon material-symbols-outlined">business</span>
+                                        <input id="field-3" type="text" readOnly className="field-input" value={companyValue} placeholder={copy.unconfigured} title={companyValue || copy.unconfigured} />
+                                    </div>
+                                    {!companyValue ? <p className="field-help field-help--subtle">{copy.unconfigured}</p> : null}
+                                </div>
+                                <p className="field-help">{copy.readonlyHint}</p>
+                                <div className="footer-cluster">
+                                    <button type="button" className="btn btn--secondary btn--sm" onClick={() => navigate("/settings")}>
+                                        <span aria-hidden="true" className="material-symbols-outlined">settings</span>
+                                        <span>{copy.goSettings}</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </section>
+
+                        <section className="surface-card">
+                            <SectionHeader
+                                icon="schedule"
+                                title={copy.dateTitle}
+                                indicator={controlledRun ? <StatusPill tone="info" icon="lock">已锁定</StatusPill> : null}
+                            />
+                            <div className="card-stack card-stack--compact">
+                                <div className="field-row field-row--dates settings-date-row">
+                                    <DateField label="开始日期" id="run-date-from" value={runSettings.date_from} onChange={(value) => setDateValueAndClear("date_from", value)} disabled={controlledRun} />
+                                    <span className="field-separator">—</span>
+                                    <DateField label="结束日期" id="run-date-to" value={runSettings.date_to} onChange={(value) => setDateValueAndClear("date_to", value)} disabled={controlledRun} />
+                                </div>
+                                <p className="field-help field-help--subtle">{copy.dateHint}</p>
+                            </div>
+                        </section>
+                    </div>
+
+                    <div className="settings-column">
+                        <section className="surface-card">
+                            <SectionHeader
+                                icon="folder_open"
+                                title={copy.outputTitle}
+                                indicator={controlledRun ? <StatusPill tone="info">已锁定</StatusPill> : null}
+                            />
+                            <div className="card-stack card-stack--compact">
+                                <div className={joinClasses("field-shell", "field-shell--readonly", !settings.save_path && "field-shell--error")}>
+                                    <span aria-hidden="true" className="field-icon material-symbols-outlined">folder</span>
+                                    <input type="text" readOnly aria-label={copy.outputTitle} className="field-input u-mono" value={settings.save_path || ""} placeholder="请选择本地输出目录" title={settings.save_path || ""} />
+                                </div>
+                                <div className="footer-cluster">
+                                    <button type="button" className="btn btn--secondary btn--sm" onClick={handleChooseDirectory} disabled={controlledRun}>
+                                        <span aria-hidden="true" className="material-symbols-outlined">folder_open</span>
+                                        <span>{controlledRun ? copy.pathLocked : copy.browseDirectory}</span>
+                                    </button>
+                                </div>
+                                <p className="field-help">{controlledRun ? copy.controlledNotice : copy.outputHint}</p>
+                            </div>
+                        </section>
+
+                        <section className="surface-card">
+                            <SectionHeader
+                                icon="folder"
+                                title={copy.localTitle}
+                                indicator={<StatusPill tone={localInputDir ? "success" : "warning"} icon="folder">{localInputDir ? "已选择" : "待选择"}</StatusPill>}
+                            />
+                            <div className="card-stack card-stack--compact">
+                                <div className="field-block">
+                                    <label className="field-label" htmlFor="field-4">{copy.localInputLabel}</label>
+                                    <div className={joinClasses("field-shell", "field-shell--readonly", !localInputDir && "field-shell--error")}>
+                                        <span aria-hidden="true" className="field-icon material-symbols-outlined">folder</span>
+                                        <input id="field-4" type="text" readOnly className="field-input u-mono" value={localInputDir} placeholder="请选择要整理的本地文件夹" title={localInputDir} />
+                                    </div>
+                                    <div className="footer-cluster">
+                                        <button type="button" className="btn btn--secondary btn--sm" onClick={handleChooseInputDirectory}>
+                                            <span aria-hidden="true" className="material-symbols-outlined">folder_open</span>
+                                            <span>{copy.chooseFolder}</span>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div className="field-block">
+                                    <label className="field-label" htmlFor="field-5">{copy.localOutputLabel}</label>
+                                    <div className="field-shell field-shell--readonly">
+                                        <span aria-hidden="true" className="field-icon material-symbols-outlined">drive_file_move</span>
+                                        <input id="field-5" type="text" readOnly className="field-input u-mono" value={localOutputDir || localInputDir} placeholder="默认同发票文件夹" title={localOutputDir || localInputDir} />
+                                    </div>
+                                    <div className="footer-cluster">
+                                        <button type="button" className="btn btn--secondary btn--sm" onClick={handleChooseLocalOutputDirectory} disabled={controlledRun}>
+                                            <span aria-hidden="true" className="material-symbols-outlined">folder_open</span>
+                                            <span>{copy.chooseOther}</span>
+                                        </button>
+                                        {localOutputDir && !controlledRun ? (
+                                            <button type="button" className="btn btn--ghost btn--sm" onClick={handleResetLocalOutputDirectory}>
+                                                <span aria-hidden="true" className="material-symbols-outlined">undo</span>
+                                                <span>{copy.resetLocalOutput}</span>
+                                            </button>
+                                        ) : null}
+                                    </div>
+                                </div>
+                                <label className="toggle-row">
+                                    <input type="checkbox" checked={localSplitByCategory} onChange={(event) => updateSettingAndClear("local_split_by_category", event.target.checked)} disabled={controlledRun} />
+                                    <span>{copy.splitByCategory}</span>
+                                </label>
+                                <p className="field-help">{localSplitByCategory ? copy.splitHelpOn : copy.splitHelpOff}</p>
+                                <p className="field-help field-help--subtle">{copy.localHint}</p>
+                            </div>
+                        </section>
+                    </div>
+                </div>
+
+            </div>
+        </AppShell>
+    );
+}
+
+function SettingsPage({ shell, theme, onToggleTheme, onOpenDisclaimer }) {
+    const location = useLocation();
+    const { settings, runContext, rulesStatus, updateSetting, persistNow } = shell;
+    const [showAuthCode, setShowAuthCode] = useState(false);
+    const [pageError, setPageError] = useState("");
+    const [emailStatus, setEmailStatus] = useState({ status: "idle", message: "" });
+    const initialSection = location && location.state && location.state.settingsSection === "rules" ? "rules" : "email";
+    const [section, setSection] = useState(initialSection);
+
+    const copy = UI_COPY.pages.settings;
+    const controlledRun = hasExplicitQaRunContext(runContext);
+    const emailError = validateEmail(settings.email);
+    const emailDomain = emailDomainOf(settings.email);
+    const emailSupported = !emailError && !!emailDomain;
+    const rulesIssues = normalizeRuleIssues(rulesStatus && rulesStatus.issues);
+    const rulesLibraryAvailable = !!(rulesStatus && rulesStatus.library_available);
+
+    useEffect(() => {
+        const requested = location && location.state && location.state.settingsSection;
+        if (requested === "rules" || requested === "email") setSection(requested);
+    }, [location]);
+
+    function updateSettingAndClear(key, value) {
+        updateSetting(key, value);
+        setPageError("");
+        if (key === "email" || key === "auth_code") setEmailStatus({ status: "idle", message: "" });
     }
 
     async function handleTestConnection() {
-        const emailError = validateEmail(settings.email);
-        if (emailError) {
-            setEmailStatus({ status: "error", message: emailError });
+        const emailValidation = validateEmail(settings.email);
+        if (emailValidation) {
+            setEmailStatus({ status: "error", message: emailValidation });
             return;
         }
         if (!settings.auth_code) {
@@ -1566,394 +2173,134 @@ function SettingsPage({ onOpenDisclaimer }) {
         }
     }
 
-    async function handleStart() {
-        if (isLocalMode) {
-            const inputDir = String(settings.local_input_dir || "").trim();
-            if (!inputDir) return setPageError("请选择要整理的本地文件夹。");
-            const outputDir = String(settings.local_output_dir || "").trim() || inputDir;
-            setStarting(true);
+    async function handleSectionChange(nextSection) {
+        if (nextSection === section) return;
+        if (nextSection === "rules") {
             try {
-                await persistUserSettings(settings, runSettings, runContext);
-                const result = await callApi("start_local_organize", inputDir, outputDir, false, localSplitByCategory);
-                if (!result || !result.success) {
-                    setPageError(result && result.message ? result.message : "任务启动失败。");
-                    return;
-                }
-                navigate("/processing");
+                await persistNow();
             } catch (error) {
-                setPageError(error.message || "任务启动失败。");
-            } finally {
-                setStarting(false);
+                console.error("Failed to save settings before loading rules", error);
             }
-            return;
         }
-        const emailError = validateEmail(settings.email);
-        if (emailError) return setPageError(emailError);
-        if (!settings.auth_code) return setPageError("请输入邮箱授权码。");
-        if (isMailMode && (!settings.company || !settings.company.trim())) return setPageError("请填写公司名称。");
-        if (!settings.save_path) return setPageError("请选择输出目录。");
-        if (dateError) return setPageError(dateError);
-        setStarting(true);
-        try {
-            await persistUserSettings(settings, runSettings, runContext);
-            const result = isFetchMode
-                ? await callApi("start_fetch_only", settings.save_path, runSettings.date_from, runSettings.date_to, String(settings.email).trim(), settings.auth_code)
-                : await callApi("start_processing", "", settings.save_path, runSettings.date_from, runSettings.date_to, String(settings.email).trim(), settings.auth_code);
-            if (!result || !result.success) {
-                setPageError(result && result.message ? result.message : "任务启动失败。");
-                return;
-            }
-            navigate("/processing");
-        } catch (error) {
-            setPageError(error.message || "任务启动失败。");
-        } finally {
-            setStarting(false);
-        }
-    }
-    if (bootstrapState === "bootstrapping") {
-        return <BootstrapStatePage active="settings" onOpenDisclaimer={onOpenDisclaimer} eyebrow={UI_COPY.pages.settings.eyebrow} title={UI_COPY.pages.settings.bootstrapTitle} description={UI_COPY.pages.settings.bootstrapDescription} tone="info" message={UI_COPY.pages.settings.bootstrapMessage} footerText={UI_COPY.pages.settings.footerText} />;
-    }
-    if (bootstrapState === "bootstrap_failed") {
-        return <BootstrapStatePage active="settings" onOpenDisclaimer={onOpenDisclaimer} eyebrow={UI_COPY.pages.settings.eyebrow} title={UI_COPY.pages.settings.bootstrapTitle} description={UI_COPY.pages.settings.errorDescription} tone="error" message={bootstrapError || "初始化设置失败，请重启应用。"} footerText={UI_COPY.pages.settings.footerText} />;
+        setSection(nextSection);
     }
 
     return (
         <AppShell
             active="settings"
+            theme={theme}
+            onToggleTheme={onToggleTheme}
             onOpenDisclaimer={onOpenDisclaimer}
             footerLeft={
                 <label className="toggle-row">
-                    <input type="checkbox" checked={settings.remember_settings !== false} onChange={(event) => updateSetting("remember_settings", event.target.checked)} />
-                    <span>自动记住当前配置</span>
+                    <input type="checkbox" checked={settings.remember_settings !== false} onChange={(event) => updateSettingAndClear("remember_settings", event.target.checked)} />
+                    <span>{copy.remember}</span>
                 </label>
             }
             footerRight={
-                <button type="button" className="btn btn--primary" onClick={handleStart} disabled={!canStart || starting}>
-                    <span className="material-symbols-outlined">{starting ? "sync" : startButtonIcon}</span>
-                    <span>{starting ? "启动中..." : startButtonLabel}</span>
-                </button>
+                <StatusPill tone={controlledRun ? "info" : "neutral"} icon={controlledRun ? "lock" : "save"}>
+                    {controlledRun ? "受控复跑" : copy.savedHint}
+                </StatusPill>
             }
         >
             <div className="page-wrap page-wrap--settings">
-                <PageHeader eyebrow={UI_COPY.pages.settings.eyebrow} title={UI_COPY.pages.settings.title} badge={controlledRun ? <StatusPill tone="info" icon="lock_clock">受控前端复跑</StatusPill> : null} />
+                <PageHeader title={copy.title} description={copy.description} />
                 {pageError ? <NoticeBox tone="error">{pageError}</NoticeBox> : null}
-                {controlledRun ? <p className="page-inline-note">{UI_COPY.pages.settings.controlledNotice}</p> : null}
+                {controlledRun ? <p className="page-inline-note">{copy.controlledNotice}</p> : null}
 
-                <section className="surface-card">
-                    <SectionHeader
-                        icon="category"
-                        title="任务类型"
-                        indicator={<StatusPill tone="info" icon={isLocalMode ? "offline_bolt" : isFetchMode ? "inbox" : "mail"}>{activeTaskMode.badge}</StatusPill>}
-                    />
-                    <div className="card-stack card-stack--compact">
-                        <div className="quick-range" role="group" aria-label="任务类型">
-                            {TASK_MODE_OPTIONS.map((option) => (
-                                <button
-                                    key={option.value}
-                                    type="button"
-                                    className={joinClasses("quick-chip", taskMode === option.value && "is-active")}
-                                    aria-pressed={taskMode === option.value}
-                                    onClick={() => updateSetting("task_mode", option.value)}
-                                >
-                                    {option.label}
-                                </button>
-                            ))}
-                        </div>
-                        <p className="field-help">{activeTaskMode.description}</p>
-                    </div>
-                </section>
+                <div className="settings-tabbar" role="tablist" aria-label="设置分区">
+                    {SETTINGS_SECTION_OPTIONS.map((option) => (
+                        <button
+                            key={option.value}
+                            type="button"
+                            role="tab"
+                            aria-selected={section === option.value}
+                            className={joinClasses("quick-chip", "settings-tab", section === option.value && "is-active")}
+                            onClick={() => handleSectionChange(option.value)}
+                        >
+                            <span aria-hidden="true" className="material-symbols-outlined">{option.icon}</span>
+                            <span>{option.label}</span>
+                            {option.value === "rules" && rulesIssues.length > 0 ? <span className="settings-tab__badge">{rulesIssues.length}</span> : null}
+                        </button>
+                    ))}
+                </div>
 
-                <div className="settings-grid settings-grid--fit">
-                    <div className="settings-column">
-                        {isLocalMode ? (
+                <div className={joinClasses("settings-section", section !== "email" && "is-hidden")} hidden={section !== "email"}>
+                    <div className="settings-grid settings-grid--fit">
+                        <div className="settings-column">
                             <section className="surface-card">
-                                <SectionHeader icon="folder_open" title="发票文件夹" indicator={<StatusPill tone={settings.local_input_dir ? "success" : "warning"} icon="folder">{settings.local_input_dir ? "已选择" : "待选择"}</StatusPill>} />
+                                <SectionHeader icon="mail" title={copy.emailCardTitle} indicator={<StatusPill tone={emailSupported ? "success" : "warning"} icon="mail">{emailSupported ? "域名可用" : "待确认"}</StatusPill>} />
                                 <div className="card-stack card-stack--compact">
-                                    <div className={joinClasses("field-shell", "field-shell--readonly", !settings.local_input_dir && "field-shell--error")}>
-                                        <span className="field-icon material-symbols-outlined">folder</span>
-                                        <input type="text" readOnly className="field-input u-mono" value={settings.local_input_dir || ""} placeholder="请选择要整理的本地文件夹" title={settings.local_input_dir || ""} />
-                                    </div>
-                                    <div className="footer-cluster">
-                                        <button type="button" className="btn btn--secondary btn--sm" onClick={handleChooseInputDirectory}>
-                                            <span className="material-symbols-outlined">folder_open</span>
-                                            <span>选择文件夹</span>
-                                        </button>
-                                    </div>
-                                    <label className="toggle-row">
-                                        <input type="checkbox" checked={localSplitByCategory} onChange={(event) => updateSetting("local_split_by_category", event.target.checked)} disabled={controlledRun} />
-                                        <span>按分类分目录</span>
-                                    </label>
-                                    <p className="field-help">{localSplitByCategory ? "按发票类型建立 餐饮/充电 等子目录归档；原件按原文件名原样保留在「整理前发票」文件夹（不改名、不分月份），重复件与待人工复核单独存放。" : "不建分类子目录：整理后的发票直接放在该文件夹里，文件名仍带类型；原件按原文件名原样保留在「整理前发票」文件夹（不改名、不分月份），重复件与待人工复核单独存放。"}</p>
-                                    <div className="footer-cluster">
-                                        <button type="button" className="btn btn--primary btn--sm" onClick={handleStart} disabled={!canStart || starting}>
-                                            <span className="material-symbols-outlined">{starting ? "sync" : "play_arrow"}</span>
-                                            <span>{starting ? "启动中..." : "整理进目录"}</span>
-                                        </button>
-                                    </div>
-                                    <p className="field-help">点击「整理进目录」或底部「开始整理」后，发票会在该文件夹内按当前选项离线识别并归档；原件按原文件名原样保留在「整理前发票」文件夹（不改名、不分月份）。</p>
-                                </div>
-                            </section>
-                        ) : (
-                            <section className="surface-card">
-                                <SectionHeader icon="mail" title="邮箱源配置" indicator={<StatusPill tone="warning" icon="mail">待确认</StatusPill>} />
-                            <div className="card-stack card-stack--compact">
-                                <div className="field-block">
-                                    <label className="field-label">邮箱地址</label>
-                                    <div className="field-shell">
-                                        <span className="field-icon material-symbols-outlined">alternate_email</span>
-                                        <input type="text" className="field-input" placeholder="name@qq.com" value={settings.email} onChange={(event) => updateSetting("email", event.target.value)} />
-                                    </div>
-                                    <p className="field-help">
-                                        {emailSupported
-                                            ? `${emailDomain} 属于受支持的邮箱域名。`
-                                            : "支持 QQ、网易 163/126/188/yeah、88、腾讯企业邮、阿里邮箱、新浪、搜狐、21CN、263、139/189 及 Gmail、iCloud、Yahoo 等常用邮箱；国际邮箱请使用应用专用密码。"}
-                                    </p>
-                                </div>
-
-                                <div className="field-block">
-                                    <label className="field-label">授权码</label>
-                                    <div className="field-shell">
-                                        <span className="field-icon material-symbols-outlined">key</span>
-                                        <input type={showAuthCode ? "text" : "password"} className="field-input u-mono" placeholder="请输入邮箱授权码" value={settings.auth_code} onChange={(event) => updateSetting("auth_code", event.target.value)} />
-                                        <button type="button" className="field-mask-toggle" onClick={() => setShowAuthCode((current) => !current)}>
-                                            <span className="material-symbols-outlined">{showAuthCode ? "visibility" : "visibility_off"}</span>
-                                        </button>
-                                    </div>
-                                    <div className="footer-cluster">
-                                        <button type="button" className="btn btn--secondary btn--sm" onClick={handleTestConnection} disabled={emailStatus.status === "testing"}>
-                                            <span className="material-symbols-outlined">{emailStatus.status === "testing" ? "sync" : "link"}</span>
-                                            <span>{emailStatus.status === "testing" ? "测试中..." : "测试邮箱连接"}</span>
-                                        </button>
-                                    </div>
-                                    {emailStatus.status !== "idle" ? <InlineStatus tone={toneFromAsyncStatus(emailStatus.status)}>{emailStatus.message}</InlineStatus> : null}
-                                </div>
-                            </div>
-                            </section>
-                        )}
-
-                        <section className="surface-card">
-                            <SectionHeader icon="folder_open" title="输出目录设置" indicator={controlledRun ? <StatusPill tone="info" icon="lock">已锁定</StatusPill> : isLocalMode ? "默认同发票文件夹" : isFetchMode ? "保存提取附件" : "保存原件与结果"} />
-                            <div className="card-stack card-stack--compact">
-                                <div className={joinClasses("field-shell", "field-shell--readonly", isLocalMode ? !localInputDir && "field-shell--error" : !settings.save_path && "field-shell--error")}>
-                                    <span className="field-icon material-symbols-outlined">folder</span>
-                                    <input type="text" readOnly className="field-input u-mono" value={isLocalMode ? (localOutputDir || localInputDir) : settings.save_path} placeholder={isLocalMode ? "默认与发票文件夹相同" : "请选择本地输出目录"} title={isLocalMode ? (localOutputDir || localInputDir) : settings.save_path} />
-                                </div>
-                                <div className="footer-cluster">
-                                    <button type="button" className="btn btn--secondary btn--sm" onClick={isLocalMode ? handleChooseLocalOutputDirectory : handleChooseDirectory} disabled={controlledRun}>
-                                        <span className="material-symbols-outlined">folder_open</span>
-                                        <span>{controlledRun ? "路径已锁定" : "浏览目录"}</span>
-                                    </button>
-                                    {isLocalMode && !controlledRun && localOutputDir ? (
-                                        <button type="button" className="btn btn--ghost btn--sm" onClick={handleResetLocalOutputDirectory}>
-                                            <span className="material-symbols-outlined">undo</span>
-                                            <span>恢复默认（发票文件夹）</span>
-                                        </button>
-                                    ) : null}
-                                </div>
-                                <p className="field-help">{controlledRun ? "当前为受控前端复跑，本轮输出目录由诊断上下文锁定。" : isLocalMode ? (localSplitByCategory ? "默认与发票文件夹相同：分类文件、「整理前发票」中的原件与结果明细都会写入该文件夹；改为其他目录时仅复制归档副本，原件留在发票文件夹不动。" : "默认与发票文件夹相同：整理后的文件、「整理前发票」中的原件与结果明细都会写入该文件夹；改为其他目录时仅复制归档副本，原件留在发票文件夹不动。") : isFetchMode ? "邮箱附件会保存到该目录下的 inbox 文件夹，并生成清单文件。" : "系统会在此目录下按发票类型保存归档文件，并生成待人工复核目录。"}</p>
-                            </div>
-                        </section>
-                    </div>
-
-                    <div className="settings-column">
-                        <section className="surface-card">
-                            <SectionHeader icon="memory" title="本地识别引擎" indicator={<StatusPill tone="success" icon="offline_bolt">离线运行</StatusPill>} />
-                            <div className="card-stack card-stack--compact">
-                                <div className="engine-list">
-                                    {LOCAL_ENGINE_ITEMS.map((item) => (
-                                        <div className="engine-item" key={item.key}>
-                                            <span className="engine-item__icon material-symbols-outlined">{item.icon}</span>
-                                            <div className="engine-item__copy">
-                                                <strong>{item.title}</strong>
-                                                <span>{item.description}</span>
-                                            </div>
-                                            <span className="engine-item__tag">内置</span>
+                                    <div className="field-block">
+                                        <label className="field-label" htmlFor="field-6">邮箱地址</label>
+                                        <div className="field-shell">
+                                            <span aria-hidden="true" className="field-icon material-symbols-outlined">alternate_email</span>
+                                            <input id="field-6" type="text" className="field-input" placeholder="name@qq.com" value={settings.email} onChange={(event) => updateSettingAndClear("email", event.target.value)} />
                                         </div>
-                                    ))}
-                                </div>
-                                <p className="field-help">无需联网、无需填写密钥，支持电子发票、OFD 版式文件与扫描件的本地解析，票据内容不会上传。</p>
-                            </div>
-                        </section>
-
-                        <section className="surface-card">
-                            <SectionHeader
-                                icon="rule"
-                                title="费用归类规则"
-                                indicator={rulesIssues.length > 0
-                                    ? <StatusPill tone="warning" icon="warning">{`${rulesIssues.length} 条提示`}</StatusPill>
-                                    : <StatusPill tone="success" icon="rule">{rulesLibraryAvailable ? "含发票库规则" : "使用全局规则"}</StatusPill>}
-                            />
-                            <div className="card-stack card-stack--compact">
-                                <p className="field-help">按目标票种、关键词与金额范围生成归档文件夹；保存后的规则在下一次整理时生效。</p>
-                                {rulesIssues.length > 0 ? (
-                                    <NoticeBox tone="warning">
-                                        <div className="rule-issues">
-                                            <p className="rule-issues__title">归类规则配置需要确认</p>
-                                            <ul className="rule-issue-list">
-                                                {rulesIssues.slice(0, 3).map((issue, index) => (
-                                                    <li key={`${issue.text}-${index}`} className="rule-issue-item">{issue.text}</li>
-                                                ))}
-                                            </ul>
-                                            <p className="field-help">请进入归类规则页修正，或在规则目录中直接编辑规则文件。</p>
-                                        </div>
-                                    </NoticeBox>
-                                ) : null}
-                                <div className="footer-cluster">
-                                    <button type="button" className="btn btn--secondary btn--sm" onClick={() => navigate("/rules")}>
-                                        <span className="material-symbols-outlined">rule</span>
-                                        <span>管理归类规则</span>
-                                    </button>
-                                </div>
-                            </div>
-                        </section>
-
-                        {isLocalMode ? null : (
-                            <section className="surface-card surface-card--compact settings-date-card">
-                                <SectionHeader icon="calendar_month" title="提取时间范围" indicator={controlledRun ? <StatusPill tone="info" icon="lock">已锁定</StatusPill> : null} />
-                            <div className="card-stack card-stack--compact">
-                                <div className="field-row field-row--dates settings-date-row">
-                                    <DateField label="开始日期" value={runSettings.date_from} onChange={(value) => setDateValue("date_from", value)} disabled={controlledRun} />
-                                    <span className="field-separator">—</span>
-                                    <DateField label="结束日期" value={runSettings.date_to} onChange={(value) => setDateValue("date_to", value)} disabled={controlledRun} />
-                                </div>
-                                {controlledRun ? <p className="field-help field-help--subtle">当前为受控复跑，日期范围已按上下文锁定。</p> : <p className="field-help field-help--subtle">确认起止日期后可直接开始提取，本页不再进入独立确认流程。</p>}
-                            </div>
-                            </section>
-                        )}
-
-                        {isMailMode ? (
-                            <section className="surface-card">
-                                <SectionHeader icon="business" title="公司配置" indicator={<StatusPill tone={settings.company && settings.company.trim() ? "success" : "warning"} icon="apartment">购买方校验</StatusPill>} />
-                            <div className="card-stack card-stack--compact">
-                                <div className="field-block">
-                                    <label className="field-label">公司 <span className="field-required">*</span></label>
-                                    <div className={joinClasses("field-shell", !settings.company || !settings.company.trim() ? "field-shell--error" : "") }>
-                                        <span className="field-icon material-symbols-outlined">domain</span>
-                                        <input type="text" className="field-input" placeholder="填写用于匹配购买方的公司名称" value={settings.company || ""} onChange={(event) => updateSetting("company", event.target.value)} />
+                                        <p className="field-help">
+                                            {emailSupported
+                                                ? `${emailDomain} 属于受支持的邮箱域名。`
+                                                : "支持 QQ、网易 163/126/188/yeah、88、腾讯企业邮、阿里邮箱、新浪、搜狐、21CN、263、139/189 及 Gmail、iCloud、Yahoo 等常用邮箱；国际邮箱请使用应用专用密码。"}
+                                        </p>
                                     </div>
-                                    {!settings.company || !settings.company.trim()
-                                        ? <p className="field-help field-help--subtle">填写公司名称后按购买方字段匹配。</p>
-                                        : <p className="field-help field-help--subtle">按购买方包含“{settings.company.trim()}”进行匹配；明确不匹配的票据会单独进入“非目标公司发票”。</p>}
+                                    <div className="field-block">
+                                        <label className="field-label" htmlFor="field-7">授权码</label>
+                                        <div className="field-shell">
+                                            <span aria-hidden="true" className="field-icon material-symbols-outlined">key</span>
+                                            <input id="field-7" type={showAuthCode ? "text" : "password"} className="field-input u-mono" placeholder="请输入邮箱授权码" value={settings.auth_code} onChange={(event) => updateSettingAndClear("auth_code", event.target.value)} />
+                                            <button type="button" className="field-mask-toggle" aria-label={showAuthCode ? "隐藏授权码" : "显示授权码"} aria-pressed={showAuthCode} onClick={() => setShowAuthCode((current) => !current)}>
+                                                <span aria-hidden="true" className="material-symbols-outlined">{showAuthCode ? "visibility" : "visibility_off"}</span>
+                                            </button>
+                                        </div>
+                                        <div className="footer-cluster">
+                                            <button type="button" className="btn btn--secondary btn--sm" onClick={handleTestConnection} disabled={emailStatus.status === "testing"}>
+                                                <span aria-hidden="true" className="material-symbols-outlined">{emailStatus.status === "testing" ? "sync" : "link"}</span>
+                                                <span>{emailStatus.status === "testing" ? "测试中..." : "测试邮箱连接"}</span>
+                                            </button>
+                                        </div>
+                                        {emailStatus.status !== "idle" ? <InlineStatus tone={toneFromAsyncStatus(emailStatus.status)}>{emailStatus.message}</InlineStatus> : null}
+                                    </div>
                                 </div>
-                            </div>
                             </section>
-                        ) : null}
-                    </div>
-                </div>
-            </div>
-        </AppShell>
-    );
-}
-
-function ProcessingPage({ onOpenDisclaimer }) {
-    const navigate = useNavigate();
-    const [progressState, setProgressState] = useState(DEFAULT_PROGRESS);
-    const redirectRef = useRef(false);
-    const terminalBodyRef = useRef(null);
-
-    useEffect(() => {
-        let active = true;
-        let timer = null;
-        const poll = async () => {
-            try {
-                const data = await callApi("get_progress");
-                if (!active || !data) return;
-                setProgressState({ ...DEFAULT_PROGRESS, ...data, stats: Object.assign({}, DEFAULT_PROGRESS.stats, data.stats || {}) });
-                if (!redirectRef.current && ["completed", "failed"].includes(data.run_state) && !data.is_running) {
-                    redirectRef.current = true;
-                    setTimeout(() => navigate("/analysis"), 1200);
-                }
-            } catch (error) {
-                if (active) setProgressState((current) => ({ ...current, last_error: error.message || "获取进度失败。" }));
-            }
-        };
-        poll();
-        timer = setInterval(poll, 1000);
-        return () => {
-            active = false;
-            if (timer) clearInterval(timer);
-        };
-    }, [navigate]);
-
-    async function handleStop() {
-        if (!progressState.can_stop) return;
-        try {
-            const result = await callApi("stop_processing");
-            if (!result || !result.success) window.alert(result && result.message ? result.message : "停止指令发送失败。");
-        } catch (error) {
-            window.alert(error.message || "停止指令发送失败。");
-        }
-    }
-
-    const stats = progressState.stats || DEFAULT_PROGRESS.stats;
-    const logs = progressState.logs || [];
-    const taskMode = normalizeTaskMode(progressState.task_mode);
-    const isLocalTask = taskMode === "local";
-    const statusTone = progressState.run_state === "failed" ? "error" : progressState.run_state === "completed" ? "success" : progressState.is_running ? "info" : "neutral";
-    const statusLabel = progressState.run_state === "failed" ? "处理失败" : progressState.run_state === "completed" ? "处理完成" : progressState.is_running ? "实时连接已建立" : UI_COPY.pages.processing.statusWaiting;
-    const processingDetail = progressState.stop_requested
-        ? UI_COPY.pages.processing.stopDetail
-        : taskMode === "fetch"
-            ? UI_COPY.pages.processing.processingDetailFetch
-            : isLocalTask
-                ? UI_COPY.pages.processing.processingDetailLocal
-                : UI_COPY.pages.processing.processingDetail;
-
-    useEffect(() => {
-        if (!terminalBodyRef.current) return;
-        terminalBodyRef.current.scrollTop = terminalBodyRef.current.scrollHeight;
-    }, [logs, progressState.is_running, progressState.stop_requested]);
-
-    return (
-        <AppShell
-            active="processing"
-            onOpenDisclaimer={onOpenDisclaimer}
-            contentScrollable={false}
-            footerLeft={<p className="footer-meta">{UI_COPY.pages.processing.closeHint}</p>}
-            footerRight={<StatusPill tone={statusTone} icon={progressState.is_running ? "radar" : "schedule"}>{statusLabel}</StatusPill>}
-        >
-            <div className="page-wrap page-wrap--processing">
-                <PageHeader eyebrow={UI_COPY.pages.processing.eyebrow} title={UI_COPY.pages.processing.title} />
-
-                <section className="surface-card surface-card--hero">
-                    <div className="progress-hero">
-                        <div className="progress-main">
-                            <div>
-                                <p className="progress-kicker">{UI_COPY.pages.processing.currentOperation}</p>
-                                <h2 className="progress-title">{progressState.status_text}</h2>
-                                <p className="progress-meta">{processingDetail}</p>
-                            </div>
-                            <div className="progress-actions">
-                                <div className="progress-value"><strong className="u-tabular">{progressState.progress}%</strong><span>{UI_COPY.pages.processing.progressLabel}</span></div>
-                                <button type="button" className="btn btn--danger" onClick={handleStop} disabled={!progressState.can_stop}><span className="material-symbols-outlined">{progressState.stop_requested ? "sync" : "close"}</span><span>{progressState.stop_requested ? "正在停止..." : "停止运行"}</span></button>
-                            </div>
                         </div>
-                        <div className="progress-track"><div className="progress-fill" style={{ width: `${progressState.progress}%` }}></div></div>
-                        <div className="progress-caption"><span className="material-symbols-outlined">sync</span><span>{progressState.stop_requested ? UI_COPY.pages.processing.stopPending : UI_COPY.pages.processing.liveRefresh}</span></div>
-                        {progressState.last_error && progressState.run_state === "failed" ? <NoticeBox tone="error">{progressState.last_error}</NoticeBox> : null}
-                        {progressState.quota_exhausted && progressState.quota_message ? <NoticeBox tone="warning">{progressState.quota_message}</NoticeBox> : null}
-                        {progressState.stop_requested && progressState.run_state !== "failed" ? <NoticeBox tone="warning">{UI_COPY.pages.processing.stopNotice}</NoticeBox> : null}
+                        <div className="settings-column">
+                            <section className="surface-card">
+                                <SectionHeader icon="business" title={copy.companyCardTitle} indicator={<StatusPill tone={String(settings.company || "").trim() ? "success" : "warning"} icon="apartment">购买方校验</StatusPill>} />
+                                <div className="card-stack card-stack--compact">
+                                    <div className="field-block">
+                                        <label className="field-label" htmlFor="field-8">公司 <span className="field-required">*</span></label>
+                                        <div className={joinClasses("field-shell", !String(settings.company || "").trim() ? "field-shell--error" : "")}>
+                                            <span aria-hidden="true" className="field-icon material-symbols-outlined">domain</span>
+                                            <input id="field-8" type="text" className="field-input" placeholder="填写用于匹配购买方的公司名称" value={settings.company || ""} onChange={(event) => updateSettingAndClear("company", event.target.value)} />
+                                        </div>
+                                        {!String(settings.company || "").trim()
+                                            ? <p className="field-help field-help--subtle">填写公司名称后按购买方字段匹配；首页会只读展示该名称。</p>
+                                            : <p className="field-help field-help--subtle">按购买方包含“{String(settings.company).trim()}”进行匹配；明确不匹配的票据会单独进入“非目标公司发票”。</p>}
+                                    </div>
+                                    <p className="field-help">邮箱任务需要公司名称用于购买方校验；只做邮箱提取时可不填。</p>
+                                </div>
+                            </section>
+                        </div>
                     </div>
-                </section>
-
-                <div className="metrics-grid">
-                    <div className="metric-card metric-card--blue"><div className="metric-card__icon"><span className="material-symbols-outlined">{isLocalTask ? "folder_open" : "mail"}</span></div><div className="metric-card__copy"><p className="metric-card__label">{isLocalTask ? UI_COPY.pages.processing.scanFilesLabel : UI_COPY.pages.processing.scanEmailsLabel}</p><p className="metric-card__value u-tabular">{stats.emails || 0}</p></div></div>
-                    <div className="metric-card metric-card--green"><div className="metric-card__icon"><span className="material-symbols-outlined">description</span></div><div className="metric-card__copy"><p className="metric-card__label">已识别发票</p><p className="metric-card__value u-tabular">{stats.invoices || 0}</p></div></div>
-                    <div className="metric-card metric-card--amber"><div className="metric-card__icon"><span className="material-symbols-outlined">warning</span></div><div className="metric-card__copy"><p className="metric-card__label">异常处理</p><p className="metric-card__value u-tabular">{stats.errors || 0}</p></div></div>
                 </div>
 
-                <section className="surface-card surface-card--terminal processing-terminal" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-                    <div className="terminal-head"><div className="terminal-title"><span className="material-symbols-outlined">terminal</span><span>实时执行日志</span></div><div className="terminal-dots"><span className="terminal-dot"></span><span className="terminal-dot"></span><span className="terminal-dot"></span></div></div>
-                    <div ref={terminalBodyRef} className="terminal-body">
-                        <p className="terminal-intro">-- 发票助手引擎已连接 --<br />-- 进度与日志实时刷新中 --</p>
-                        {logs.map((log, index) => <div key={`${log.time || "log"}-${index}`} className="terminal-line"><span className="terminal-time">{safeText(log.time, "[实时]")}</span><span className={resolveLogToneClass(log)}>{safeText(log.type, "LOG")}</span><span className="terminal-text">{safeText(log.msg, "-")}</span></div>)}
-                        {progressState.is_running ? <div className="terminal-line" style={{ marginTop: 4 }}><span className="terminal-time">[实时]</span><span className="terminal-kind terminal-kind--info">状态</span><span className="terminal-text">{progressState.stop_requested ? "正在安全停止..." : "任务持续执行中..."}<span className="terminal-cursor"></span></span></div> : null}
+                <div className={joinClasses("settings-section", section !== "rules" && "is-hidden")} hidden={section !== "rules"}>
+                    <div className="settings-rules-head">
+                        <div>
+                            <p className="page-eyebrow">{UI_COPY.pages.rules.title}</p>
+                            <p className="field-help">{UI_COPY.pages.rules.description}</p>
+                        </div>
+                        <StatusPill tone={rulesIssues.length > 0 ? "warning" : "success"} icon={rulesIssues.length > 0 ? "warning" : "rule"}>
+                            {rulesIssues.length > 0 ? `${rulesIssues.length} 条提示` : (rulesLibraryAvailable ? "含发票库规则" : "使用全局规则")}
+                        </StatusPill>
                     </div>
-                </section>
+                    <RulesWorkspace prepare={() => persistNow()} />
+                </div>
             </div>
         </AppShell>
     );
 }
+
 
 function fileExtension(path) {
     const value = String(path || "").toLowerCase();
@@ -2044,7 +2391,7 @@ function ResultSummaryCard({ icon, label, value, helper, tone = "info" }) {
     return (
         <section className={joinClasses("stat-card", `stat-card--${tone}`)}>
             <div className="stat-card__top">
-                <div className="stat-card__icon"><span className="material-symbols-outlined">{icon}</span></div>
+                <div className="stat-card__icon"><span aria-hidden="true" className="material-symbols-outlined">{icon}</span></div>
                 <div className="stat-card__copy"><p className="stat-card__label">{label}</p><p className="stat-card__value u-tabular">{value}</p></div>
             </div>
             <p className="stat-card__helper">{helper}</p>
@@ -2053,14 +2400,14 @@ function ResultSummaryCard({ icon, label, value, helper, tone = "info" }) {
 }
 
 function ResultToolbarButton({ icon, label, onClick, disabled = false, primary = false }) {
-    return <button type="button" className={joinClasses("btn", primary ? "btn--primary" : "btn--secondary", "btn--sm")} onClick={onClick} disabled={disabled}><span className="material-symbols-outlined">{icon}</span><span>{label}</span></button>;
+    return <button type="button" className={joinClasses("btn", primary ? "btn--primary" : "btn--secondary", "btn--sm")} onClick={onClick} disabled={disabled}><span aria-hidden="true" className="material-symbols-outlined">{icon}</span><span>{label}</span></button>;
 }
 
 function ResultActionBanner({ tone = "warning", icon, eyebrow, title, text, buttonLabel, onClick, disabled = false, pathText = "", chips = null }) {
     return (
         <section className={joinClasses("manual-banner", tone === "neutral" && "manual-banner--calm", tone === "neutral" && "manual-banner--output")}>
             <div className="manual-banner__lead">
-                <div className="manual-banner__icon"><span className="material-symbols-outlined">{icon}</span></div>
+                <div className="manual-banner__icon"><span aria-hidden="true" className="material-symbols-outlined">{icon}</span></div>
                 <div>
                     <p className="manual-banner__eyebrow">{eyebrow}</p>
                     <p className="manual-banner__title">{title}</p>
@@ -2070,7 +2417,7 @@ function ResultActionBanner({ tone = "warning", icon, eyebrow, title, text, butt
                 </div>
             </div>
             <button type="button" className="btn btn--secondary" onClick={onClick} disabled={disabled}>
-                <span className="material-symbols-outlined">{icon}</span>
+                <span aria-hidden="true" className="material-symbols-outlined">{icon}</span>
                 <span>{buttonLabel}</span>
             </button>
         </section>
@@ -2103,7 +2450,7 @@ function RuleEditor({ editor, documentTypes, onChange, onCreateType, onCommit, o
     if (!editor) {
         return (
             <div className="rules-empty-state">
-                <span className="material-symbols-outlined">edit_note</span>
+                <span aria-hidden="true" className="material-symbols-outlined">edit_note</span>
                 <p>选择一条规则编辑，或新增一条规则。</p>
             </div>
         );
@@ -2157,21 +2504,21 @@ function RuleEditor({ editor, documentTypes, onChange, onCreateType, onCommit, o
                             setCreatingType(true);
                             setTypeError("");
                         }}>
-                            <span className="material-symbols-outlined">add</span>
+                            <span aria-hidden="true" className="material-symbols-outlined">add</span>
                             <span>新建票种</span>
                         </button>
                     </div>
                     {creatingType ? (
                         <div className="rule-type-create">
                             <div className="field-shell" style={{ flex: 1, minWidth: 140 }}>
-                                <span className="field-icon material-symbols-outlined">category</span>
+                                <span aria-hidden="true" className="field-icon material-symbols-outlined">category</span>
                                 <input type="text" className="field-input" placeholder="输入新票种名称，如 会议" value={typeName} onChange={(event) => {
                                     setTypeName(event.target.value);
                                     setTypeError("");
                                 }} autoFocus />
                             </div>
                             <button type="button" className="btn btn--primary btn--sm" onClick={handleCreateType} disabled={typeBusy}>
-                                <span className="material-symbols-outlined">{typeBusy ? "sync" : "check"}</span>
+                                <span aria-hidden="true" className="material-symbols-outlined">{typeBusy ? "sync" : "check"}</span>
                                 <span>{typeBusy ? "创建中..." : "确认新建"}</span>
                             </button>
                             <button type="button" className="btn btn--ghost btn--sm" onClick={handleCancelCreateType} disabled={typeBusy}>
@@ -2183,36 +2530,36 @@ function RuleEditor({ editor, documentTypes, onChange, onCreateType, onCommit, o
                     <p className="field-help">{RULE_TARGET_TYPE_HELP}</p>
                 </div>
                 <div className="field-block field-block--wide">
-                    <label className="field-label">关键词 <span className="field-required">*</span></label>
+                    <label className="field-label" htmlFor="field-9">关键词 <span className="field-required">*</span></label>
                     <div className="field-shell">
-                        <span className="field-icon material-symbols-outlined">key</span>
-                        <input type="text" className="field-input" placeholder="如 滴滴、星巴克、某某酒店" value={editor.keyword} onChange={(event) => onChange({ keyword: event.target.value })} />
+                        <span aria-hidden="true" className="field-icon material-symbols-outlined">key</span>
+                        <input id="field-9" type="text" className="field-input" placeholder="如 滴滴、星巴克、某某酒店" value={editor.keyword} onChange={(event) => onChange({ keyword: event.target.value })} />
                     </div>
                     <p className="field-help">发票的销售方或明细包含该关键词时命中本规则。</p>
                 </div>
                 <div className="field-block">
-                    <label className="field-label">金额下限</label>
+                    <label className="field-label" htmlFor="field-10">金额下限</label>
                     <div className="field-shell">
-                        <input type="text" inputMode="decimal" className="field-input u-tabular" placeholder="不限" value={editor.amountMin} onChange={(event) => onChange({ amountMin: event.target.value })} />
+                        <input id="field-10" type="text" inputMode="decimal" className="field-input u-tabular" placeholder="不限" value={editor.amountMin} onChange={(event) => onChange({ amountMin: event.target.value })} />
                     </div>
                 </div>
                 <div className="field-block">
-                    <label className="field-label">金额上限</label>
+                    <label className="field-label" htmlFor="field-11">金额上限</label>
                     <div className="field-shell">
-                        <input type="text" inputMode="decimal" className="field-input u-tabular" placeholder="不限" value={editor.amountMax} onChange={(event) => onChange({ amountMax: event.target.value })} />
+                        <input id="field-11" type="text" inputMode="decimal" className="field-input u-tabular" placeholder="不限" value={editor.amountMax} onChange={(event) => onChange({ amountMax: event.target.value })} />
                     </div>
                 </div>
                 <div className="field-block">
-                    <label className="field-label">启用</label>
+                    <label className="field-label" htmlFor="field-12">启用</label>
                     <label className="toggle-row">
-                        <input type="checkbox" checked={editor.enabled !== false} onChange={(event) => onChange({ enabled: event.target.checked })} />
+                        <input id="field-12" type="checkbox" checked={editor.enabled !== false} onChange={(event) => onChange({ enabled: event.target.checked })} />
                         <span>{editor.enabled !== false ? "已启用" : "已停用"}</span>
                     </label>
                 </div>
                 <div className="field-block field-block--wide">
                     <label className="field-label">归档到</label>
                     <div className="rule-archive-summary">
-                        <span className="material-symbols-outlined">folder</span>
+                        <span aria-hidden="true" className="material-symbols-outlined">folder</span>
                         <span>{previewFolder ? `归档到：${previewFolder}` : "请选择目标票种，并填写关键词和金额范围"}</span>
                     </div>
                     <p className="field-help">文件夹由目标票种和金额范围自动生成，不需要手动填写；保存后生效。</p>
@@ -2221,11 +2568,11 @@ function RuleEditor({ editor, documentTypes, onChange, onCreateType, onCommit, o
             {editor.error ? <NoticeBox tone="error">{editor.error}</NoticeBox> : null}
             <div className="footer-cluster">
                 <button type="button" className="btn btn--primary btn--sm" onClick={onCommit}>
-                    <span className="material-symbols-outlined">check</span>
+                    <span aria-hidden="true" className="material-symbols-outlined">check</span>
                     <span>{editor.mode === "new" ? "添加规则" : "保存修改"}</span>
                 </button>
                 <button type="button" className="btn btn--ghost btn--sm" onClick={onCancel}>
-                    <span className="material-symbols-outlined">close</span>
+                    <span aria-hidden="true" className="material-symbols-outlined">close</span>
                     <span>取消</span>
                 </button>
             </div>
@@ -2318,9 +2665,9 @@ function RuleDictionarySection({ terms, categoryOptions, scope, onAddTerm, onDel
         <div className="card-stack card-stack--compact">
             <div className="rule-dictionary-form">
                 <div className="field-block">
-                    <label className="field-label">销售方名称或税号</label>
+                    <label className="field-label" htmlFor="field-13">销售方名称或税号</label>
                     <div className="field-shell">
-                        <input type="text" className="field-input" placeholder="如 某某餐饮管理有限公司" value={termText} onChange={(event) => {
+                        <input id="field-13" type="text" className="field-input" placeholder="如 某某餐饮管理有限公司" value={termText} onChange={(event) => {
                             setTermText(event.target.value);
                             setError("");
                         }} />
@@ -2336,7 +2683,7 @@ function RuleDictionarySection({ terms, categoryOptions, scope, onAddTerm, onDel
             </div>
             <div className="footer-cluster">
                 <button type="button" className="btn btn--secondary btn--sm" onClick={handleAdd}>
-                    <span className="material-symbols-outlined">add_circle</span>
+                    <span aria-hidden="true" className="material-symbols-outlined">add_circle</span>
                     <span>添加词典</span>
                 </button>
                 <span className="field-help">按销售方精确匹配，适合固定供应商。</span>
@@ -2352,7 +2699,7 @@ function RuleDictionarySection({ terms, categoryOptions, scope, onAddTerm, onDel
                             </div>
                             <StatusPill tone="neutral">{ruleLayerLabel(term.source_layer || scope)}</StatusPill>
                             <button type="button" className="rule-icon-button" title="删除词典条目" aria-label={`删除 ${term.term}`} onClick={() => onDeleteTerm(index)}>
-                                <span className="material-symbols-outlined">delete</span>
+                                <span aria-hidden="true" className="material-symbols-outlined">delete</span>
                             </button>
                         </div>
                     ))}
@@ -2378,7 +2725,7 @@ function RuleUnclassifiedSection({ invoices, onPrefill }) {
                                 <span>{safeText(row.type, "未知票种")} · {formatRuleInvoiceAmountLabel(row.amount)}{row.date ? ` · ${row.date}` : ""}</span>
                             </div>
                             <button type="button" className="btn btn--secondary btn--sm" onClick={() => onPrefill(row)}>
-                                <span className="material-symbols-outlined">add_circle</span>
+                                <span aria-hidden="true" className="material-symbols-outlined">add_circle</span>
                                 <span>据此新建规则</span>
                             </button>
                         </div>
@@ -2399,7 +2746,7 @@ function RuleBuiltinSection({ rows, busy, onEdit, onToggle, onRestore, onRestore
                 <div className="rules-toolbar">
                     <p className="field-help">内置规则可按当前作用范围覆盖；目标票种决定归档文件夹和归类结果，内置规则原有的票种兜底条件会自动保留。未命中自定义规则时按列表顺序兜底。</p>
                     <button type="button" className="btn btn--ghost btn--sm" onClick={onRestoreAll} disabled={busy}>
-                        <span className="material-symbols-outlined">restart_alt</span>
+                        <span aria-hidden="true" className="material-symbols-outlined">restart_alt</span>
                         <span>全部恢复默认</span>
                     </button>
                 </div>
@@ -2413,7 +2760,7 @@ function RuleBuiltinSection({ rows, busy, onEdit, onToggle, onRestore, onRestore
                             return (
                                 <div className="rules-builtin-row" key={row.id}>
                                     <span className="rules-builtin-row__folder u-truncate" title={folderText}>
-                                        <span className="material-symbols-outlined">folder</span>
+                                        <span aria-hidden="true" className="material-symbols-outlined">folder</span>
                                         <span className="u-truncate">{folderText}</span>
                                         {row.target_type
                                             ? <span className="rule-target-tag" title={`目标票种：${row.target_type}`}>{row.target_type}</span>
@@ -2432,13 +2779,13 @@ function RuleBuiltinSection({ rows, busy, onEdit, onToggle, onRestore, onRestore
                                             aria-label={`${row.enabled !== false ? "停用" : "启用"}内置规则 ${folderText}`}
                                             onClick={() => onToggle(row)}
                                         >
-                                            <span className="material-symbols-outlined">{row.enabled !== false ? "toggle_on" : "toggle_off"}</span>
+                                            <span aria-hidden="true" className="material-symbols-outlined">{row.enabled !== false ? "toggle_on" : "toggle_off"}</span>
                                         </button>
                                         <button type="button" className="rule-icon-button" title="编辑" aria-label={`编辑内置规则 ${folderText}`} onClick={() => onEdit(row)}>
-                                            <span className="material-symbols-outlined">edit</span>
+                                            <span aria-hidden="true" className="material-symbols-outlined">edit</span>
                                         </button>
                                         <button type="button" className="rule-icon-button" title="恢复默认" aria-label={`恢复默认内置规则 ${folderText}`} onClick={() => onRestore(row)}>
-                                            <span className="material-symbols-outlined">restart_alt</span>
+                                            <span aria-hidden="true" className="material-symbols-outlined">restart_alt</span>
                                         </button>
                                     </span>
                                 </div>
@@ -2460,7 +2807,7 @@ function RuleBuiltinEditor({ editor, documentTypes, onChange, onCreateType, onCo
     if (!editor) {
         return (
             <div className="rules-empty-state">
-                <span className="material-symbols-outlined">inventory_2</span>
+                <span aria-hidden="true" className="material-symbols-outlined">inventory_2</span>
                 <p>从内置默认规则中选择一条进行覆盖编辑。</p>
             </div>
         );
@@ -2514,21 +2861,21 @@ function RuleBuiltinEditor({ editor, documentTypes, onChange, onCreateType, onCo
                             setCreatingType(true);
                             setTypeError("");
                         }}>
-                            <span className="material-symbols-outlined">add</span>
+                            <span aria-hidden="true" className="material-symbols-outlined">add</span>
                             <span>新建票种</span>
                         </button>
                     </div>
                     {creatingType ? (
                         <div className="rule-type-create">
                             <div className="field-shell" style={{ flex: 1, minWidth: 140 }}>
-                                <span className="field-icon material-symbols-outlined">category</span>
+                                <span aria-hidden="true" className="field-icon material-symbols-outlined">category</span>
                                 <input type="text" className="field-input" placeholder="输入新票种名称，如 会议" value={typeName} onChange={(event) => {
                                     setTypeName(event.target.value);
                                     setTypeError("");
                                 }} autoFocus />
                             </div>
                             <button type="button" className="btn btn--primary btn--sm" onClick={handleCreateType} disabled={typeBusy}>
-                                <span className="material-symbols-outlined">{typeBusy ? "sync" : "check"}</span>
+                                <span aria-hidden="true" className="material-symbols-outlined">{typeBusy ? "sync" : "check"}</span>
                                 <span>{typeBusy ? "创建中..." : "确认新建"}</span>
                             </button>
                             <button type="button" className="btn btn--ghost btn--sm" onClick={handleCancelCreateType} disabled={typeBusy}>
@@ -2540,33 +2887,33 @@ function RuleBuiltinEditor({ editor, documentTypes, onChange, onCreateType, onCo
                     <p className="field-help">{RULE_TARGET_TYPE_HELP}</p>
                 </div>
                 <div className="field-block field-block--wide">
-                    <label className="field-label">关键词</label>
-                    <textarea className="rule-textarea" placeholder="多个关键词用逗号或换行分隔" value={editor.keywordsText} onChange={(event) => onChange({ keywordsText: event.target.value })} />
+                    <label className="field-label" htmlFor="field-14">关键词</label>
+                    <textarea id="field-14" className="rule-textarea" placeholder="多个关键词用逗号或换行分隔" value={editor.keywordsText} onChange={(event) => onChange({ keywordsText: event.target.value })} />
                     <p className="field-help">命中任一关键词时使用这条内置规则；留空表示该规则只按票种兜底。</p>
                 </div>
                 <div className="field-block">
-                    <label className="field-label">金额下限</label>
+                    <label className="field-label" htmlFor="field-15">金额下限</label>
                     <div className="field-shell">
-                        <input type="text" inputMode="decimal" className="field-input u-tabular" placeholder="不限" value={editor.amountMin} onChange={(event) => onChange({ amountMin: event.target.value })} />
+                        <input id="field-15" type="text" inputMode="decimal" className="field-input u-tabular" placeholder="不限" value={editor.amountMin} onChange={(event) => onChange({ amountMin: event.target.value })} />
                     </div>
                 </div>
                 <div className="field-block">
-                    <label className="field-label">金额上限</label>
+                    <label className="field-label" htmlFor="field-16">金额上限</label>
                     <div className="field-shell">
-                        <input type="text" inputMode="decimal" className="field-input u-tabular" placeholder="不限" value={editor.amountMax} onChange={(event) => onChange({ amountMax: event.target.value })} />
+                        <input id="field-16" type="text" inputMode="decimal" className="field-input u-tabular" placeholder="不限" value={editor.amountMax} onChange={(event) => onChange({ amountMax: event.target.value })} />
                     </div>
                 </div>
                 <div className="field-block">
-                    <label className="field-label">启用</label>
+                    <label className="field-label" htmlFor="field-17">启用</label>
                     <label className="toggle-row">
-                        <input type="checkbox" checked={editor.enabled !== false} onChange={(event) => onChange({ enabled: event.target.checked })} />
+                        <input id="field-17" type="checkbox" checked={editor.enabled !== false} onChange={(event) => onChange({ enabled: event.target.checked })} />
                         <span>{editor.enabled !== false ? "已启用" : "已停用"}</span>
                     </label>
                 </div>
                 <div className="field-block field-block--wide">
                     <label className="field-label">归档到</label>
                     <div className="rule-archive-summary">
-                        <span className="material-symbols-outlined">folder</span>
+                        <span aria-hidden="true" className="material-symbols-outlined">folder</span>
                         <span>{previewFolder ? `归档到：${previewFolder}` : "请选择目标票种，并填写关键词和金额范围"}</span>
                     </div>
                     <p className="field-help">文件夹由目标票种和金额范围自动生成，不需要手动填写；保存后生效。</p>
@@ -2575,11 +2922,11 @@ function RuleBuiltinEditor({ editor, documentTypes, onChange, onCreateType, onCo
             {editor.error ? <NoticeBox tone="error">{editor.error}</NoticeBox> : null}
             <div className="footer-cluster">
                 <button type="button" className="btn btn--primary btn--sm" onClick={onCommit}>
-                    <span className="material-symbols-outlined">check</span>
+                    <span aria-hidden="true" className="material-symbols-outlined">check</span>
                     <span>保存覆盖</span>
                 </button>
                 <button type="button" className="btn btn--ghost btn--sm" onClick={onCancel}>
-                    <span className="material-symbols-outlined">close</span>
+                    <span aria-hidden="true" className="material-symbols-outlined">close</span>
                     <span>取消</span>
                 </button>
             </div>
@@ -2588,17 +2935,30 @@ function RuleBuiltinEditor({ editor, documentTypes, onChange, onCreateType, onCo
 }
 
 function RuleRestoreDialog({ dialog, mode, busy, error, issues, libraryAvailable, scopeLabel, dirty, onModeChange, onConfirm, onCancel }) {
+    const cardRef = useRef(null);
+    const titleId = "restore-dialog-title";
+    const open = !!dialog;
+
+    useEffect(() => {
+        if (!open) return undefined;
+        const previouslyFocused = document.activeElement;
+        if (cardRef.current && cardRef.current.focus) cardRef.current.focus();
+        return () => {
+            if (previouslyFocused && previouslyFocused.focus) previouslyFocused.focus();
+        };
+    }, [open]);
+
     if (!dialog) return null;
     return (
         <div className="modal-overlay" onClick={onCancel}>
-            <div className="modal-card restore-dialog" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-card restore-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} ref={cardRef} onClick={(event) => event.stopPropagation()}>
                 <div className="modal-head">
                     <div>
                         <p className="page-eyebrow">恢复默认</p>
-                        <h2 className="page-title" style={{ fontSize: 26 }}>{dialog.title}</h2>
+                        <h2 id={titleId} className="sheet-title">{dialog.title}</h2>
                     </div>
                     <button type="button" className="btn btn--ghost btn--sm" onClick={onCancel} aria-label="关闭">
-                        <span className="material-symbols-outlined">close</span>
+                        <span aria-hidden="true" className="material-symbols-outlined">close</span>
                     </button>
                 </div>
                 <div className="modal-body">
@@ -2629,7 +2989,7 @@ function RuleRestoreDialog({ dialog, mode, busy, error, issues, libraryAvailable
                 <div className="modal-footer">
                     <button type="button" className="btn btn--ghost" onClick={onCancel} disabled={busy}>取消</button>
                     <button type="button" className="btn btn--primary" onClick={onConfirm} disabled={busy}>
-                        <span className="material-symbols-outlined">{busy ? "sync" : "restart_alt"}</span>
+                        <span aria-hidden="true" className="material-symbols-outlined">{busy ? "sync" : "restart_alt"}</span>
                         <span>{busy ? "恢复中..." : "确认恢复"}</span>
                     </button>
                 </div>
@@ -2662,7 +3022,7 @@ function RuleTypesManager({ builtinTypes, customTypes, issues, busy, onDeleteTyp
                     {issues && issues.length > 0 ? <RuleIssues issues={issues} title="票种操作未完成" /> : null}
                     {customTypes.length === 0 ? (
                         <div className="rules-empty-state">
-                            <span className="material-symbols-outlined">category</span>
+                            <span aria-hidden="true" className="material-symbols-outlined">category</span>
                             <p>还没有自定义票种，可在规则编辑器中新建。</p>
                         </div>
                     ) : (
@@ -2679,7 +3039,7 @@ function RuleTypesManager({ builtinTypes, customTypes, issues, busy, onDeleteTyp
                                         disabled={busy}
                                         onClick={() => onDeleteType(name)}
                                     >
-                                        <span className="material-symbols-outlined">delete</span>
+                                        <span aria-hidden="true" className="material-symbols-outlined">delete</span>
                                     </button>
                                 </div>
                             ))}
@@ -2691,7 +3051,7 @@ function RuleTypesManager({ builtinTypes, customTypes, issues, busy, onDeleteTyp
     );
 }
 
-function AnalysisPage({ onOpenDisclaimer }) {
+function AnalysisPage({ theme, onToggleTheme, onOpenDisclaimer }) {
     const navigate = useNavigate();
     const [summary, setSummary] = useState({});
     const [successInvoices, setSuccessInvoices] = useState([]);
@@ -2872,19 +3232,21 @@ function AnalysisPage({ onOpenDisclaimer }) {
         ]
         : [
             { key: "success", icon: "task_alt", label: "处理成功", value: successCount, helper: successCount > 0 ? (isLocalResult ? (localInPlace ? "归档文件已写入发票文件夹。" : "归档副本已写入输出目录。") : "归档文件已写入输出目录。") : "当前还没有成功记录。", tone: "success" },
-            { key: "retention", icon: "inventory_2", label: "暂存记录", value: retentionCount, helper: retentionCount > 0 ? "系统已保全但未纳入成功归档，可按需导出查看。" : "当前没有暂存记录。", tone: "info" },
+            { key: "retention", icon: "inventory_2", label: "暂存记录", value: retentionCount, helper: retentionCount > 0 ? "已保留但未成功归档，可按需导出查看。" : "当前没有暂存记录。", tone: "info" },
             { key: "manual", icon: "folder_open", label: "待人工复核", value: manualCheckCount, helper: manualCheckCount > 0 ? "这是当前需要优先处理的内容。" : "当前没有待人工复核项。", tone: manualCheckCount > 0 ? "warning" : "info" },
         ];
 
     return (
         <AppShell
-            active="analysis"
+            active="results"
+            theme={theme}
+            onToggleTheme={onToggleTheme}
             onOpenDisclaimer={onOpenDisclaimer}
-            footerLeft={<button type="button" className="btn btn--ghost" onClick={() => navigate("/")}><span className="material-symbols-outlined">add_circle</span><span>开始新批次</span></button>}
+            footerLeft={<button type="button" className="btn btn--ghost" onClick={() => navigate("/")}><span aria-hidden="true" className="material-symbols-outlined">add_circle</span><span>开始新批次</span></button>}
             footerRight={lastExportPath ? <p className="footer-meta">最近导出: {fileNameFromPath(lastExportPath)}</p> : null}
         >
             <div className="page-wrap page-wrap--analysis">
-                <PageHeader eyebrow={UI_COPY.pages.analysis.eyebrow} title={UI_COPY.pages.analysis.title} />
+                <PageHeader title={UI_COPY.pages.analysis.title} />
 
                 {completionBanner ? (
                     <ResultActionBanner
@@ -2901,15 +3263,15 @@ function AnalysisPage({ onOpenDisclaimer }) {
                 ) : null}
 
                 <section className="surface-card surface-card--hero">
-                    <div style={{ padding: 18, display: "flex", flexDirection: "column", gap: 16 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, flexWrap: "wrap" }}>
+                    <div className="hero-body">
+                        <div className="hero-head">
                             <div>
                                 <p className="progress-kicker">{UI_COPY.pages.analysis.statusSummary}</p>
-                                <h2 className="progress-title">{resultHeadline}</h2>
+                                <h2 className="result-headline">{resultHeadline}</h2>
                                 {isFetchResult ? (
-                                    <p className="progress-meta">本轮共提取 <strong className="u-tabular">{fetchAttachments}</strong> 个附件，清单已写入 inbox 文件夹。</p>
+                                    <p className="result-meta">本轮共提取 <strong className="u-tabular">{fetchAttachments}</strong> 个附件，清单已写入 inbox 文件夹。</p>
                                 ) : (
-                                    <p className="progress-meta">共整理 <strong className="u-tabular">{totalResultCount}</strong> 条结果记录。{statusText}</p>
+                                    <p className="result-meta">共整理 <strong className="u-tabular">{totalResultCount}</strong> 条结果记录。{statusText}</p>
                                 )}
                             </div>
                             <div className="footer-cluster">
@@ -2920,7 +3282,7 @@ function AnalysisPage({ onOpenDisclaimer }) {
                         {classificationEntries.length > 0 || classificationSourceEntries.length > 0 ? (
                             <div className="classification-summary">
                                 <div className="classification-summary__head">
-                                    <span className="material-symbols-outlined">category</span>
+                                    <span aria-hidden="true" className="material-symbols-outlined">category</span>
                                     <span>{UI_COPY.pages.analysis.classificationTitle}</span>
                                 </div>
                                 {classificationEntries.length > 0 ? (
@@ -2956,7 +3318,7 @@ function AnalysisPage({ onOpenDisclaimer }) {
                         title={`检测到 ${unclassifiedCount} 张发票未归类`}
                         text="这些发票没有命中任何已启用类目，整理后会进入待人工复核。补充归类规则后重新整理即可自动归档。"
                         buttonLabel="管理归类规则"
-                        onClick={() => navigate("/rules")}
+                        onClick={() => navigate("/settings", { state: { settingsSection: "rules" } })}
                     />
                 ) : null}
                 {manualCheckCount > 0 ? (
@@ -2987,7 +3349,7 @@ function AnalysisPage({ onOpenDisclaimer }) {
     );
 }
 
-function RulesPage({ onOpenDisclaimer }) {
+function RulesWorkspace({ prepare }) {
     const [rulesData, setRulesData] = useState(null);
     const [libraryDir, setLibraryDir] = useState("");
     const [scope, setScope] = useState("global");
@@ -3147,6 +3509,7 @@ function RulesPage({ onOpenDisclaimer }) {
         let active = true;
         (async () => {
             try {
+                if (prepare) await prepare();
                 const data = await callApi("load_classification_rules", "");
                 if (!active) return;
                 applyRulesData(data);
@@ -3675,38 +4038,31 @@ function RulesPage({ onOpenDisclaimer }) {
     }
 
     return (
-        <AppShell
-            active="rules"
-            onOpenDisclaimer={onOpenDisclaimer}
-            footerLeft={
-                <div className="footer-cluster">
-                    <button type="button" className="btn btn--ghost btn--sm" onClick={() => reloadRules()} disabled={busyAction === "reload"}>
-                        <span className="material-symbols-outlined">{busyAction === "reload" ? "sync" : "refresh"}</span>
-                        <span>{busyAction === "reload" ? "加载中..." : "重新加载"}</span>
-                    </button>
-                    <button type="button" className="btn btn--ghost btn--sm" onClick={handleOpenRulesFolder} disabled={busyAction === "folder"}>
-                        <span className="material-symbols-outlined">folder_open</span>
-                        <span>打开规则目录</span>
-                    </button>
-                    <button type="button" className="btn btn--ghost btn--sm" onClick={handleResetScope} disabled={busyAction === "reset"}>
-                        <span className="material-symbols-outlined">restart_alt</span>
-                        <span>{busyAction === "reset" ? "恢复中..." : "恢复默认"}</span>
-                    </button>
+        <>
+            <div className="rules-workspace">
+                <div className="rules-action-bar">
+                    <div className="footer-cluster">
+                        <button type="button" className="btn btn--ghost btn--sm" onClick={() => reloadRules()} disabled={busyAction === "reload"}>
+                            <span aria-hidden="true" className="material-symbols-outlined">{busyAction === "reload" ? "sync" : "refresh"}</span>
+                            <span>{busyAction === "reload" ? "加载中..." : "重新加载"}</span>
+                        </button>
+                        <button type="button" className="btn btn--ghost btn--sm" onClick={handleOpenRulesFolder} disabled={busyAction === "folder"}>
+                            <span aria-hidden="true" className="material-symbols-outlined">folder_open</span>
+                            <span>打开规则目录</span>
+                        </button>
+                        <button type="button" className="btn btn--ghost btn--sm" onClick={handleResetScope} disabled={busyAction === "reset"}>
+                            <span aria-hidden="true" className="material-symbols-outlined">restart_alt</span>
+                            <span>{busyAction === "reset" ? "恢复中..." : "恢复默认"}</span>
+                        </button>
+                    </div>
+                    <div className="footer-cluster">
+                        <StatusPill tone={dirty ? "warning" : "success"} icon={dirty ? "edit" : "task_alt"}>{dirty ? "有未保存修改" : "规则已加载"}</StatusPill>
+                        <button type="button" className="btn btn--primary btn--sm" onClick={handleSaveRules} disabled={saving || loading || missingTargetCount > 0 || missingBuiltinTargetCount > 0}>
+                            <span aria-hidden="true" className="material-symbols-outlined">{saving ? "sync" : "save"}</span>
+                            <span>{saving ? "保存中..." : "保存规则"}</span>
+                        </button>
+                    </div>
                 </div>
-            }
-            footerRight={
-                <button type="button" className="btn btn--primary" onClick={handleSaveRules} disabled={saving || loading || missingTargetCount > 0 || missingBuiltinTargetCount > 0}>
-                    <span className="material-symbols-outlined">{saving ? "sync" : "save"}</span>
-                    <span>{saving ? "保存中..." : "保存规则"}</span>
-                </button>
-            }
-        >
-            <div className="page-wrap page-wrap--rules">
-                <PageHeader
-                    title={UI_COPY.pages.rules.title}
-                    description={UI_COPY.pages.rules.description}
-                    badge={<StatusPill tone={dirty ? "warning" : "success"} icon={dirty ? "edit" : "task_alt"}>{dirty ? "有未保存修改" : "规则已加载"}</StatusPill>}
-                />
 
                 {loading && !rulesData ? <NoticeBox tone="info">正在加载归类规则...</NoticeBox> : null}
                 {loadError ? <NoticeBox tone="error">{loadError}</NoticeBox> : null}
@@ -3740,9 +4096,11 @@ function RulesPage({ onOpenDisclaimer }) {
                             })}
                         </div>
                         <p className="field-help">{ruleScopeDescription(scope)}</p>
-                        <p className="field-help field-help--subtle u-mono u-truncate" title={directoryText}>规则文件：{directoryText}</p>
-                        <p className="field-help">在界面保存会重写当前作用范围的规则文件；如需保留 YAML 注释，请直接编辑规则文件。</p>
-                        {!libraryAvailable ? <p className="field-help">暂未识别到当前发票库：先完成一次本地整理或选择输出目录后，才能切换「当前发票库」并保存库内规则。</p> : null}
+                        <div className="field-help-group">
+                            <p className="field-help field-help--subtle u-mono u-truncate" title={directoryText}>规则文件：{directoryText}</p>
+                            <p className="field-help">在界面保存会重写当前作用范围的规则文件；如需保留 YAML 注释，请直接编辑规则文件。</p>
+                            {!libraryAvailable ? <p className="field-help">暂未识别到当前发票库：先完成一次本地整理或选择输出目录后，才能切换「当前发票库」并保存库内规则。</p> : null}
+                        </div>
                     </div>
                 </section>
 
@@ -3770,21 +4128,21 @@ function RulesPage({ onOpenDisclaimer }) {
                                     <p className="field-help">用当前编辑中的规则试算一张发票，不会写入规则文件，也不影响已保存配置。</p>
                                     <div className="rules-test-grid">
                                         <div className="field-block">
-                                            <label className="field-label">销售方</label>
+                                            <label className="field-label" htmlFor="field-18">销售方</label>
                                             <div className="field-shell">
-                                                <input type="text" className="field-input" placeholder="如 某某餐饮管理有限公司" value={testFields.seller} onChange={(event) => updateTestField("seller", event.target.value)} />
+                                                <input id="field-18" type="text" className="field-input" placeholder="如 某某餐饮管理有限公司" value={testFields.seller} onChange={(event) => updateTestField("seller", event.target.value)} />
                                             </div>
                                         </div>
                                         <div className="field-block">
-                                            <label className="field-label">销售方税号</label>
+                                            <label className="field-label" htmlFor="field-19">销售方税号</label>
                                             <div className="field-shell">
-                                                <input type="text" className="field-input u-mono" placeholder="可选" value={testFields.seller_tin} onChange={(event) => updateTestField("seller_tin", event.target.value)} />
+                                                <input id="field-19" type="text" className="field-input u-mono" placeholder="可选" value={testFields.seller_tin} onChange={(event) => updateTestField("seller_tin", event.target.value)} />
                                             </div>
                                         </div>
                                         <div className="field-block">
-                                            <label className="field-label">发票明细</label>
+                                            <label className="field-label" htmlFor="field-20">发票明细</label>
                                             <div className="field-shell">
-                                                <input type="text" className="field-input" placeholder="如 餐饮服务" value={testFields.item} onChange={(event) => updateTestField("item", event.target.value)} />
+                                                <input id="field-20" type="text" className="field-input" placeholder="如 餐饮服务" value={testFields.item} onChange={(event) => updateTestField("item", event.target.value)} />
                                             </div>
                                         </div>
                                         <div className="field-block">
@@ -3797,19 +4155,19 @@ function RulesPage({ onOpenDisclaimer }) {
                                             />
                                         </div>
                                         <div className="field-block">
-                                            <label className="field-label">金额</label>
+                                            <label className="field-label" htmlFor="field-21">金额</label>
                                             <div className="field-shell">
-                                                <input type="text" inputMode="decimal" className="field-input u-tabular" placeholder="如 128.00" value={testFields.amount} onChange={(event) => updateTestField("amount", event.target.value)} />
+                                                <input id="field-21" type="text" inputMode="decimal" className="field-input u-tabular" placeholder="如 128.00" value={testFields.amount} onChange={(event) => updateTestField("amount", event.target.value)} />
                                             </div>
                                         </div>
                                     </div>
                                     <div className="footer-cluster">
                                         <button type="button" className="btn btn--secondary btn--sm" onClick={handleTestRules} disabled={testState.status === "testing"}>
-                                            <span className="material-symbols-outlined">{testState.status === "testing" ? "sync" : "play_arrow"}</span>
+                                            <span aria-hidden="true" className="material-symbols-outlined">{testState.status === "testing" ? "sync" : "play_arrow"}</span>
                                             <span>{testState.status === "testing" ? "测试中..." : "测试归类结果"}</span>
                                         </button>
                                         <button type="button" className="btn btn--ghost btn--sm" onClick={() => setTestState({ status: "idle", result: null, issues: [], message: "" })}>
-                                            <span className="material-symbols-outlined">clear_all</span>
+                                            <span aria-hidden="true" className="material-symbols-outlined">clear_all</span>
                                             <span>清空结果</span>
                                         </button>
                                     </div>
@@ -3865,13 +4223,13 @@ function RulesPage({ onOpenDisclaimer }) {
                                         <div className="rules-toolbar">
                                             <p className="field-help">每条规则由目标票种、关键词和金额范围组成，文件夹按「目标票种 + 金额范围」自动生成。</p>
                                             <button type="button" className="btn btn--secondary btn--sm" onClick={handleAddRule}>
-                                                <span className="material-symbols-outlined">add</span>
+                                                <span aria-hidden="true" className="material-symbols-outlined">add</span>
                                                 <span>新增规则</span>
                                             </button>
                                         </div>
                                         {ruleRows.length === 0 ? (
                                             <div className="rules-empty-state">
-                                                <span className="material-symbols-outlined">rule</span>
+                                                <span aria-hidden="true" className="material-symbols-outlined">rule</span>
                                                 <p>当前作用范围还没有自定义规则，点击「新增规则」创建第一条规则。</p>
                                             </div>
                                         ) : (
@@ -3880,7 +4238,7 @@ function RulesPage({ onOpenDisclaimer }) {
                                                     <div key={String(row.id || row.index)} className={joinClasses("rule-category-row", row.enabled === false && "is-disabled")}>
                                                         <div className="rule-category-row__main">
                                                             <div className="rule-category-row__title">
-                                                                <span className="rule-category-row__folder-icon material-symbols-outlined">folder</span>
+                                                                <span aria-hidden="true" className="rule-category-row__folder-icon material-symbols-outlined">folder</span>
                                                                 <span className={joinClasses("rule-category-row__name", "u-truncate", !row.previewFolder && "rule-category-row__name--missing")} title={row.previewFolder || "请选择目标票种"}>
                                                                     {row.previewFolder || "请选择目标票种"}
                                                                 </span>
@@ -3903,19 +4261,19 @@ function RulesPage({ onOpenDisclaimer }) {
                                                                 aria-label={`${row.enabled !== false ? "停用" : "启用"} ${row.previewFolder || "规则"}`}
                                                                 onClick={() => handleToggleRule(row.index)}
                                                             >
-                                                                <span className="material-symbols-outlined">{row.enabled !== false ? "toggle_on" : "toggle_off"}</span>
+                                                                <span aria-hidden="true" className="material-symbols-outlined">{row.enabled !== false ? "toggle_on" : "toggle_off"}</span>
                                                             </button>
                                                             <button type="button" className="rule-icon-button" title="上移" aria-label={`上移 ${row.previewFolder || "规则"}`} disabled={row.index === 0} onClick={() => handleMoveRule(row.index, -1)}>
-                                                                <span className="material-symbols-outlined">arrow_upward</span>
+                                                                <span aria-hidden="true" className="material-symbols-outlined">arrow_upward</span>
                                                             </button>
                                                             <button type="button" className="rule-icon-button" title="下移" aria-label={`下移 ${row.previewFolder || "规则"}`} disabled={row.index === ruleRows.length - 1} onClick={() => handleMoveRule(row.index, 1)}>
-                                                                <span className="material-symbols-outlined">arrow_downward</span>
+                                                                <span aria-hidden="true" className="material-symbols-outlined">arrow_downward</span>
                                                             </button>
                                                             <button type="button" className="rule-icon-button" title="编辑" aria-label={`编辑 ${row.previewFolder || "规则"}`} onClick={() => handleEditRule(row.index)}>
-                                                                <span className="material-symbols-outlined">edit</span>
+                                                                <span aria-hidden="true" className="material-symbols-outlined">edit</span>
                                                             </button>
                                                             <button type="button" className="rule-icon-button rule-icon-button--danger" title="删除" aria-label={`删除 ${row.previewFolder || "规则"}`} onClick={() => handleDeleteRule(row.index)}>
-                                                                <span className="material-symbols-outlined">delete</span>
+                                                                <span aria-hidden="true" className="material-symbols-outlined">delete</span>
                                                             </button>
                                                         </div>
                                                     </div>
@@ -3992,7 +4350,7 @@ function RulesPage({ onOpenDisclaimer }) {
                     setRestoreIssues([]);
                 }}
             />
-        </AppShell>
+        </>
     );
 }
 
@@ -4062,15 +4420,35 @@ if (typeof window.addEventListener === "function") {
 
 function App() {
     const [showDisclaimer, setShowDisclaimer] = useState(false);
+    const { theme, toggleTheme } = useTheme();
+    const shell = useShellSettings();
+    const openDisclaimer = () => setShowDisclaimer(true);
+    const bootstrapping = shell.bootstrapState !== "bootstrapped";
+    const bootstrapFailed = shell.bootstrapState === "bootstrap_failed";
+
     return (
         <>
             <MemoryRouter>
-                <Routes>
-                    <Route path="/" element={<SettingsPage onOpenDisclaimer={() => setShowDisclaimer(true)} />} />
-                    <Route path="/processing" element={<ProcessingPage onOpenDisclaimer={() => setShowDisclaimer(true)} />} />
-                    <Route path="/analysis" element={<AnalysisPage onOpenDisclaimer={() => setShowDisclaimer(true)} />} />
-                    <Route path="/rules" element={<RulesPage onOpenDisclaimer={() => setShowDisclaimer(true)} />} />
-                </Routes>
+                {bootstrapping ? (
+                    <BootstrapStatePage
+                        active="home"
+                        theme={theme}
+                        onToggleTheme={toggleTheme}
+                        onOpenDisclaimer={openDisclaimer}
+                        eyebrow={UI_COPY.pages.home.eyebrow}
+                        title={UI_COPY.pages.home.bootstrapTitle}
+                        description={bootstrapFailed ? UI_COPY.pages.home.errorDescription : UI_COPY.pages.home.bootstrapDescription}
+                        tone={bootstrapFailed ? "error" : "info"}
+                        message={bootstrapFailed ? (shell.bootstrapError || UI_COPY.pages.home.errorMessage) : UI_COPY.pages.home.bootstrapMessage}
+                        footerText="正在载入"
+                    />
+                ) : (
+                    <Routes>
+                        <Route path="/" element={<HomePage shell={shell} theme={theme} onToggleTheme={toggleTheme} onOpenDisclaimer={openDisclaimer} />} />
+                        <Route path="/results" element={<AnalysisPage theme={theme} onToggleTheme={toggleTheme} onOpenDisclaimer={openDisclaimer} />} />
+                        <Route path="/settings" element={<SettingsPage shell={shell} theme={theme} onToggleTheme={toggleTheme} onOpenDisclaimer={openDisclaimer} />} />
+                    </Routes>
+                )}
             </MemoryRouter>
             <DisclaimerDialog open={showDisclaimer} onClose={() => setShowDisclaimer(false)} />
         </>

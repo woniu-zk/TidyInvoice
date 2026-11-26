@@ -13,7 +13,8 @@ const {
   MemoryRouter,
   Routes,
   Route,
-  useNavigate
+  useNavigate,
+  useLocation
 } = ReactRouterDOM;
 function isoDate(date) {
   const year = date.getFullYear();
@@ -77,6 +78,7 @@ if (!window.__APP_BRAND__) {
 }
 const APP_BRAND = Object.freeze({
   name: window.__APP_BRAND__.name,
+  nameEn: window.__APP_BRAND__.nameEn,
   subtitle: window.__APP_BRAND__.subtitle
 });
 const APP_VISIBLE_COPY = {
@@ -86,20 +88,20 @@ const APP_VISIBLE_COPY = {
   githubLabel: window.__APP_BRAND__.githubLabel,
   githubUrl: window.__APP_BRAND__.githubUrl,
   taskModes: {
-    mail: {
-      label: "邮箱提取并整理",
-      description: "连接邮箱提取附件，识别后按分类与命名规则归档。",
-      badge: "识别后归档"
-    },
     fetch: {
-      label: "仅提取到 inbox",
+      label: "邮箱提取",
       description: "只把邮箱附件保存到 inbox 文件夹并生成清单，不做识别和归档。",
       badge: "只保存附件"
     },
     local: {
-      label: "本地文件夹整理",
-      description: "读取本机文件夹中的发票文件，直接在该文件夹内离线识别并自动分类归档，不需要邮箱和网络。",
+      label: "本地整理",
+      description: "读取本机发票文件夹，离线识别后按分类与命名规则归档，不需要邮箱和网络。",
       badge: "本机离线整理"
+    },
+    mail: {
+      label: "邮箱提取并整理",
+      description: "连接邮箱提取附件，识别后按分类与命名规则归档。",
+      badge: "识别后归档"
     }
   },
   resultBanners: {
@@ -131,34 +133,18 @@ const APP_VISIBLE_COPY = {
   }
 };
 const TASK_MODE_OPTIONS = [{
-  value: "mail",
-  ...APP_VISIBLE_COPY.taskModes.mail
-}, {
   value: "fetch",
   ...APP_VISIBLE_COPY.taskModes.fetch
 }, {
   value: "local",
   ...APP_VISIBLE_COPY.taskModes.local
+}, {
+  value: "mail",
+  ...APP_VISIBLE_COPY.taskModes.mail
 }];
 const TASK_MODE_VALUES = new Set(TASK_MODE_OPTIONS.map(option => option.value));
 const EMAIL_PROVIDER_DOMAINS = ["qq.com", "vip.qq.com", "foxmail.com", "163.com", "126.com", "188.com", "yeah.net", "qiye.163.com", "88.com", "exmail.qq.com", "sina.com", "sina.cn", "sohu.com", "21cn.com", "263.net", "189.cn", "139.com", "aliyun.com", "qiye.aliyun.com", "gmail.com", "googlemail.com", "icloud.com", "me.com", "mac.com", "yahoo.com", "ymail.com", "zoho.com", "yandex.com", "gmx.net", "gmx.com", "aol.com", "fastmail.com"];
 const SUPPORTED_EMAIL_DOMAINS = new Set(EMAIL_PROVIDER_DOMAINS);
-const LOCAL_ENGINE_ITEMS = [{
-  key: "pdf-text",
-  icon: "description",
-  title: "PDF 文本解析",
-  description: "直接读取电子发票的版式文本与明细。"
-}, {
-  key: "ofd",
-  icon: "picture_as_pdf",
-  title: "OFD 解析",
-  description: "解析国标版式文件中的票面信息。"
-}, {
-  key: "ocr",
-  icon: "document_scanner",
-  title: "本地 OCR",
-  description: "扫描件与图片在本机离线识别。"
-}];
 const DISCLAIMER_SOFTWARE_ITEMS = ["本软件用于票据整理、归档与复核辅助处理。", "本软件不附带任何真实邮箱凭据。", "请仅填写并使用你自己的邮箱授权信息。", "涉及报销、入账或合规判断的重要票据，请务必进行人工复核。"];
 const DISCLAIMER_ITEMS = ["本工具用于票据整理与归档辅助，识别结果应结合业务流程进行复核。", "对于识别、归档、遗漏、误判及由此产生的后果，工具方不承担责任。", "使用者应自行遵守所在公司关于票据数据与信息安全管理的相关规定。", "涉及报销、入账或合规判断的重要票据，请务必进行人工复核。"];
 const UI_COPY = {
@@ -175,63 +161,87 @@ const UI_COPY = {
     windowSubtitle: "桌面工作区"
   },
   navigation: [{
-    key: "settings",
-    label: "启动配置",
-    description: "邮箱、识别与日期",
-    icon: "tune",
+    key: "home",
+    label: "首页",
+    description: "提取与整理",
+    icon: "space_dashboard",
     path: "/"
   }, {
-    key: "processing",
-    label: "处理中心",
-    description: "进度与日志",
-    icon: "data_thresholding",
-    path: "/processing"
-  }, {
-    key: "analysis",
-    label: "结果分析",
-    description: "总览与导出",
+    key: "results",
+    label: "结果",
+    description: "汇总与导出",
     icon: "assessment",
-    path: "/analysis"
+    path: "/results"
   }, {
-    key: "rules",
-    label: "归类规则",
-    description: "目标票种、关键词与金额",
-    icon: "rule",
-    path: "/rules"
+    key: "settings",
+    label: "设置",
+    description: "邮箱与规则",
+    icon: "settings",
+    path: "/settings"
   }],
   pages: {
-    settings: {
-      eyebrow: "Step 1",
-      title: "启动配置",
-      footerText: "当前页: 启动配置",
-      bootstrapTitle: "启动配置",
+    home: {
+      eyebrow: "工作台",
+      title: "首页",
+      description: "确认提取时间与输出位置，然后开始邮箱提取或本地整理。",
+      bootstrapTitle: "正在载入",
       bootstrapDescription: "正在初始化本地设置。",
       bootstrapMessage: "正在连接桌面接口并加载本地设置，请稍候。",
       errorDescription: "本地设置初始化失败。",
-      controlledNotice: "受控复跑已锁定输出目录与日期窗口。"
-    },
-    processing: {
-      eyebrow: "Step 2",
-      title: "处理中心",
-      footerText: "当前页: 处理中心",
-      closeHint: "关闭程序会直接结束当前窗口与任务进程，请仅在确认后执行。",
-      statusWaiting: "等待任务状态",
+      errorMessage: "本地设置初始化失败，请重启应用。",
+      controlledNotice: "受控复跑已锁定输出目录与日期窗口。",
+      readonlyBadge: "只读",
+      emailLabel: "提取邮箱",
+      companyLabel: "公司配置",
+      unconfigured: "尚未配置",
+      goSettings: "前往设置",
+      readonlyHint: "邮箱、授权码与公司名称在设置页维护，此处仅展示当前配置。",
+      outputTitle: "输出目录设置",
+      outputHint: "邮箱提取与邮箱提取并整理会把附件和归档写入该目录；本地整理使用下方归档目录。",
+      browseDirectory: "浏览目录",
+      pathLocked: "路径已锁定",
+      dateTitle: "提取时间",
+      dateHint: "确认起止日期后开始提取，日期范围会随任务一起提交。",
+      localTitle: "本地整理",
+      localInputLabel: "本地发票文件夹",
+      localOutputLabel: "归档目录",
+      chooseFolder: "选择文件夹",
+      chooseOther: "选择其他目录",
+      resetLocalOutput: "恢复默认（发票文件夹）",
+      splitByCategory: "按分类分目录",
+      splitHelpOn: "按发票类型建立 餐饮/充电 等子目录归档；原件按原文件名原样保留在「整理前发票」文件夹。",
+      splitHelpOff: "不建分类子目录：整理后的发票直接放在该文件夹里，文件名仍带类型；原件按原文件名原样保留在「整理前发票」文件夹。",
+      localHint: "本地整理会读取该文件夹并在归档目录生成分类结果，不需要邮箱和网络。",
+      actionsTitle: "开始处理",
+      actionHint: "邮箱提取只保存附件；本地整理在本机完成识别归档；邮箱提取并整理会提取附件后按规则归档。",
+      progressTitle: "处理进度",
+      statusWaiting: "等待任务开始",
       currentOperation: "当前操作",
       progressLabel: "完成度",
-      liveRefresh: "进度与日志保持实时刷新。",
+      liveRefresh: "进度与处理信息保持实时刷新。",
       stopPending: "已收到安全停止指令。",
       stopDetail: "系统将在当前文件处理完成后安全停止。",
-      processingDetail: "邮件抓取、票据恢复与本地识别将依次执行。",
+      processingDetail: "邮件抓取、票据识别与归档整理将依次执行。",
       processingDetailFetch: "本轮只提取邮箱附件，不会进行识别与归档。",
       processingDetailLocal: "本地文件扫描、票据识别与归档整理将依次执行。",
       scanEmailsLabel: "已扫描邮件",
       scanFilesLabel: "已扫描文件",
-      stopNotice: "已收到安全停止指令，当前邮件或当前文件处理完成后将结束任务。"
+      stopNotice: "已收到安全停止指令，当前邮件或当前文件处理完成后将结束任务。",
+      runEmpty: "尚未开始处理。完成配置后点击上方按钮开始。",
+      runInfoTitle: "处理信息",
+      runInfoEmpty: "暂无运行信息。",
+      startTimeLabel: "开始时间",
+      elapsedLabel: "已运行",
+      updatedLabel: "最近更新",
+      viewResults: "查看结果",
+      stop: "停止运行",
+      stopping: "正在停止...",
+      footerMeta: "任务运行时可以安全停止，当前邮件或当前文件处理完成后结束。"
     },
     analysis: {
-      eyebrow: "Step 3",
+      eyebrow: "处理汇总",
       title: "结果分析",
-      footerText: "当前页: 结果分析",
+      footerText: "当前页: 结果",
       statusSummary: "运行结果",
       resultTitle: "本次处理完成",
       reviewTitle: "待人工复核",
@@ -240,6 +250,19 @@ const UI_COPY = {
       reviewIdle: "结果明细仍可导出查看，输出目录会保留本轮成功归档结果。",
       classificationTitle: "分类汇总",
       classificationEmpty: "本轮还没有可统计的分类结果。"
+    },
+    settings: {
+      eyebrow: "基础配置",
+      title: "设置",
+      description: "邮箱、公司与归类规则都在这里维护；规则保存后在下一次整理时生效。",
+      footerText: "当前页: 设置",
+      emailSection: "邮箱配置",
+      rulesSection: "规则设置",
+      emailCardTitle: "邮箱源配置",
+      companyCardTitle: "公司配置",
+      controlledNotice: "受控复跑已锁定输出目录与日期窗口，相关配置不可修改。",
+      remember: "自动记住当前配置",
+      savedHint: "配置保存在本机。"
     },
     rules: {
       title: "归类规则",
@@ -922,19 +945,202 @@ function toneFromAsyncStatus(status) {
   if (status === "testing") return "info";
   return "info";
 }
+function pad2(value) {
+  return `${value}`.padStart(2, "0");
+}
+function formatClock(timestamp) {
+  const value = Number(timestamp || 0);
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
+}
+function formatDuration(totalSeconds) {
+  const value = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+  const minutes = Math.floor(value / 60);
+  const seconds = value % 60;
+  if (minutes > 0) return `${minutes}分${pad2(seconds)}秒`;
+  return `${seconds}秒`;
+}
+const THEME_STORAGE_KEY = `${BRAND_SESSION_PREFIX}.theme`;
+function readStoredTheme() {
+  try {
+    if (typeof window !== "undefined" && window.localStorage) {
+      const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
+      if (stored === "light" || stored === "dark") return stored;
+    }
+  } catch (error) {
+    // Local storage can be unavailable in restricted webviews.
+  }
+  try {
+    if (typeof window !== "undefined" && typeof window.matchMedia === "function") {
+      if (window.matchMedia("(prefers-color-scheme: light)").matches) return "light";
+    }
+  } catch (error) {
+    // Fall back to the dark workspace when the media query is unavailable.
+  }
+  return "dark";
+}
+function applyTheme(theme) {
+  try {
+    if (typeof document !== "undefined" && document && document.documentElement) {
+      document.documentElement.dataset.theme = theme;
+    }
+  } catch (error) {
+    // Theme application is best effort; the default palette stays usable.
+  }
+}
+const INITIAL_THEME = readStoredTheme();
+applyTheme(INITIAL_THEME);
+function persistTheme(theme) {
+  try {
+    if (typeof window !== "undefined" && window.localStorage) {
+      window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+    }
+  } catch (error) {
+    // Remembering the theme is optional.
+  }
+}
+function useTheme() {
+  const [theme, setTheme] = useState(INITIAL_THEME);
+  useEffect(() => {
+    applyTheme(theme);
+  }, [theme]);
+  function toggleTheme() {
+    setTheme(current => {
+      const next = current === "dark" ? "light" : "dark";
+      persistTheme(next);
+      return next;
+    });
+  }
+  return {
+    theme,
+    toggleTheme
+  };
+}
+function useShellSettings() {
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [runSettings, setRunSettings] = useState(DEFAULT_RUN_SETTINGS);
+  const [runContext, setRunContext] = useState({
+    controlled_run: false,
+    explicit_run_context: false
+  });
+  const [rulesStatus, setRulesStatus] = useState({});
+  const [bootstrapState, setBootstrapState] = useState("bootstrapping");
+  const [bootstrapError, setBootstrapError] = useState("");
+  const saveTimerRef = useRef(null);
+  const settingsRef = useRef(DEFAULT_SETTINGS);
+  const runSettingsRef = useRef(DEFAULT_RUN_SETTINGS);
+  const runContextRef = useRef({
+    controlled_run: false,
+    explicit_run_context: false
+  });
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const state = await loadShellState();
+        if (!active) return;
+        settingsRef.current = state.settings;
+        runSettingsRef.current = state.runSettings;
+        runContextRef.current = state.runContext;
+        setSettings(state.settings);
+        setRunSettings(state.runSettings);
+        setRunContext(state.runContext);
+        setRulesStatus(state.rulesStatus || {});
+        setBootstrapError("");
+        setBootstrapState("bootstrapped");
+      } catch (error) {
+        if (!active) return;
+        setBootstrapError(error.message || UI_COPY.pages.home.errorMessage);
+        setBootstrapState("bootstrap_failed");
+      }
+    })();
+    return () => {
+      active = false;
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, []);
+  useEffect(() => {
+    if (bootstrapState !== "bootstrapped") return undefined;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      persistNow().catch(error => {
+        console.error("Failed to save settings", error);
+      });
+    }, 400);
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, [bootstrapState, settings, runSettings, runContext]);
+  function updateSetting(key, value) {
+    setSettings(current => {
+      const next = {
+        ...current,
+        [key]: value
+      };
+      settingsRef.current = next;
+      return next;
+    });
+  }
+  function setDateValue(field, value) {
+    setRunSettings(current => {
+      const next = {
+        ...current,
+        [field]: value,
+        quick_range: "custom"
+      };
+      runSettingsRef.current = next;
+      return next;
+    });
+  }
+  async function persistNow(overrides) {
+    const nextSettings = overrides && overrides.settings || settingsRef.current;
+    const nextRunSettings = overrides && overrides.runSettings || runSettingsRef.current;
+    return persistUserSettings(nextSettings, nextRunSettings, runContextRef.current);
+  }
+  return {
+    settings,
+    runSettings,
+    runContext,
+    rulesStatus,
+    bootstrapState,
+    bootstrapError,
+    updateSetting,
+    setDateValue,
+    persistNow
+  };
+}
 function resolveGroupTone(groupKey) {
   if (groupKey === "manual_review") return "group-chip--warning";
   if (groupKey === "retained_record") return "group-chip--info";
   if (groupKey === "processing_error") return "group-chip--error";
   return "";
 }
-function resolveLogToneClass(log) {
+const LOG_KIND_LABELS = {
+  error: "异常",
+  warning: "提醒",
+  success: "成功",
+  info: "信息"
+};
+function resolveLogTone(log) {
   const sample = `${String(log && log.color || "")} ${String(log && log.type || "")}`.toLowerCase();
-  if (sample.includes("error") || sample.includes("red")) return "terminal-kind terminal-kind--error";
-  if (sample.includes("warning") || sample.includes("warn") || sample.includes("amber") || sample.includes("orange")) return "terminal-kind terminal-kind--warning";
-  if (sample.includes("success") || sample.includes("green") || sample.includes("emerald")) return "terminal-kind terminal-kind--success";
-  if (sample.includes("info") || sample.includes("blue") || sample.includes("cyan")) return "terminal-kind terminal-kind--info";
-  return "terminal-kind";
+  if (sample.includes("error") || sample.includes("red")) return "error";
+  if (sample.includes("warning") || sample.includes("warn") || sample.includes("amber") || sample.includes("orange")) return "warning";
+  if (sample.includes("success") || sample.includes("green") || sample.includes("emerald")) return "success";
+  if (sample.includes("info") || sample.includes("blue") || sample.includes("cyan")) return "info";
+  return "";
+}
+function resolveLogToneClass(log) {
+  const tone = resolveLogTone(log);
+  return tone ? `run-log__kind run-log__kind--${tone}` : "run-log__kind";
+}
+
+// 日志级别是后端字段；界面上按中文呈现，未识别的级别原样回退。
+function resolveLogKindLabel(log) {
+  const tone = resolveLogTone(log);
+  if (tone) return LOG_KIND_LABELS[tone];
+  return safeText(log && log.type, "日志");
 }
 function NoticeBox({
   tone = "info",
@@ -953,6 +1159,7 @@ function InlineStatus({
   return /*#__PURE__*/React.createElement("div", {
     className: joinClasses("inline-status", `inline-status--${tone}`)
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined inline-status__icon"
   }, icon), /*#__PURE__*/React.createElement("span", {
     className: "inline-status__text"
@@ -966,6 +1173,7 @@ function StatusPill({
   return /*#__PURE__*/React.createElement("span", {
     className: joinClasses("status-pill", tone !== "neutral" && `status-pill--${tone}`)
   }, icon && /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined",
     style: {
       fontSize: 16
@@ -973,7 +1181,6 @@ function StatusPill({
   }, icon), /*#__PURE__*/React.createElement("span", null, children));
 }
 function SectionHeader({
-  icon,
   title,
   indicator
 }) {
@@ -981,9 +1188,7 @@ function SectionHeader({
     className: "section-header"
   }, /*#__PURE__*/React.createElement("div", {
     className: "section-title"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "section-title__icon material-symbols-outlined"
-  }, icon), /*#__PURE__*/React.createElement("span", null, title)), indicator ? /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("span", null, title)), indicator ? /*#__PURE__*/React.createElement("div", {
     className: "u-text-muted",
     style: {
       fontSize: 12
@@ -991,16 +1196,13 @@ function SectionHeader({
   }, indicator) : null);
 }
 function PageHeader({
-  eyebrow,
   title,
   description,
   badge
 }) {
   return /*#__PURE__*/React.createElement("div", {
     className: "page-header-shell"
-  }, /*#__PURE__*/React.createElement("div", null, eyebrow ? /*#__PURE__*/React.createElement("p", {
-    className: "page-eyebrow"
-  }, eyebrow) : null, /*#__PURE__*/React.createElement("h1", {
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h1", {
     className: "page-title"
   }, title), description ? /*#__PURE__*/React.createElement("p", {
     className: "page-description"
@@ -1070,6 +1272,7 @@ function DarkSelect({
   }, /*#__PURE__*/React.createElement("span", {
     className: "field-dropdown-trigger__label"
   }, activeOption.label), /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined field-dropdown-trigger__icon"
   }, open ? "expand_less" : "expand_more")), open ? /*#__PURE__*/React.createElement("div", {
     className: "field-dropdown-menu",
@@ -1081,6 +1284,7 @@ function DarkSelect({
     className: joinClasses("field-dropdown-option", option.value === activeOption.value && "is-active"),
     onClick: () => handleSelect(option.value)
   }, /*#__PURE__*/React.createElement("span", null, option.label), option.value === activeOption.value ? /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined"
   }, "check") : null))) : null);
 }
@@ -1088,7 +1292,8 @@ function DateField({
   label,
   value,
   onChange,
-  disabled = false
+  disabled = false,
+  id = "date-field"
 }) {
   const inputRef = useRef(null);
   function openPicker() {
@@ -1110,10 +1315,12 @@ function DateField({
       flex: 1
     }
   }, /*#__PURE__*/React.createElement("label", {
-    className: "field-label"
+    className: "field-label",
+    htmlFor: id
   }, label), /*#__PURE__*/React.createElement("div", {
     className: joinClasses("field-shell", "field-shell--date", disabled && "field-shell--readonly")
   }, /*#__PURE__*/React.createElement("input", {
+    id: id,
     ref: inputRef,
     type: "date",
     className: "field-input field-input--date",
@@ -1128,6 +1335,7 @@ function DateField({
     disabled: disabled,
     "aria-label": `${label}日历`
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined"
   }, "calendar_month"))));
 }
@@ -1180,16 +1388,6 @@ function AppWindowChrome({
     }
   }
   return /*#__PURE__*/React.createElement("div", {
-    className: "window-chrome"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "window-drag-region"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "window-title-stack"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "window-title"
-  }, APP_BRAND.name), /*#__PURE__*/React.createElement("span", {
-    className: "window-subtitle"
-  }, activeItem && activeItem.label || UI_COPY.shell.windowSubtitle))), /*#__PURE__*/React.createElement("div", {
     className: "window-controls"
   }, /*#__PURE__*/React.createElement("button", {
     type: "button",
@@ -1218,10 +1416,71 @@ function AppWindowChrome({
     title: closing ? UI_COPY.shell.closing : UI_COPY.shell.close
   }, /*#__PURE__*/React.createElement("span", {
     className: "window-traffic-button__glyph"
-  }))));
+  })));
+}
+function AppSidebar({
+  active,
+  theme,
+  onToggleTheme,
+  onOpenDisclaimer
+}) {
+  const navigate = useNavigate();
+  const githubUrl = APP_VISIBLE_COPY.githubUrl;
+  const themeLabel = theme === "dark" ? "浅色模式" : "深色模式";
+  const themeActionLabel = theme === "dark" ? "切换到浅色模式" : "切换到深色模式";
+  return /*#__PURE__*/React.createElement("aside", {
+    className: "app-sidebar"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "sidebar-brand pywebview-drag-region"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "sidebar-brand__name"
+  }, APP_BRAND.name)), /*#__PURE__*/React.createElement("nav", {
+    className: "sidebar-nav",
+    "aria-label": "\u4E3B\u5BFC\u822A"
+  }, UI_COPY.navigation.map(item => /*#__PURE__*/React.createElement("button", {
+    key: item.key,
+    type: "button",
+    className: joinClasses("sidebar-tab", active === item.key && "is-active"),
+    "aria-current": active === item.key ? "page" : undefined,
+    onClick: () => navigate(item.path)
+  }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
+    className: "sidebar-tab__icon material-symbols-outlined"
+  }, item.icon), /*#__PURE__*/React.createElement("span", null, item.label)))), /*#__PURE__*/React.createElement("div", {
+    className: "sidebar-spacer pywebview-drag-region"
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "sidebar-foot"
+  }, /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "sidebar-action",
+    onClick: onToggleTheme,
+    "aria-label": themeActionLabel,
+    title: themeActionLabel
+  }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
+    className: "material-symbols-outlined"
+  }, theme === "dark" ? "light_mode" : "dark_mode"), /*#__PURE__*/React.createElement("span", null, themeLabel)), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "sidebar-action",
+    onClick: onOpenDisclaimer
+  }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
+    className: "material-symbols-outlined"
+  }, "balance"), /*#__PURE__*/React.createElement("span", null, "\u514D\u8D23\u58F0\u660E")), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "sidebar-action",
+    onClick: () => openExternalUrl(githubUrl)
+  }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
+    className: "material-symbols-outlined"
+  }, "code"), /*#__PURE__*/React.createElement("span", null, APP_VISIBLE_COPY.githubLabel))), /*#__PURE__*/React.createElement(AppWindowChrome, {
+    active: active
+  }));
 }
 function AppShell({
   active,
+  theme,
+  onToggleTheme,
   onOpenDisclaimer,
   children,
   footerLeft,
@@ -1231,14 +1490,14 @@ function AppShell({
 }) {
   return /*#__PURE__*/React.createElement("div", {
     className: "app-shell"
-  }, /*#__PURE__*/React.createElement(Sidebar, {
+  }, /*#__PURE__*/React.createElement(AppSidebar, {
     active: active,
+    theme: theme,
+    onToggleTheme: onToggleTheme,
     onOpenDisclaimer: onOpenDisclaimer
   }), /*#__PURE__*/React.createElement("main", {
     className: "app-main"
-  }, /*#__PURE__*/React.createElement(AppWindowChrome, {
-    active: active
-  }), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", {
     className: joinClasses("page-scroll", !contentScrollable && "page-scroll--locked", contentClassName)
   }, children), /*#__PURE__*/React.createElement(PageFooter, {
     left: footerLeft,
@@ -1247,6 +1506,8 @@ function AppShell({
 }
 function BootstrapStatePage({
   active,
+  theme,
+  onToggleTheme,
   onOpenDisclaimer,
   eyebrow,
   title,
@@ -1257,6 +1518,8 @@ function BootstrapStatePage({
 }) {
   return /*#__PURE__*/React.createElement(AppShell, {
     active: active,
+    theme: theme,
+    onToggleTheme: onToggleTheme,
     onOpenDisclaimer: onOpenDisclaimer,
     footerRight: /*#__PURE__*/React.createElement("p", {
       className: "footer-meta"
@@ -1289,6 +1552,7 @@ function SummaryField({
   }, /*#__PURE__*/React.createElement("div", {
     className: "summary-item__icon"
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined"
   }, icon)), /*#__PURE__*/React.createElement("div", {
     className: "summary-item__copy"
@@ -1304,13 +1568,21 @@ function DisclaimerDialog({
   open,
   onClose
 }) {
+  const cardRef = useRef(null);
+  const titleId = "disclaimer-dialog-title";
   useEffect(() => {
     if (!open) return undefined;
+    const previouslyFocused = document.activeElement;
     function handleKeydown(event) {
       if (event.key === "Escape") onClose();
     }
     window.addEventListener("keydown", handleKeydown);
-    return () => window.removeEventListener("keydown", handleKeydown);
+    if (cardRef.current && cardRef.current.focus) cardRef.current.focus();
+    return () => {
+      window.removeEventListener("keydown", handleKeydown);
+      // 关闭后把焦点还给触发它的按钮，键盘用户不会丢失位置。
+      if (previouslyFocused && previouslyFocused.focus) previouslyFocused.focus();
+    };
   }, [open, onClose]);
   if (!open) return null;
   return /*#__PURE__*/React.createElement("div", {
@@ -1318,6 +1590,11 @@ function DisclaimerDialog({
     onClick: onClose
   }, /*#__PURE__*/React.createElement("div", {
     className: "modal-card",
+    role: "dialog",
+    "aria-modal": "true",
+    "aria-labelledby": titleId,
+    tabIndex: -1,
+    ref: cardRef,
     onClick: event => event.stopPropagation()
   }, /*#__PURE__*/React.createElement("div", {
     className: "modal-head"
@@ -1327,15 +1604,15 @@ function DisclaimerDialog({
       marginBottom: 10
     }
   }, "\u514D\u8D23\u58F0\u660E"), /*#__PURE__*/React.createElement("h2", {
-    className: "page-title",
-    style: {
-      fontSize: 28
-    }
+    id: titleId,
+    className: "sheet-title"
   }, "\u4F7F\u7528\u524D\u8BF7\u786E\u8BA4\u4EE5\u4E0B\u4E8B\u9879")), /*#__PURE__*/React.createElement("button", {
     type: "button",
     className: "btn btn--ghost btn--sm",
-    onClick: onClose
+    onClick: onClose,
+    "aria-label": "\u5173\u95ED\u514D\u8D23\u58F0\u660E"
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined"
   }, "close"))), /*#__PURE__*/React.createElement("div", {
     className: "modal-body"
@@ -1363,149 +1640,105 @@ function DisclaimerDialog({
     onClick: onClose
   }, "\u6211\u5DF2\u77E5\u6653"))));
 }
-function Sidebar({
-  active,
+const SETTINGS_SECTION_OPTIONS = [{
+  value: "email",
+  label: UI_COPY.pages.settings.emailSection,
+  icon: "mail"
+}, {
+  value: "rules",
+  label: UI_COPY.pages.settings.rulesSection,
+  icon: "rule"
+}];
+function HomePage({
+  shell,
+  theme,
+  onToggleTheme,
   onOpenDisclaimer
 }) {
   const navigate = useNavigate();
-  const githubUrl = APP_VISIBLE_COPY.githubUrl;
-  return /*#__PURE__*/React.createElement("aside", {
-    className: "app-sidebar"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "sidebar-top"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "sidebar-logo"
-  }, "IF"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("p", {
-    className: "sidebar-title"
-  }, APP_BRAND.name), /*#__PURE__*/React.createElement("p", {
-    className: "sidebar-subtitle"
-  }, APP_VISIBLE_COPY.topSubtitle))), /*#__PURE__*/React.createElement("nav", {
-    className: "sidebar-nav"
-  }, UI_COPY.navigation.map(item => /*#__PURE__*/React.createElement("button", {
-    key: item.key,
-    type: "button",
-    className: joinClasses("sidebar-nav__item", active === item.key && "is-active"),
-    onClick: () => navigate(item.path)
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "sidebar-nav__item-icon material-symbols-outlined"
-  }, item.icon), /*#__PURE__*/React.createElement("span", {
-    className: "sidebar-nav__item-copy"
-  }, /*#__PURE__*/React.createElement("strong", null, item.label), /*#__PURE__*/React.createElement("span", null, item.description))))), /*#__PURE__*/React.createElement("div", {
-    className: "sidebar-footer"
-  }, /*#__PURE__*/React.createElement("button", {
-    type: "button",
-    className: "sidebar-foot-button",
-    onClick: () => navigate("/")
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "material-symbols-outlined"
-  }, "restart_alt"), /*#__PURE__*/React.createElement("span", {
-    className: "sidebar-foot-button__label"
-  }, "\u56DE\u5230\u9996\u9875")), /*#__PURE__*/React.createElement("button", {
-    type: "button",
-    className: "sidebar-foot-button",
-    onClick: onOpenDisclaimer
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "material-symbols-outlined"
-  }, "balance"), /*#__PURE__*/React.createElement("span", {
-    className: "sidebar-foot-button__label"
-  }, "\u514D\u8D23\u58F0\u660E")), /*#__PURE__*/React.createElement("div", {
-    className: "sidebar-link-row"
-  }, /*#__PURE__*/React.createElement("button", {
-    type: "button",
-    className: "sidebar-foot-chip sidebar-foot-chip--single",
-    onClick: () => openExternalUrl(githubUrl)
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "material-symbols-outlined"
-  }, "code"), /*#__PURE__*/React.createElement("span", null, APP_VISIBLE_COPY.githubLabel))), /*#__PURE__*/React.createElement("div", {
-    className: "sidebar-brand"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "sidebar-brand__dot"
-  }), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("p", {
-    className: "sidebar-brand__name"
-  }, APP_VISIBLE_COPY.footerVersion), /*#__PURE__*/React.createElement("p", {
-    className: "sidebar-brand__sub"
-  }, APP_VISIBLE_COPY.footerStamp)))));
-}
-function SettingsPage({
-  onOpenDisclaimer
-}) {
-  const navigate = useNavigate();
-  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
-  const [runSettings, setRunSettings] = useState(DEFAULT_RUN_SETTINGS);
-  const [runContext, setRunContext] = useState({
-    controlled_run: false,
-    explicit_run_context: false
-  });
-  const [showAuthCode, setShowAuthCode] = useState(false);
-  const [pageError, setPageError] = useState("");
-  const [emailStatus, setEmailStatus] = useState({
-    status: "idle",
-    message: ""
-  });
-  const [bootstrapState, setBootstrapState] = useState("bootstrapping");
-  const [bootstrapError, setBootstrapError] = useState("");
+  const {
+    settings,
+    runSettings,
+    runContext,
+    updateSetting,
+    setDateValue,
+    persistNow
+  } = shell;
   const [starting, setStarting] = useState(false);
-  const [rulesStatus, setRulesStatus] = useState({});
-  const saveTimerRef = useRef(null);
+  const [pageError, setPageError] = useState("");
+  const [progressState, setProgressState] = useState(DEFAULT_PROGRESS);
+  const [pollNonce, setPollNonce] = useState(0);
+  const [nowTick, setNowTick] = useState(Date.now());
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(0);
+  const progressRef = useRef(null);
+  const progressStateRef = useRef(DEFAULT_PROGRESS);
+  const runStartedAtRef = useRef(0);
+  const runFinishedAtRef = useRef(0);
   const autostartTimerRef = useRef(null);
   const autostartTriggeredRef = useRef(false);
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        const state = await loadShellState();
-        if (!active) return;
-        setSettings(state.settings);
-        setRunSettings(state.runSettings);
-        setRunContext(state.runContext);
-        setRulesStatus(state.rulesStatus || {});
-        setBootstrapError("");
-        setBootstrapState("bootstrapped");
-      } catch (error) {
-        if (active) {
-          setBootstrapError(error.message || "初始化设置失败，请重启应用。");
-          setBootstrapState("bootstrap_failed");
-        }
-      }
-    })();
-    return () => {
-      active = false;
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      if (autostartTimerRef.current) clearTimeout(autostartTimerRef.current);
-    };
-  }, []);
-  useEffect(() => {
-    if (bootstrapState !== "bootstrapped") return undefined;
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => {
-      persistUserSettings(settings, runSettings, runContext).catch(error => {
-        console.error("Failed to save settings", error);
-      });
-    }, 400);
-    return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    };
-  }, [bootstrapState, settings, runSettings, runContext]);
+  const copy = UI_COPY.pages.home;
   const controlledRun = hasExplicitQaRunContext(runContext);
-  const taskMode = normalizeTaskMode(settings.task_mode);
-  const isMailMode = taskMode === "mail";
-  const isFetchMode = taskMode === "fetch";
-  const isLocalMode = taskMode === "local";
+  const emailValue = String(settings.email || "").trim();
+  const companyValue = String(settings.company || "").trim();
   const localInputDir = String(settings.local_input_dir || "").trim();
   const localOutputDir = String(settings.local_output_dir || "").trim();
   const localSplitByCategory = settings.local_split_by_category !== false;
-  const activeTaskMode = TASK_MODE_OPTIONS.find(option => option.value === taskMode) || TASK_MODE_OPTIONS[0];
-  const emailError = validateEmail(settings.email);
-  const emailDomain = emailDomainOf(settings.email);
-  const emailSupported = !emailError && !!emailDomain;
-  const dateError = validateDateRange(runSettings.date_from, runSettings.date_to);
-  const startButtonLabel = isLocalMode ? "开始整理" : isFetchMode ? "开始提取" : "开始处理";
-  const startButtonIcon = "play_arrow";
-  const canStart = isLocalMode ? !!localInputDir : !emailError && !!settings.auth_code && (isFetchMode || !!String(settings.company || "").trim()) && !!String(settings.save_path || "").trim() && !dateError;
-  const rulesIssues = normalizeRuleIssues(rulesStatus && rulesStatus.issues);
-  const rulesLibraryAvailable = !!(rulesStatus && rulesStatus.library_available);
+  const taskOptions = useMemo(() => TASK_MODE_OPTIONS.map(option => ({
+    ...option,
+    icon: option.value === "fetch" ? "download" : option.value === "local" ? "folder_open" : "mail",
+    primary: option.value === "mail"
+  })), []);
   useEffect(() => {
-    if (bootstrapState !== "bootstrapped" || starting || autostartTriggeredRef.current || !shouldAutostartControlledRun(runContext)) return undefined;
+    progressStateRef.current = progressState;
+  }, [progressState]);
+  useEffect(() => {
+    let active = true;
+    let timer = null;
+    const tick = async () => {
+      try {
+        const data = await callApi("get_progress");
+        if (!active || !data) return;
+        const next = {
+          ...DEFAULT_PROGRESS,
+          ...data,
+          stats: Object.assign({}, DEFAULT_PROGRESS.stats, data.stats || {})
+        };
+        const previous = progressStateRef.current;
+        if (next.is_running && !previous.is_running) {
+          if (!runStartedAtRef.current) runStartedAtRef.current = Date.now();
+          runFinishedAtRef.current = 0;
+        }
+        if (!next.is_running && previous.is_running && ["completed", "failed"].includes(next.run_state)) {
+          runFinishedAtRef.current = Date.now();
+        }
+        progressStateRef.current = next;
+        setProgressState(next);
+        setLastUpdatedAt(Date.now());
+      } catch (error) {
+        if (!active) return;
+        setProgressState(current => ({
+          ...current,
+          last_error: error.message || "获取进度失败。"
+        }));
+      }
+      if (!active) return;
+      const delay = progressStateRef.current.is_running ? 1000 : 5000;
+      timer = setTimeout(tick, delay);
+    };
+    tick();
+    return () => {
+      active = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [pollNonce]);
+  useEffect(() => {
+    if (!progressState.is_running) return undefined;
+    setNowTick(Date.now());
+    const timer = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [progressState.is_running]);
+  useEffect(() => {
+    if (shell.bootstrapState !== "bootstrapped" || starting || autostartTriggeredRef.current || !shouldAutostartControlledRun(runContext)) return undefined;
     if (isControlledAutostartConsumed(runContext)) {
       autostartTriggeredRef.current = true;
       return undefined;
@@ -1514,36 +1747,25 @@ function SettingsPage({
     autostartTimerRef.current = setTimeout(() => {
       autostartTriggeredRef.current = true;
       markControlledAutostartConsumed(runContext);
-      handleStart();
+      startTask(normalizeTaskMode(settings.task_mode));
     }, delayMs);
     return () => {
       if (autostartTimerRef.current) clearTimeout(autostartTimerRef.current);
     };
-  }, [bootstrapState, runContext, starting, settings, runSettings]);
-  function updateSetting(key, value) {
-    setSettings(current => ({
-      ...current,
-      [key]: value
-    }));
+  }, [shell.bootstrapState, runContext, starting, settings, runSettings]);
+  function updateSettingAndClear(key, value) {
+    updateSetting(key, value);
     setPageError("");
-    if (key === "email" || key === "auth_code") setEmailStatus({
-      status: "idle",
-      message: ""
-    });
   }
-  function setDateValue(field, value) {
-    setRunSettings(current => ({
-      ...current,
-      [field]: value,
-      quick_range: "custom"
-    }));
+  function setDateValueAndClear(field, value) {
+    setDateValue(field, value);
     setPageError("");
   }
   async function handleChooseDirectory() {
     if (controlledRun) return;
     try {
       const result = await callApi("choose_directory");
-      if (result && result.success && result.path) updateSetting("save_path", result.path);
+      if (result && result.success && result.path) updateSettingAndClear("save_path", result.path);
     } catch (error) {
       setPageError(error.message || "选择目录失败。");
     }
@@ -1551,7 +1773,7 @@ function SettingsPage({
   async function handleChooseInputDirectory() {
     try {
       const result = await callApi("choose_directory");
-      if (result && result.success && result.path) updateSetting("local_input_dir", result.path);
+      if (result && result.success && result.path) updateSettingAndClear("local_input_dir", result.path);
     } catch (error) {
       setPageError(error.message || "选择文件夹失败。");
     }
@@ -1560,21 +1782,535 @@ function SettingsPage({
     if (controlledRun) return;
     try {
       const result = await callApi("choose_directory");
-      if (result && result.success && result.path) updateSetting("local_output_dir", result.path);
+      if (result && result.success && result.path) updateSettingAndClear("local_output_dir", result.path);
     } catch (error) {
       setPageError(error.message || "选择目录失败。");
     }
   }
   function handleResetLocalOutputDirectory() {
     if (controlledRun) return;
-    updateSetting("local_output_dir", "");
+    updateSettingAndClear("local_output_dir", "");
+  }
+  function validateTask(mode) {
+    if (mode === "local") {
+      if (!localInputDir) return "请选择要整理的本地发票文件夹。";
+      return "";
+    }
+    const emailError = validateEmail(settings.email);
+    if (emailError) return emailError;
+    if (!settings.auth_code) return "请先在设置中填写邮箱授权码。";
+    if (!String(settings.save_path || "").trim()) return "请先选择输出目录。";
+    const dateError = validateDateRange(runSettings.date_from, runSettings.date_to);
+    if (dateError) return dateError;
+    if (mode === "mail" && !companyValue) return "请先在设置中填写公司名称。";
+    return "";
+  }
+  async function startTask(mode) {
+    if (starting) return;
+    if (progressStateRef.current.is_running) {
+      setPageError("任务正在运行，请等待结束或先停止当前任务。");
+      return;
+    }
+    const taskError = validateTask(mode);
+    if (taskError) {
+      setPageError(taskError);
+      return;
+    }
+    setPageError("");
+    setStarting(true);
+    try {
+      const nextSettings = {
+        ...settings,
+        task_mode: mode
+      };
+      updateSetting("task_mode", mode);
+      await persistNow({
+        settings: nextSettings
+      });
+      let result = null;
+      if (mode === "local") {
+        const inputDir = String(settings.local_input_dir || "").trim();
+        const outputDir = String(settings.local_output_dir || "").trim() || inputDir;
+        result = await callApi("start_local_organize", inputDir, outputDir, false, localSplitByCategory);
+      } else if (mode === "fetch") {
+        result = await callApi("start_fetch_only", settings.save_path, runSettings.date_from, runSettings.date_to, String(settings.email).trim(), settings.auth_code);
+      } else {
+        result = await callApi("start_processing", "", settings.save_path, runSettings.date_from, runSettings.date_to, String(settings.email).trim(), settings.auth_code);
+      }
+      if (!result || !result.success) {
+        setPageError(result && result.message || "任务启动失败。");
+        return;
+      }
+      runStartedAtRef.current = Date.now();
+      runFinishedAtRef.current = 0;
+      setPollNonce(current => current + 1);
+      if (progressRef.current && progressRef.current.scrollIntoView) {
+        progressRef.current.scrollIntoView({
+          behavior: "smooth",
+          block: "nearest"
+        });
+      }
+    } catch (error) {
+      setPageError(error.message || "任务启动失败。");
+    } finally {
+      setStarting(false);
+    }
+  }
+  async function handleStop() {
+    if (!progressState.can_stop) return;
+    try {
+      const result = await callApi("stop_processing");
+      if (!result || !result.success) window.alert(result && result.message || "停止指令发送失败。");
+    } catch (error) {
+      window.alert(error.message || "停止指令发送失败。");
+    }
+  }
+  const stats = progressState.stats || DEFAULT_PROGRESS.stats;
+  const logs = (progressState.logs || []).slice(-6);
+  const progressTaskMode = normalizeTaskMode(progressState.task_mode);
+  const progressModeOption = TASK_MODE_OPTIONS.find(option => option.value === progressTaskMode) || TASK_MODE_OPTIONS[0];
+  const isLocalTask = progressTaskMode === "local";
+  const statusTone = progressState.run_state === "failed" ? "error" : progressState.run_state === "completed" ? "success" : progressState.is_running ? "info" : "neutral";
+  const statusLabel = progressState.run_state === "failed" ? "处理失败" : progressState.run_state === "completed" ? "处理完成" : progressState.is_running ? "正在运行" : copy.statusWaiting;
+  const processingDetail = progressState.stop_requested ? copy.stopDetail : progressTaskMode === "fetch" ? copy.processingDetailFetch : isLocalTask ? copy.processingDetailLocal : copy.processingDetail;
+  const startedAt = runStartedAtRef.current;
+  const endedAt = progressState.is_running ? nowTick : runFinishedAtRef.current || nowTick;
+  const elapsedLabel = startedAt ? formatDuration((endedAt - startedAt) / 1000) : "—";
+  const hasRunData = progressState.is_running || progressState.run_state !== "idle" || logs.length > 0 || Number(progressState.progress || 0) > 0;
+  const canViewResults = !progressState.is_running && ["completed", "failed"].includes(progressState.run_state);
+  const activeTaskMode = normalizeTaskMode(settings.task_mode);
+  const activeTaskOption = taskOptions.find(option => option.value === activeTaskMode) || taskOptions[0];
+  return /*#__PURE__*/React.createElement(AppShell, {
+    active: "home",
+    theme: theme,
+    onToggleTheme: onToggleTheme,
+    onOpenDisclaimer: onOpenDisclaimer,
+    footerLeft: /*#__PURE__*/React.createElement("p", {
+      className: "footer-meta"
+    }, controlledRun ? copy.controlledNotice : copy.footerMeta),
+    footerRight: canViewResults ? /*#__PURE__*/React.createElement("button", {
+      type: "button",
+      className: "btn btn--secondary btn--sm",
+      onClick: () => navigate("/results")
+    }, /*#__PURE__*/React.createElement("span", {
+      "aria-hidden": "true",
+      className: "material-symbols-outlined"
+    }, "arrow_forward"), /*#__PURE__*/React.createElement("span", null, copy.viewResults)) : null
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "page-wrap page-wrap--home"
+  }, /*#__PURE__*/React.createElement(PageHeader, {
+    title: copy.title,
+    description: copy.description,
+    badge: controlledRun ? /*#__PURE__*/React.createElement(StatusPill, {
+      tone: "info"
+    }, "\u53D7\u63A7\u524D\u7AEF\u590D\u8DD1") : null
+  }), pageError ? /*#__PURE__*/React.createElement(NoticeBox, {
+    tone: "error"
+  }, pageError) : null, controlledRun ? /*#__PURE__*/React.createElement("p", {
+    className: "page-inline-note"
+  }, copy.controlledNotice) : null, /*#__PURE__*/React.createElement("section", {
+    className: "surface-card"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card-stack card-stack--compact"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "mode-picker",
+    role: "radiogroup",
+    "aria-label": copy.actionsTitle,
+    "aria-describedby": "task-mode-help"
+  }, taskOptions.map(option => /*#__PURE__*/React.createElement("button", {
+    key: option.value,
+    type: "button",
+    role: "radio",
+    "aria-checked": activeTaskMode === option.value,
+    className: joinClasses("mode-option", activeTaskMode === option.value && "is-selected"),
+    onClick: () => updateSettingAndClear("task_mode", option.value),
+    disabled: starting || progressState.is_running
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "mode-option__label"
+  }, option.label)))), /*#__PURE__*/React.createElement("p", {
+    className: "field-help",
+    id: "task-mode-help"
+  }, activeTaskOption.description), /*#__PURE__*/React.createElement("div", {
+    className: "run-band__actions"
+  }, /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn--primary",
+    onClick: () => startTask(activeTaskMode),
+    disabled: starting || progressState.is_running
+  }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
+    className: "material-symbols-outlined"
+  }, "play_arrow"), /*#__PURE__*/React.createElement("span", null, starting ? "启动中..." : copy.actionsTitle))))), /*#__PURE__*/React.createElement("section", {
+    className: "surface-card",
+    ref: progressRef
+  }, /*#__PURE__*/React.createElement(SectionHeader, {
+    icon: "monitor_heart",
+    title: copy.progressTitle,
+    indicator: /*#__PURE__*/React.createElement(StatusPill, {
+      tone: statusTone
+    }, statusLabel)
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "run-progress",
+    "aria-live": "polite"
+  }, hasRunData ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "run-progress__head"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("p", {
+    className: "progress-kicker"
+  }, progressModeOption.label, " \xB7 ", copy.currentOperation), /*#__PURE__*/React.createElement("h2", {
+    className: "progress-title"
+  }, progressState.status_text || copy.statusWaiting), /*#__PURE__*/React.createElement("p", {
+    className: "progress-meta"
+  }, processingDetail)), /*#__PURE__*/React.createElement("div", {
+    className: "progress-value"
+  }, /*#__PURE__*/React.createElement("strong", {
+    className: "u-tabular"
+  }, progressState.progress, "%"), /*#__PURE__*/React.createElement("span", null, copy.progressLabel))), /*#__PURE__*/React.createElement("div", {
+    className: "progress-track",
+    role: "progressbar",
+    "aria-label": copy.progressLabel,
+    "aria-valuemin": 0,
+    "aria-valuemax": 100,
+    "aria-valuenow": Math.max(0, Math.min(100, Number(progressState.progress) || 0))
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "progress-fill",
+    style: {
+      width: `${progressState.progress}%`
+    }
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "run-progress__meta"
+  }, /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("strong", null, copy.startTimeLabel), formatClock(startedAt)), /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("strong", null, copy.elapsedLabel), elapsedLabel), /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("strong", null, copy.updatedLabel), formatClock(lastUpdatedAt))), /*#__PURE__*/React.createElement("div", {
+    className: "run-stats"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "summary-item summary-item--accent"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "summary-item__copy"
+  }, /*#__PURE__*/React.createElement("p", {
+    className: "summary-item__label"
+  }, isLocalTask ? copy.scanFilesLabel : copy.scanEmailsLabel), /*#__PURE__*/React.createElement("p", {
+    className: "summary-item__value u-tabular"
+  }, stats.emails || 0))), /*#__PURE__*/React.createElement("div", {
+    className: "summary-item summary-item--success"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "summary-item__copy"
+  }, /*#__PURE__*/React.createElement("p", {
+    className: "summary-item__label"
+  }, "\u5DF2\u8BC6\u522B\u53D1\u7968"), /*#__PURE__*/React.createElement("p", {
+    className: "summary-item__value u-tabular"
+  }, stats.invoices || 0))), /*#__PURE__*/React.createElement("div", {
+    className: "summary-item summary-item--warning"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "summary-item__copy"
+  }, /*#__PURE__*/React.createElement("p", {
+    className: "summary-item__label"
+  }, "\u5F02\u5E38\u5904\u7406"), /*#__PURE__*/React.createElement("p", {
+    className: "summary-item__value u-tabular"
+  }, stats.errors || 0)))), progressState.last_error && progressState.run_state === "failed" ? /*#__PURE__*/React.createElement(NoticeBox, {
+    tone: "error"
+  }, progressState.last_error) : null, progressState.quota_exhausted && progressState.quota_message ? /*#__PURE__*/React.createElement(NoticeBox, {
+    tone: "warning"
+  }, progressState.quota_message) : null, progressState.stop_requested && progressState.run_state !== "failed" ? /*#__PURE__*/React.createElement(NoticeBox, {
+    tone: "warning"
+  }, copy.stopNotice) : null, /*#__PURE__*/React.createElement("div", {
+    className: "run-log"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "run-log__head"
+  }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
+    className: "material-symbols-outlined"
+  }, "info"), /*#__PURE__*/React.createElement("span", null, copy.runInfoTitle)), logs.length > 0 ? logs.map((log, index) => /*#__PURE__*/React.createElement("div", {
+    key: `${log.time || "log"}-${index}`,
+    className: "run-log__line"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "run-log__time"
+  }, safeText(log.time, "[实时]")), /*#__PURE__*/React.createElement("span", {
+    className: resolveLogToneClass(log)
+  }, resolveLogKindLabel(log)), /*#__PURE__*/React.createElement("span", {
+    className: "run-log__text"
+  }, safeText(log.msg, "-")))) : /*#__PURE__*/React.createElement("p", {
+    className: "run-log__empty"
+  }, copy.runInfoEmpty)), /*#__PURE__*/React.createElement("div", {
+    className: "footer-cluster"
+  }, progressState.is_running || progressState.can_stop ? /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn--danger",
+    onClick: handleStop,
+    disabled: !progressState.can_stop
+  }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
+    className: "material-symbols-outlined"
+  }, progressState.stop_requested ? "sync" : "close"), /*#__PURE__*/React.createElement("span", null, progressState.stop_requested ? copy.stopping : copy.stop)) : null, canViewResults ? /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn--secondary",
+    onClick: () => navigate("/results")
+  }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
+    className: "material-symbols-outlined"
+  }, "arrow_forward"), /*#__PURE__*/React.createElement("span", null, copy.viewResults)) : null)) : /*#__PURE__*/React.createElement("div", {
+    className: "run-empty"
+  }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
+    className: "material-symbols-outlined"
+  }, "play_circle"), /*#__PURE__*/React.createElement("p", null, copy.runEmpty)))), /*#__PURE__*/React.createElement("div", {
+    className: "settings-grid settings-grid--fit"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "settings-column"
+  }, /*#__PURE__*/React.createElement("section", {
+    className: "surface-card"
+  }, /*#__PURE__*/React.createElement(SectionHeader, {
+    icon: "alternate_email",
+    title: "\u90AE\u7BB1\u4E0E\u516C\u53F8"
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "card-stack card-stack--compact"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "field-block"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "field-label",
+    htmlFor: "field-2"
+  }, copy.emailLabel), /*#__PURE__*/React.createElement("div", {
+    className: "field-shell field-shell--readonly"
+  }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
+    className: "field-icon material-symbols-outlined"
+  }, "alternate_email"), /*#__PURE__*/React.createElement("input", {
+    id: "field-2",
+    type: "text",
+    readOnly: true,
+    className: "field-input u-mono",
+    value: emailValue,
+    placeholder: copy.unconfigured,
+    title: emailValue || copy.unconfigured
+  })), !emailValue ? /*#__PURE__*/React.createElement("p", {
+    className: "field-help field-help--subtle"
+  }, copy.unconfigured) : null), /*#__PURE__*/React.createElement("div", {
+    className: "field-block"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "field-label",
+    htmlFor: "field-3"
+  }, copy.companyLabel), /*#__PURE__*/React.createElement("div", {
+    className: "field-shell field-shell--readonly"
+  }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
+    className: "field-icon material-symbols-outlined"
+  }, "business"), /*#__PURE__*/React.createElement("input", {
+    id: "field-3",
+    type: "text",
+    readOnly: true,
+    className: "field-input",
+    value: companyValue,
+    placeholder: copy.unconfigured,
+    title: companyValue || copy.unconfigured
+  })), !companyValue ? /*#__PURE__*/React.createElement("p", {
+    className: "field-help field-help--subtle"
+  }, copy.unconfigured) : null), /*#__PURE__*/React.createElement("p", {
+    className: "field-help"
+  }, copy.readonlyHint), /*#__PURE__*/React.createElement("div", {
+    className: "footer-cluster"
+  }, /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn--secondary btn--sm",
+    onClick: () => navigate("/settings")
+  }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
+    className: "material-symbols-outlined"
+  }, "settings"), /*#__PURE__*/React.createElement("span", null, copy.goSettings))))), /*#__PURE__*/React.createElement("section", {
+    className: "surface-card"
+  }, /*#__PURE__*/React.createElement(SectionHeader, {
+    icon: "schedule",
+    title: copy.dateTitle,
+    indicator: controlledRun ? /*#__PURE__*/React.createElement(StatusPill, {
+      tone: "info",
+      icon: "lock"
+    }, "\u5DF2\u9501\u5B9A") : null
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "card-stack card-stack--compact"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "field-row field-row--dates settings-date-row"
+  }, /*#__PURE__*/React.createElement(DateField, {
+    label: "\u5F00\u59CB\u65E5\u671F",
+    id: "run-date-from",
+    value: runSettings.date_from,
+    onChange: value => setDateValueAndClear("date_from", value),
+    disabled: controlledRun
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "field-separator"
+  }, "\u2014"), /*#__PURE__*/React.createElement(DateField, {
+    label: "\u7ED3\u675F\u65E5\u671F",
+    id: "run-date-to",
+    value: runSettings.date_to,
+    onChange: value => setDateValueAndClear("date_to", value),
+    disabled: controlledRun
+  })), /*#__PURE__*/React.createElement("p", {
+    className: "field-help field-help--subtle"
+  }, copy.dateHint)))), /*#__PURE__*/React.createElement("div", {
+    className: "settings-column"
+  }, /*#__PURE__*/React.createElement("section", {
+    className: "surface-card"
+  }, /*#__PURE__*/React.createElement(SectionHeader, {
+    icon: "folder_open",
+    title: copy.outputTitle,
+    indicator: controlledRun ? /*#__PURE__*/React.createElement(StatusPill, {
+      tone: "info"
+    }, "\u5DF2\u9501\u5B9A") : null
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "card-stack card-stack--compact"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: joinClasses("field-shell", "field-shell--readonly", !settings.save_path && "field-shell--error")
+  }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
+    className: "field-icon material-symbols-outlined"
+  }, "folder"), /*#__PURE__*/React.createElement("input", {
+    type: "text",
+    readOnly: true,
+    "aria-label": copy.outputTitle,
+    className: "field-input u-mono",
+    value: settings.save_path || "",
+    placeholder: "\u8BF7\u9009\u62E9\u672C\u5730\u8F93\u51FA\u76EE\u5F55",
+    title: settings.save_path || ""
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "footer-cluster"
+  }, /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn--secondary btn--sm",
+    onClick: handleChooseDirectory,
+    disabled: controlledRun
+  }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
+    className: "material-symbols-outlined"
+  }, "folder_open"), /*#__PURE__*/React.createElement("span", null, controlledRun ? copy.pathLocked : copy.browseDirectory))), /*#__PURE__*/React.createElement("p", {
+    className: "field-help"
+  }, controlledRun ? copy.controlledNotice : copy.outputHint))), /*#__PURE__*/React.createElement("section", {
+    className: "surface-card"
+  }, /*#__PURE__*/React.createElement(SectionHeader, {
+    icon: "folder",
+    title: copy.localTitle,
+    indicator: /*#__PURE__*/React.createElement(StatusPill, {
+      tone: localInputDir ? "success" : "warning",
+      icon: "folder"
+    }, localInputDir ? "已选择" : "待选择")
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "card-stack card-stack--compact"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "field-block"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "field-label",
+    htmlFor: "field-4"
+  }, copy.localInputLabel), /*#__PURE__*/React.createElement("div", {
+    className: joinClasses("field-shell", "field-shell--readonly", !localInputDir && "field-shell--error")
+  }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
+    className: "field-icon material-symbols-outlined"
+  }, "folder"), /*#__PURE__*/React.createElement("input", {
+    id: "field-4",
+    type: "text",
+    readOnly: true,
+    className: "field-input u-mono",
+    value: localInputDir,
+    placeholder: "\u8BF7\u9009\u62E9\u8981\u6574\u7406\u7684\u672C\u5730\u6587\u4EF6\u5939",
+    title: localInputDir
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "footer-cluster"
+  }, /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn--secondary btn--sm",
+    onClick: handleChooseInputDirectory
+  }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
+    className: "material-symbols-outlined"
+  }, "folder_open"), /*#__PURE__*/React.createElement("span", null, copy.chooseFolder)))), /*#__PURE__*/React.createElement("div", {
+    className: "field-block"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "field-label",
+    htmlFor: "field-5"
+  }, copy.localOutputLabel), /*#__PURE__*/React.createElement("div", {
+    className: "field-shell field-shell--readonly"
+  }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
+    className: "field-icon material-symbols-outlined"
+  }, "drive_file_move"), /*#__PURE__*/React.createElement("input", {
+    id: "field-5",
+    type: "text",
+    readOnly: true,
+    className: "field-input u-mono",
+    value: localOutputDir || localInputDir,
+    placeholder: "\u9ED8\u8BA4\u540C\u53D1\u7968\u6587\u4EF6\u5939",
+    title: localOutputDir || localInputDir
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "footer-cluster"
+  }, /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn--secondary btn--sm",
+    onClick: handleChooseLocalOutputDirectory,
+    disabled: controlledRun
+  }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
+    className: "material-symbols-outlined"
+  }, "folder_open"), /*#__PURE__*/React.createElement("span", null, copy.chooseOther)), localOutputDir && !controlledRun ? /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn--ghost btn--sm",
+    onClick: handleResetLocalOutputDirectory
+  }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
+    className: "material-symbols-outlined"
+  }, "undo"), /*#__PURE__*/React.createElement("span", null, copy.resetLocalOutput)) : null)), /*#__PURE__*/React.createElement("label", {
+    className: "toggle-row"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    checked: localSplitByCategory,
+    onChange: event => updateSettingAndClear("local_split_by_category", event.target.checked),
+    disabled: controlledRun
+  }), /*#__PURE__*/React.createElement("span", null, copy.splitByCategory)), /*#__PURE__*/React.createElement("p", {
+    className: "field-help"
+  }, localSplitByCategory ? copy.splitHelpOn : copy.splitHelpOff), /*#__PURE__*/React.createElement("p", {
+    className: "field-help field-help--subtle"
+  }, copy.localHint)))))));
+}
+function SettingsPage({
+  shell,
+  theme,
+  onToggleTheme,
+  onOpenDisclaimer
+}) {
+  const location = useLocation();
+  const {
+    settings,
+    runContext,
+    rulesStatus,
+    updateSetting,
+    persistNow
+  } = shell;
+  const [showAuthCode, setShowAuthCode] = useState(false);
+  const [pageError, setPageError] = useState("");
+  const [emailStatus, setEmailStatus] = useState({
+    status: "idle",
+    message: ""
+  });
+  const initialSection = location && location.state && location.state.settingsSection === "rules" ? "rules" : "email";
+  const [section, setSection] = useState(initialSection);
+  const copy = UI_COPY.pages.settings;
+  const controlledRun = hasExplicitQaRunContext(runContext);
+  const emailError = validateEmail(settings.email);
+  const emailDomain = emailDomainOf(settings.email);
+  const emailSupported = !emailError && !!emailDomain;
+  const rulesIssues = normalizeRuleIssues(rulesStatus && rulesStatus.issues);
+  const rulesLibraryAvailable = !!(rulesStatus && rulesStatus.library_available);
+  useEffect(() => {
+    const requested = location && location.state && location.state.settingsSection;
+    if (requested === "rules" || requested === "email") setSection(requested);
+  }, [location]);
+  function updateSettingAndClear(key, value) {
+    updateSetting(key, value);
+    setPageError("");
+    if (key === "email" || key === "auth_code") setEmailStatus({
+      status: "idle",
+      message: ""
+    });
   }
   async function handleTestConnection() {
-    const emailError = validateEmail(settings.email);
-    if (emailError) {
+    const emailValidation = validateEmail(settings.email);
+    if (emailValidation) {
       setEmailStatus({
         status: "error",
-        message: emailError
+        message: emailValidation
       });
       return;
     }
@@ -1602,226 +2338,120 @@ function SettingsPage({
       });
     }
   }
-  async function handleStart() {
-    if (isLocalMode) {
-      const inputDir = String(settings.local_input_dir || "").trim();
-      if (!inputDir) return setPageError("请选择要整理的本地文件夹。");
-      const outputDir = String(settings.local_output_dir || "").trim() || inputDir;
-      setStarting(true);
+  async function handleSectionChange(nextSection) {
+    if (nextSection === section) return;
+    if (nextSection === "rules") {
       try {
-        await persistUserSettings(settings, runSettings, runContext);
-        const result = await callApi("start_local_organize", inputDir, outputDir, false, localSplitByCategory);
-        if (!result || !result.success) {
-          setPageError(result && result.message ? result.message : "任务启动失败。");
-          return;
-        }
-        navigate("/processing");
+        await persistNow();
       } catch (error) {
-        setPageError(error.message || "任务启动失败。");
-      } finally {
-        setStarting(false);
+        console.error("Failed to save settings before loading rules", error);
       }
-      return;
     }
-    const emailError = validateEmail(settings.email);
-    if (emailError) return setPageError(emailError);
-    if (!settings.auth_code) return setPageError("请输入邮箱授权码。");
-    if (isMailMode && (!settings.company || !settings.company.trim())) return setPageError("请填写公司名称。");
-    if (!settings.save_path) return setPageError("请选择输出目录。");
-    if (dateError) return setPageError(dateError);
-    setStarting(true);
-    try {
-      await persistUserSettings(settings, runSettings, runContext);
-      const result = isFetchMode ? await callApi("start_fetch_only", settings.save_path, runSettings.date_from, runSettings.date_to, String(settings.email).trim(), settings.auth_code) : await callApi("start_processing", "", settings.save_path, runSettings.date_from, runSettings.date_to, String(settings.email).trim(), settings.auth_code);
-      if (!result || !result.success) {
-        setPageError(result && result.message ? result.message : "任务启动失败。");
-        return;
-      }
-      navigate("/processing");
-    } catch (error) {
-      setPageError(error.message || "任务启动失败。");
-    } finally {
-      setStarting(false);
-    }
-  }
-  if (bootstrapState === "bootstrapping") {
-    return /*#__PURE__*/React.createElement(BootstrapStatePage, {
-      active: "settings",
-      onOpenDisclaimer: onOpenDisclaimer,
-      eyebrow: UI_COPY.pages.settings.eyebrow,
-      title: UI_COPY.pages.settings.bootstrapTitle,
-      description: UI_COPY.pages.settings.bootstrapDescription,
-      tone: "info",
-      message: UI_COPY.pages.settings.bootstrapMessage,
-      footerText: UI_COPY.pages.settings.footerText
-    });
-  }
-  if (bootstrapState === "bootstrap_failed") {
-    return /*#__PURE__*/React.createElement(BootstrapStatePage, {
-      active: "settings",
-      onOpenDisclaimer: onOpenDisclaimer,
-      eyebrow: UI_COPY.pages.settings.eyebrow,
-      title: UI_COPY.pages.settings.bootstrapTitle,
-      description: UI_COPY.pages.settings.errorDescription,
-      tone: "error",
-      message: bootstrapError || "初始化设置失败，请重启应用。",
-      footerText: UI_COPY.pages.settings.footerText
-    });
+    setSection(nextSection);
   }
   return /*#__PURE__*/React.createElement(AppShell, {
     active: "settings",
+    theme: theme,
+    onToggleTheme: onToggleTheme,
     onOpenDisclaimer: onOpenDisclaimer,
     footerLeft: /*#__PURE__*/React.createElement("label", {
       className: "toggle-row"
     }, /*#__PURE__*/React.createElement("input", {
       type: "checkbox",
       checked: settings.remember_settings !== false,
-      onChange: event => updateSetting("remember_settings", event.target.checked)
-    }), /*#__PURE__*/React.createElement("span", null, "\u81EA\u52A8\u8BB0\u4F4F\u5F53\u524D\u914D\u7F6E")),
-    footerRight: /*#__PURE__*/React.createElement("button", {
-      type: "button",
-      className: "btn btn--primary",
-      onClick: handleStart,
-      disabled: !canStart || starting
-    }, /*#__PURE__*/React.createElement("span", {
-      className: "material-symbols-outlined"
-    }, starting ? "sync" : startButtonIcon), /*#__PURE__*/React.createElement("span", null, starting ? "启动中..." : startButtonLabel))
+      onChange: event => updateSettingAndClear("remember_settings", event.target.checked)
+    }), /*#__PURE__*/React.createElement("span", null, copy.remember)),
+    footerRight: /*#__PURE__*/React.createElement(StatusPill, {
+      tone: controlledRun ? "info" : "neutral",
+      icon: controlledRun ? "lock" : "save"
+    }, controlledRun ? "受控复跑" : copy.savedHint)
   }, /*#__PURE__*/React.createElement("div", {
     className: "page-wrap page-wrap--settings"
   }, /*#__PURE__*/React.createElement(PageHeader, {
-    eyebrow: UI_COPY.pages.settings.eyebrow,
-    title: UI_COPY.pages.settings.title,
-    badge: controlledRun ? /*#__PURE__*/React.createElement(StatusPill, {
-      tone: "info",
-      icon: "lock_clock"
-    }, "\u53D7\u63A7\u524D\u7AEF\u590D\u8DD1") : null
+    title: copy.title,
+    description: copy.description
   }), pageError ? /*#__PURE__*/React.createElement(NoticeBox, {
     tone: "error"
   }, pageError) : null, controlledRun ? /*#__PURE__*/React.createElement("p", {
     className: "page-inline-note"
-  }, UI_COPY.pages.settings.controlledNotice) : null, /*#__PURE__*/React.createElement("section", {
-    className: "surface-card"
-  }, /*#__PURE__*/React.createElement(SectionHeader, {
-    icon: "category",
-    title: "\u4EFB\u52A1\u7C7B\u578B",
-    indicator: /*#__PURE__*/React.createElement(StatusPill, {
-      tone: "info",
-      icon: isLocalMode ? "offline_bolt" : isFetchMode ? "inbox" : "mail"
-    }, activeTaskMode.badge)
-  }), /*#__PURE__*/React.createElement("div", {
-    className: "card-stack card-stack--compact"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "quick-range",
-    role: "group",
-    "aria-label": "\u4EFB\u52A1\u7C7B\u578B"
-  }, TASK_MODE_OPTIONS.map(option => /*#__PURE__*/React.createElement("button", {
+  }, copy.controlledNotice) : null, /*#__PURE__*/React.createElement("div", {
+    className: "settings-tabbar",
+    role: "tablist",
+    "aria-label": "\u8BBE\u7F6E\u5206\u533A"
+  }, SETTINGS_SECTION_OPTIONS.map(option => /*#__PURE__*/React.createElement("button", {
     key: option.value,
     type: "button",
-    className: joinClasses("quick-chip", taskMode === option.value && "is-active"),
-    "aria-pressed": taskMode === option.value,
-    onClick: () => updateSetting("task_mode", option.value)
-  }, option.label))), /*#__PURE__*/React.createElement("p", {
-    className: "field-help"
-  }, activeTaskMode.description))), /*#__PURE__*/React.createElement("div", {
+    role: "tab",
+    "aria-selected": section === option.value,
+    className: joinClasses("quick-chip", "settings-tab", section === option.value && "is-active"),
+    onClick: () => handleSectionChange(option.value)
+  }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
+    className: "material-symbols-outlined"
+  }, option.icon), /*#__PURE__*/React.createElement("span", null, option.label), option.value === "rules" && rulesIssues.length > 0 ? /*#__PURE__*/React.createElement("span", {
+    className: "settings-tab__badge"
+  }, rulesIssues.length) : null))), /*#__PURE__*/React.createElement("div", {
+    className: joinClasses("settings-section", section !== "email" && "is-hidden"),
+    hidden: section !== "email"
+  }, /*#__PURE__*/React.createElement("div", {
     className: "settings-grid settings-grid--fit"
   }, /*#__PURE__*/React.createElement("div", {
     className: "settings-column"
-  }, isLocalMode ? /*#__PURE__*/React.createElement("section", {
-    className: "surface-card"
-  }, /*#__PURE__*/React.createElement(SectionHeader, {
-    icon: "folder_open",
-    title: "\u53D1\u7968\u6587\u4EF6\u5939",
-    indicator: /*#__PURE__*/React.createElement(StatusPill, {
-      tone: settings.local_input_dir ? "success" : "warning",
-      icon: "folder"
-    }, settings.local_input_dir ? "已选择" : "待选择")
-  }), /*#__PURE__*/React.createElement("div", {
-    className: "card-stack card-stack--compact"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: joinClasses("field-shell", "field-shell--readonly", !settings.local_input_dir && "field-shell--error")
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "field-icon material-symbols-outlined"
-  }, "folder"), /*#__PURE__*/React.createElement("input", {
-    type: "text",
-    readOnly: true,
-    className: "field-input u-mono",
-    value: settings.local_input_dir || "",
-    placeholder: "\u8BF7\u9009\u62E9\u8981\u6574\u7406\u7684\u672C\u5730\u6587\u4EF6\u5939",
-    title: settings.local_input_dir || ""
-  })), /*#__PURE__*/React.createElement("div", {
-    className: "footer-cluster"
-  }, /*#__PURE__*/React.createElement("button", {
-    type: "button",
-    className: "btn btn--secondary btn--sm",
-    onClick: handleChooseInputDirectory
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "material-symbols-outlined"
-  }, "folder_open"), /*#__PURE__*/React.createElement("span", null, "\u9009\u62E9\u6587\u4EF6\u5939"))), /*#__PURE__*/React.createElement("label", {
-    className: "toggle-row"
-  }, /*#__PURE__*/React.createElement("input", {
-    type: "checkbox",
-    checked: localSplitByCategory,
-    onChange: event => updateSetting("local_split_by_category", event.target.checked),
-    disabled: controlledRun
-  }), /*#__PURE__*/React.createElement("span", null, "\u6309\u5206\u7C7B\u5206\u76EE\u5F55")), /*#__PURE__*/React.createElement("p", {
-    className: "field-help"
-  }, localSplitByCategory ? "按发票类型建立 餐饮/充电 等子目录归档；原件按原文件名原样保留在「整理前发票」文件夹（不改名、不分月份），重复件与待人工复核单独存放。" : "不建分类子目录：整理后的发票直接放在该文件夹里，文件名仍带类型；原件按原文件名原样保留在「整理前发票」文件夹（不改名、不分月份），重复件与待人工复核单独存放。"), /*#__PURE__*/React.createElement("div", {
-    className: "footer-cluster"
-  }, /*#__PURE__*/React.createElement("button", {
-    type: "button",
-    className: "btn btn--primary btn--sm",
-    onClick: handleStart,
-    disabled: !canStart || starting
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "material-symbols-outlined"
-  }, starting ? "sync" : "play_arrow"), /*#__PURE__*/React.createElement("span", null, starting ? "启动中..." : "整理进目录"))), /*#__PURE__*/React.createElement("p", {
-    className: "field-help"
-  }, "\u70B9\u51FB\u300C\u6574\u7406\u8FDB\u76EE\u5F55\u300D\u6216\u5E95\u90E8\u300C\u5F00\u59CB\u6574\u7406\u300D\u540E\uFF0C\u53D1\u7968\u4F1A\u5728\u8BE5\u6587\u4EF6\u5939\u5185\u6309\u5F53\u524D\u9009\u9879\u79BB\u7EBF\u8BC6\u522B\u5E76\u5F52\u6863\uFF1B\u539F\u4EF6\u6309\u539F\u6587\u4EF6\u540D\u539F\u6837\u4FDD\u7559\u5728\u300C\u6574\u7406\u524D\u53D1\u7968\u300D\u6587\u4EF6\u5939\uFF08\u4E0D\u6539\u540D\u3001\u4E0D\u5206\u6708\u4EFD\uFF09\u3002"))) : /*#__PURE__*/React.createElement("section", {
+  }, /*#__PURE__*/React.createElement("section", {
     className: "surface-card"
   }, /*#__PURE__*/React.createElement(SectionHeader, {
     icon: "mail",
-    title: "\u90AE\u7BB1\u6E90\u914D\u7F6E",
+    title: copy.emailCardTitle,
     indicator: /*#__PURE__*/React.createElement(StatusPill, {
-      tone: "warning",
+      tone: emailSupported ? "success" : "warning",
       icon: "mail"
-    }, "\u5F85\u786E\u8BA4")
+    }, emailSupported ? "域名可用" : "待确认")
   }), /*#__PURE__*/React.createElement("div", {
     className: "card-stack card-stack--compact"
   }, /*#__PURE__*/React.createElement("div", {
     className: "field-block"
   }, /*#__PURE__*/React.createElement("label", {
-    className: "field-label"
+    className: "field-label",
+    htmlFor: "field-6"
   }, "\u90AE\u7BB1\u5730\u5740"), /*#__PURE__*/React.createElement("div", {
     className: "field-shell"
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "field-icon material-symbols-outlined"
   }, "alternate_email"), /*#__PURE__*/React.createElement("input", {
+    id: "field-6",
     type: "text",
     className: "field-input",
     placeholder: "name@qq.com",
     value: settings.email,
-    onChange: event => updateSetting("email", event.target.value)
+    onChange: event => updateSettingAndClear("email", event.target.value)
   })), /*#__PURE__*/React.createElement("p", {
     className: "field-help"
   }, emailSupported ? `${emailDomain} 属于受支持的邮箱域名。` : "支持 QQ、网易 163/126/188/yeah、88、腾讯企业邮、阿里邮箱、新浪、搜狐、21CN、263、139/189 及 Gmail、iCloud、Yahoo 等常用邮箱；国际邮箱请使用应用专用密码。")), /*#__PURE__*/React.createElement("div", {
     className: "field-block"
   }, /*#__PURE__*/React.createElement("label", {
-    className: "field-label"
+    className: "field-label",
+    htmlFor: "field-7"
   }, "\u6388\u6743\u7801"), /*#__PURE__*/React.createElement("div", {
     className: "field-shell"
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "field-icon material-symbols-outlined"
   }, "key"), /*#__PURE__*/React.createElement("input", {
+    id: "field-7",
     type: showAuthCode ? "text" : "password",
     className: "field-input u-mono",
     placeholder: "\u8BF7\u8F93\u5165\u90AE\u7BB1\u6388\u6743\u7801",
     value: settings.auth_code,
-    onChange: event => updateSetting("auth_code", event.target.value)
+    onChange: event => updateSettingAndClear("auth_code", event.target.value)
   }), /*#__PURE__*/React.createElement("button", {
     type: "button",
     className: "field-mask-toggle",
+    "aria-label": showAuthCode ? "隐藏授权码" : "显示授权码",
+    "aria-pressed": showAuthCode,
     onClick: () => setShowAuthCode(current => !current)
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined"
   }, showAuthCode ? "visibility" : "visibility_off"))), /*#__PURE__*/React.createElement("div", {
     className: "footer-cluster"
@@ -1831,147 +2461,19 @@ function SettingsPage({
     onClick: handleTestConnection,
     disabled: emailStatus.status === "testing"
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined"
   }, emailStatus.status === "testing" ? "sync" : "link"), /*#__PURE__*/React.createElement("span", null, emailStatus.status === "testing" ? "测试中..." : "测试邮箱连接"))), emailStatus.status !== "idle" ? /*#__PURE__*/React.createElement(InlineStatus, {
     tone: toneFromAsyncStatus(emailStatus.status)
-  }, emailStatus.message) : null))), /*#__PURE__*/React.createElement("section", {
-    className: "surface-card"
-  }, /*#__PURE__*/React.createElement(SectionHeader, {
-    icon: "folder_open",
-    title: "\u8F93\u51FA\u76EE\u5F55\u8BBE\u7F6E",
-    indicator: controlledRun ? /*#__PURE__*/React.createElement(StatusPill, {
-      tone: "info",
-      icon: "lock"
-    }, "\u5DF2\u9501\u5B9A") : isLocalMode ? "默认同发票文件夹" : isFetchMode ? "保存提取附件" : "保存原件与结果"
-  }), /*#__PURE__*/React.createElement("div", {
-    className: "card-stack card-stack--compact"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: joinClasses("field-shell", "field-shell--readonly", isLocalMode ? !localInputDir && "field-shell--error" : !settings.save_path && "field-shell--error")
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "field-icon material-symbols-outlined"
-  }, "folder"), /*#__PURE__*/React.createElement("input", {
-    type: "text",
-    readOnly: true,
-    className: "field-input u-mono",
-    value: isLocalMode ? localOutputDir || localInputDir : settings.save_path,
-    placeholder: isLocalMode ? "默认与发票文件夹相同" : "请选择本地输出目录",
-    title: isLocalMode ? localOutputDir || localInputDir : settings.save_path
-  })), /*#__PURE__*/React.createElement("div", {
-    className: "footer-cluster"
-  }, /*#__PURE__*/React.createElement("button", {
-    type: "button",
-    className: "btn btn--secondary btn--sm",
-    onClick: isLocalMode ? handleChooseLocalOutputDirectory : handleChooseDirectory,
-    disabled: controlledRun
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "material-symbols-outlined"
-  }, "folder_open"), /*#__PURE__*/React.createElement("span", null, controlledRun ? "路径已锁定" : "浏览目录")), isLocalMode && !controlledRun && localOutputDir ? /*#__PURE__*/React.createElement("button", {
-    type: "button",
-    className: "btn btn--ghost btn--sm",
-    onClick: handleResetLocalOutputDirectory
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "material-symbols-outlined"
-  }, "undo"), /*#__PURE__*/React.createElement("span", null, "\u6062\u590D\u9ED8\u8BA4\uFF08\u53D1\u7968\u6587\u4EF6\u5939\uFF09")) : null), /*#__PURE__*/React.createElement("p", {
-    className: "field-help"
-  }, controlledRun ? "当前为受控前端复跑，本轮输出目录由诊断上下文锁定。" : isLocalMode ? localSplitByCategory ? "默认与发票文件夹相同：分类文件、「整理前发票」中的原件与结果明细都会写入该文件夹；改为其他目录时仅复制归档副本，原件留在发票文件夹不动。" : "默认与发票文件夹相同：整理后的文件、「整理前发票」中的原件与结果明细都会写入该文件夹；改为其他目录时仅复制归档副本，原件留在发票文件夹不动。" : isFetchMode ? "邮箱附件会保存到该目录下的 inbox 文件夹，并生成清单文件。" : "系统会在此目录下按发票类型保存归档文件，并生成待人工复核目录。")))), /*#__PURE__*/React.createElement("div", {
+  }, emailStatus.message) : null)))), /*#__PURE__*/React.createElement("div", {
     className: "settings-column"
   }, /*#__PURE__*/React.createElement("section", {
     className: "surface-card"
   }, /*#__PURE__*/React.createElement(SectionHeader, {
-    icon: "memory",
-    title: "\u672C\u5730\u8BC6\u522B\u5F15\u64CE",
-    indicator: /*#__PURE__*/React.createElement(StatusPill, {
-      tone: "success",
-      icon: "offline_bolt"
-    }, "\u79BB\u7EBF\u8FD0\u884C")
-  }), /*#__PURE__*/React.createElement("div", {
-    className: "card-stack card-stack--compact"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "engine-list"
-  }, LOCAL_ENGINE_ITEMS.map(item => /*#__PURE__*/React.createElement("div", {
-    className: "engine-item",
-    key: item.key
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "engine-item__icon material-symbols-outlined"
-  }, item.icon), /*#__PURE__*/React.createElement("div", {
-    className: "engine-item__copy"
-  }, /*#__PURE__*/React.createElement("strong", null, item.title), /*#__PURE__*/React.createElement("span", null, item.description)), /*#__PURE__*/React.createElement("span", {
-    className: "engine-item__tag"
-  }, "\u5185\u7F6E")))), /*#__PURE__*/React.createElement("p", {
-    className: "field-help"
-  }, "\u65E0\u9700\u8054\u7F51\u3001\u65E0\u9700\u586B\u5199\u5BC6\u94A5\uFF0C\u652F\u6301\u7535\u5B50\u53D1\u7968\u3001OFD \u7248\u5F0F\u6587\u4EF6\u4E0E\u626B\u63CF\u4EF6\u7684\u672C\u5730\u89E3\u6790\uFF0C\u7968\u636E\u5185\u5BB9\u4E0D\u4F1A\u4E0A\u4F20\u3002"))), /*#__PURE__*/React.createElement("section", {
-    className: "surface-card"
-  }, /*#__PURE__*/React.createElement(SectionHeader, {
-    icon: "rule",
-    title: "\u8D39\u7528\u5F52\u7C7B\u89C4\u5219",
-    indicator: rulesIssues.length > 0 ? /*#__PURE__*/React.createElement(StatusPill, {
-      tone: "warning",
-      icon: "warning"
-    }, `${rulesIssues.length} 条提示`) : /*#__PURE__*/React.createElement(StatusPill, {
-      tone: "success",
-      icon: "rule"
-    }, rulesLibraryAvailable ? "含发票库规则" : "使用全局规则")
-  }), /*#__PURE__*/React.createElement("div", {
-    className: "card-stack card-stack--compact"
-  }, /*#__PURE__*/React.createElement("p", {
-    className: "field-help"
-  }, "\u6309\u76EE\u6807\u7968\u79CD\u3001\u5173\u952E\u8BCD\u4E0E\u91D1\u989D\u8303\u56F4\u751F\u6210\u5F52\u6863\u6587\u4EF6\u5939\uFF1B\u4FDD\u5B58\u540E\u7684\u89C4\u5219\u5728\u4E0B\u4E00\u6B21\u6574\u7406\u65F6\u751F\u6548\u3002"), rulesIssues.length > 0 ? /*#__PURE__*/React.createElement(NoticeBox, {
-    tone: "warning"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "rule-issues"
-  }, /*#__PURE__*/React.createElement("p", {
-    className: "rule-issues__title"
-  }, "\u5F52\u7C7B\u89C4\u5219\u914D\u7F6E\u9700\u8981\u786E\u8BA4"), /*#__PURE__*/React.createElement("ul", {
-    className: "rule-issue-list"
-  }, rulesIssues.slice(0, 3).map((issue, index) => /*#__PURE__*/React.createElement("li", {
-    key: `${issue.text}-${index}`,
-    className: "rule-issue-item"
-  }, issue.text))), /*#__PURE__*/React.createElement("p", {
-    className: "field-help"
-  }, "\u8BF7\u8FDB\u5165\u5F52\u7C7B\u89C4\u5219\u9875\u4FEE\u6B63\uFF0C\u6216\u5728\u89C4\u5219\u76EE\u5F55\u4E2D\u76F4\u63A5\u7F16\u8F91\u89C4\u5219\u6587\u4EF6\u3002"))) : null, /*#__PURE__*/React.createElement("div", {
-    className: "footer-cluster"
-  }, /*#__PURE__*/React.createElement("button", {
-    type: "button",
-    className: "btn btn--secondary btn--sm",
-    onClick: () => navigate("/rules")
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "material-symbols-outlined"
-  }, "rule"), /*#__PURE__*/React.createElement("span", null, "\u7BA1\u7406\u5F52\u7C7B\u89C4\u5219"))))), isLocalMode ? null : /*#__PURE__*/React.createElement("section", {
-    className: "surface-card surface-card--compact settings-date-card"
-  }, /*#__PURE__*/React.createElement(SectionHeader, {
-    icon: "calendar_month",
-    title: "\u63D0\u53D6\u65F6\u95F4\u8303\u56F4",
-    indicator: controlledRun ? /*#__PURE__*/React.createElement(StatusPill, {
-      tone: "info",
-      icon: "lock"
-    }, "\u5DF2\u9501\u5B9A") : null
-  }), /*#__PURE__*/React.createElement("div", {
-    className: "card-stack card-stack--compact"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "field-row field-row--dates settings-date-row"
-  }, /*#__PURE__*/React.createElement(DateField, {
-    label: "\u5F00\u59CB\u65E5\u671F",
-    value: runSettings.date_from,
-    onChange: value => setDateValue("date_from", value),
-    disabled: controlledRun
-  }), /*#__PURE__*/React.createElement("span", {
-    className: "field-separator"
-  }, "\u2014"), /*#__PURE__*/React.createElement(DateField, {
-    label: "\u7ED3\u675F\u65E5\u671F",
-    value: runSettings.date_to,
-    onChange: value => setDateValue("date_to", value),
-    disabled: controlledRun
-  })), controlledRun ? /*#__PURE__*/React.createElement("p", {
-    className: "field-help field-help--subtle"
-  }, "\u5F53\u524D\u4E3A\u53D7\u63A7\u590D\u8DD1\uFF0C\u65E5\u671F\u8303\u56F4\u5DF2\u6309\u4E0A\u4E0B\u6587\u9501\u5B9A\u3002") : /*#__PURE__*/React.createElement("p", {
-    className: "field-help field-help--subtle"
-  }, "\u786E\u8BA4\u8D77\u6B62\u65E5\u671F\u540E\u53EF\u76F4\u63A5\u5F00\u59CB\u63D0\u53D6\uFF0C\u672C\u9875\u4E0D\u518D\u8FDB\u5165\u72EC\u7ACB\u786E\u8BA4\u6D41\u7A0B\u3002"))), isMailMode ? /*#__PURE__*/React.createElement("section", {
-    className: "surface-card"
-  }, /*#__PURE__*/React.createElement(SectionHeader, {
     icon: "business",
-    title: "\u516C\u53F8\u914D\u7F6E",
+    title: copy.companyCardTitle,
     indicator: /*#__PURE__*/React.createElement(StatusPill, {
-      tone: settings.company && settings.company.trim() ? "success" : "warning",
+      tone: String(settings.company || "").trim() ? "success" : "warning",
       icon: "apartment"
     }, "\u8D2D\u4E70\u65B9\u6821\u9A8C")
   }), /*#__PURE__*/React.createElement("div", {
@@ -1979,228 +2481,43 @@ function SettingsPage({
   }, /*#__PURE__*/React.createElement("div", {
     className: "field-block"
   }, /*#__PURE__*/React.createElement("label", {
-    className: "field-label"
+    className: "field-label",
+    htmlFor: "field-8"
   }, "\u516C\u53F8 ", /*#__PURE__*/React.createElement("span", {
     className: "field-required"
   }, "*")), /*#__PURE__*/React.createElement("div", {
-    className: joinClasses("field-shell", !settings.company || !settings.company.trim() ? "field-shell--error" : "")
+    className: joinClasses("field-shell", !String(settings.company || "").trim() ? "field-shell--error" : "")
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "field-icon material-symbols-outlined"
   }, "domain"), /*#__PURE__*/React.createElement("input", {
+    id: "field-8",
     type: "text",
     className: "field-input",
     placeholder: "\u586B\u5199\u7528\u4E8E\u5339\u914D\u8D2D\u4E70\u65B9\u7684\u516C\u53F8\u540D\u79F0",
     value: settings.company || "",
-    onChange: event => updateSetting("company", event.target.value)
-  })), !settings.company || !settings.company.trim() ? /*#__PURE__*/React.createElement("p", {
+    onChange: event => updateSettingAndClear("company", event.target.value)
+  })), !String(settings.company || "").trim() ? /*#__PURE__*/React.createElement("p", {
     className: "field-help field-help--subtle"
-  }, "\u586B\u5199\u516C\u53F8\u540D\u79F0\u540E\u6309\u8D2D\u4E70\u65B9\u5B57\u6BB5\u5339\u914D\u3002") : /*#__PURE__*/React.createElement("p", {
+  }, "\u586B\u5199\u516C\u53F8\u540D\u79F0\u540E\u6309\u8D2D\u4E70\u65B9\u5B57\u6BB5\u5339\u914D\uFF1B\u9996\u9875\u4F1A\u53EA\u8BFB\u5C55\u793A\u8BE5\u540D\u79F0\u3002") : /*#__PURE__*/React.createElement("p", {
     className: "field-help field-help--subtle"
-  }, "\u6309\u8D2D\u4E70\u65B9\u5305\u542B\u201C", settings.company.trim(), "\u201D\u8FDB\u884C\u5339\u914D\uFF1B\u660E\u786E\u4E0D\u5339\u914D\u7684\u7968\u636E\u4F1A\u5355\u72EC\u8FDB\u5165\u201C\u975E\u76EE\u6807\u516C\u53F8\u53D1\u7968\u201D\u3002")))) : null))));
-}
-function ProcessingPage({
-  onOpenDisclaimer
-}) {
-  const navigate = useNavigate();
-  const [progressState, setProgressState] = useState(DEFAULT_PROGRESS);
-  const redirectRef = useRef(false);
-  const terminalBodyRef = useRef(null);
-  useEffect(() => {
-    let active = true;
-    let timer = null;
-    const poll = async () => {
-      try {
-        const data = await callApi("get_progress");
-        if (!active || !data) return;
-        setProgressState({
-          ...DEFAULT_PROGRESS,
-          ...data,
-          stats: Object.assign({}, DEFAULT_PROGRESS.stats, data.stats || {})
-        });
-        if (!redirectRef.current && ["completed", "failed"].includes(data.run_state) && !data.is_running) {
-          redirectRef.current = true;
-          setTimeout(() => navigate("/analysis"), 1200);
-        }
-      } catch (error) {
-        if (active) setProgressState(current => ({
-          ...current,
-          last_error: error.message || "获取进度失败。"
-        }));
-      }
-    };
-    poll();
-    timer = setInterval(poll, 1000);
-    return () => {
-      active = false;
-      if (timer) clearInterval(timer);
-    };
-  }, [navigate]);
-  async function handleStop() {
-    if (!progressState.can_stop) return;
-    try {
-      const result = await callApi("stop_processing");
-      if (!result || !result.success) window.alert(result && result.message ? result.message : "停止指令发送失败。");
-    } catch (error) {
-      window.alert(error.message || "停止指令发送失败。");
-    }
-  }
-  const stats = progressState.stats || DEFAULT_PROGRESS.stats;
-  const logs = progressState.logs || [];
-  const taskMode = normalizeTaskMode(progressState.task_mode);
-  const isLocalTask = taskMode === "local";
-  const statusTone = progressState.run_state === "failed" ? "error" : progressState.run_state === "completed" ? "success" : progressState.is_running ? "info" : "neutral";
-  const statusLabel = progressState.run_state === "failed" ? "处理失败" : progressState.run_state === "completed" ? "处理完成" : progressState.is_running ? "实时连接已建立" : UI_COPY.pages.processing.statusWaiting;
-  const processingDetail = progressState.stop_requested ? UI_COPY.pages.processing.stopDetail : taskMode === "fetch" ? UI_COPY.pages.processing.processingDetailFetch : isLocalTask ? UI_COPY.pages.processing.processingDetailLocal : UI_COPY.pages.processing.processingDetail;
-  useEffect(() => {
-    if (!terminalBodyRef.current) return;
-    terminalBodyRef.current.scrollTop = terminalBodyRef.current.scrollHeight;
-  }, [logs, progressState.is_running, progressState.stop_requested]);
-  return /*#__PURE__*/React.createElement(AppShell, {
-    active: "processing",
-    onOpenDisclaimer: onOpenDisclaimer,
-    contentScrollable: false,
-    footerLeft: /*#__PURE__*/React.createElement("p", {
-      className: "footer-meta"
-    }, UI_COPY.pages.processing.closeHint),
-    footerRight: /*#__PURE__*/React.createElement(StatusPill, {
-      tone: statusTone,
-      icon: progressState.is_running ? "radar" : "schedule"
-    }, statusLabel)
+  }, "\u6309\u8D2D\u4E70\u65B9\u5305\u542B\u201C", String(settings.company).trim(), "\u201D\u8FDB\u884C\u5339\u914D\uFF1B\u660E\u786E\u4E0D\u5339\u914D\u7684\u7968\u636E\u4F1A\u5355\u72EC\u8FDB\u5165\u201C\u975E\u76EE\u6807\u516C\u53F8\u53D1\u7968\u201D\u3002")), /*#__PURE__*/React.createElement("p", {
+    className: "field-help"
+  }, "\u90AE\u7BB1\u4EFB\u52A1\u9700\u8981\u516C\u53F8\u540D\u79F0\u7528\u4E8E\u8D2D\u4E70\u65B9\u6821\u9A8C\uFF1B\u53EA\u505A\u90AE\u7BB1\u63D0\u53D6\u65F6\u53EF\u4E0D\u586B\u3002")))))), /*#__PURE__*/React.createElement("div", {
+    className: joinClasses("settings-section", section !== "rules" && "is-hidden"),
+    hidden: section !== "rules"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "page-wrap page-wrap--processing"
-  }, /*#__PURE__*/React.createElement(PageHeader, {
-    eyebrow: UI_COPY.pages.processing.eyebrow,
-    title: UI_COPY.pages.processing.title
-  }), /*#__PURE__*/React.createElement("section", {
-    className: "surface-card surface-card--hero"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "progress-hero"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "progress-main"
+    className: "settings-rules-head"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("p", {
-    className: "progress-kicker"
-  }, UI_COPY.pages.processing.currentOperation), /*#__PURE__*/React.createElement("h2", {
-    className: "progress-title"
-  }, progressState.status_text), /*#__PURE__*/React.createElement("p", {
-    className: "progress-meta"
-  }, processingDetail)), /*#__PURE__*/React.createElement("div", {
-    className: "progress-actions"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "progress-value"
-  }, /*#__PURE__*/React.createElement("strong", {
-    className: "u-tabular"
-  }, progressState.progress, "%"), /*#__PURE__*/React.createElement("span", null, UI_COPY.pages.processing.progressLabel)), /*#__PURE__*/React.createElement("button", {
-    type: "button",
-    className: "btn btn--danger",
-    onClick: handleStop,
-    disabled: !progressState.can_stop
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "material-symbols-outlined"
-  }, progressState.stop_requested ? "sync" : "close"), /*#__PURE__*/React.createElement("span", null, progressState.stop_requested ? "正在停止..." : "停止运行")))), /*#__PURE__*/React.createElement("div", {
-    className: "progress-track"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "progress-fill",
-    style: {
-      width: `${progressState.progress}%`
-    }
-  })), /*#__PURE__*/React.createElement("div", {
-    className: "progress-caption"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "material-symbols-outlined"
-  }, "sync"), /*#__PURE__*/React.createElement("span", null, progressState.stop_requested ? UI_COPY.pages.processing.stopPending : UI_COPY.pages.processing.liveRefresh)), progressState.last_error && progressState.run_state === "failed" ? /*#__PURE__*/React.createElement(NoticeBox, {
-    tone: "error"
-  }, progressState.last_error) : null, progressState.quota_exhausted && progressState.quota_message ? /*#__PURE__*/React.createElement(NoticeBox, {
-    tone: "warning"
-  }, progressState.quota_message) : null, progressState.stop_requested && progressState.run_state !== "failed" ? /*#__PURE__*/React.createElement(NoticeBox, {
-    tone: "warning"
-  }, UI_COPY.pages.processing.stopNotice) : null)), /*#__PURE__*/React.createElement("div", {
-    className: "metrics-grid"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "metric-card metric-card--blue"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "metric-card__icon"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "material-symbols-outlined"
-  }, isLocalTask ? "folder_open" : "mail")), /*#__PURE__*/React.createElement("div", {
-    className: "metric-card__copy"
-  }, /*#__PURE__*/React.createElement("p", {
-    className: "metric-card__label"
-  }, isLocalTask ? UI_COPY.pages.processing.scanFilesLabel : UI_COPY.pages.processing.scanEmailsLabel), /*#__PURE__*/React.createElement("p", {
-    className: "metric-card__value u-tabular"
-  }, stats.emails || 0))), /*#__PURE__*/React.createElement("div", {
-    className: "metric-card metric-card--green"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "metric-card__icon"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "material-symbols-outlined"
-  }, "description")), /*#__PURE__*/React.createElement("div", {
-    className: "metric-card__copy"
-  }, /*#__PURE__*/React.createElement("p", {
-    className: "metric-card__label"
-  }, "\u5DF2\u8BC6\u522B\u53D1\u7968"), /*#__PURE__*/React.createElement("p", {
-    className: "metric-card__value u-tabular"
-  }, stats.invoices || 0))), /*#__PURE__*/React.createElement("div", {
-    className: "metric-card metric-card--amber"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "metric-card__icon"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "material-symbols-outlined"
-  }, "warning")), /*#__PURE__*/React.createElement("div", {
-    className: "metric-card__copy"
-  }, /*#__PURE__*/React.createElement("p", {
-    className: "metric-card__label"
-  }, "\u5F02\u5E38\u5904\u7406"), /*#__PURE__*/React.createElement("p", {
-    className: "metric-card__value u-tabular"
-  }, stats.errors || 0)))), /*#__PURE__*/React.createElement("section", {
-    className: "surface-card surface-card--terminal processing-terminal",
-    style: {
-      flex: 1,
-      minHeight: 0,
-      display: "flex",
-      flexDirection: "column"
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "terminal-head"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "terminal-title"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "material-symbols-outlined"
-  }, "terminal"), /*#__PURE__*/React.createElement("span", null, "\u5B9E\u65F6\u6267\u884C\u65E5\u5FD7")), /*#__PURE__*/React.createElement("div", {
-    className: "terminal-dots"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "terminal-dot"
-  }), /*#__PURE__*/React.createElement("span", {
-    className: "terminal-dot"
-  }), /*#__PURE__*/React.createElement("span", {
-    className: "terminal-dot"
-  }))), /*#__PURE__*/React.createElement("div", {
-    ref: terminalBodyRef,
-    className: "terminal-body"
-  }, /*#__PURE__*/React.createElement("p", {
-    className: "terminal-intro"
-  }, "-- \u53D1\u7968\u52A9\u624B\u5F15\u64CE\u5DF2\u8FDE\u63A5 --", /*#__PURE__*/React.createElement("br", null), "-- \u8FDB\u5EA6\u4E0E\u65E5\u5FD7\u5B9E\u65F6\u5237\u65B0\u4E2D --"), logs.map((log, index) => /*#__PURE__*/React.createElement("div", {
-    key: `${log.time || "log"}-${index}`,
-    className: "terminal-line"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "terminal-time"
-  }, safeText(log.time, "[实时]")), /*#__PURE__*/React.createElement("span", {
-    className: resolveLogToneClass(log)
-  }, safeText(log.type, "LOG")), /*#__PURE__*/React.createElement("span", {
-    className: "terminal-text"
-  }, safeText(log.msg, "-")))), progressState.is_running ? /*#__PURE__*/React.createElement("div", {
-    className: "terminal-line",
-    style: {
-      marginTop: 4
-    }
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "terminal-time"
-  }, "[\u5B9E\u65F6]"), /*#__PURE__*/React.createElement("span", {
-    className: "terminal-kind terminal-kind--info"
-  }, "\u72B6\u6001"), /*#__PURE__*/React.createElement("span", {
-    className: "terminal-text"
-  }, progressState.stop_requested ? "正在安全停止..." : "任务持续执行中...", /*#__PURE__*/React.createElement("span", {
-    className: "terminal-cursor"
-  }))) : null))));
+    className: "page-eyebrow"
+  }, UI_COPY.pages.rules.title), /*#__PURE__*/React.createElement("p", {
+    className: "field-help"
+  }, UI_COPY.pages.rules.description)), /*#__PURE__*/React.createElement(StatusPill, {
+    tone: rulesIssues.length > 0 ? "warning" : "success",
+    icon: rulesIssues.length > 0 ? "warning" : "rule"
+  }, rulesIssues.length > 0 ? `${rulesIssues.length} 条提示` : rulesLibraryAvailable ? "含发票库规则" : "使用全局规则")), /*#__PURE__*/React.createElement(RulesWorkspace, {
+    prepare: () => persistNow()
+  }))));
 }
 function fileExtension(path) {
   const value = String(path || "").toLowerCase();
@@ -2307,6 +2624,7 @@ function ResultSummaryCard({
   }, /*#__PURE__*/React.createElement("div", {
     className: "stat-card__icon"
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined"
   }, icon)), /*#__PURE__*/React.createElement("div", {
     className: "stat-card__copy"
@@ -2331,6 +2649,7 @@ function ResultToolbarButton({
     onClick: onClick,
     disabled: disabled
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined"
   }, icon), /*#__PURE__*/React.createElement("span", null, label));
 }
@@ -2353,6 +2672,7 @@ function ResultActionBanner({
   }, /*#__PURE__*/React.createElement("div", {
     className: "manual-banner__icon"
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined"
   }, icon)), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("p", {
     className: "manual-banner__eyebrow"
@@ -2369,6 +2689,7 @@ function ResultActionBanner({
     onClick: onClick,
     disabled: disabled
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined"
   }, icon), /*#__PURE__*/React.createElement("span", null, buttonLabel)));
 }
@@ -2409,6 +2730,7 @@ function RuleEditor({
     return /*#__PURE__*/React.createElement("div", {
       className: "rules-empty-state"
     }, /*#__PURE__*/React.createElement("span", {
+      "aria-hidden": "true",
       className: "material-symbols-outlined"
     }, "edit_note"), /*#__PURE__*/React.createElement("p", null, "\u9009\u62E9\u4E00\u6761\u89C4\u5219\u7F16\u8F91\uFF0C\u6216\u65B0\u589E\u4E00\u6761\u89C4\u5219\u3002"));
   }
@@ -2479,6 +2801,7 @@ function RuleEditor({
       setTypeError("");
     }
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined"
   }, "add"), /*#__PURE__*/React.createElement("span", null, "\u65B0\u5EFA\u7968\u79CD"))), creatingType ? /*#__PURE__*/React.createElement("div", {
     className: "rule-type-create"
@@ -2489,6 +2812,7 @@ function RuleEditor({
       minWidth: 140
     }
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "field-icon material-symbols-outlined"
   }, "category"), /*#__PURE__*/React.createElement("input", {
     type: "text",
@@ -2506,6 +2830,7 @@ function RuleEditor({
     onClick: handleCreateType,
     disabled: typeBusy
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined"
   }, typeBusy ? "sync" : "check"), /*#__PURE__*/React.createElement("span", null, typeBusy ? "创建中..." : "确认新建")), /*#__PURE__*/React.createElement("button", {
     type: "button",
@@ -2519,14 +2844,17 @@ function RuleEditor({
   }, RULE_TARGET_TYPE_HELP)), /*#__PURE__*/React.createElement("div", {
     className: "field-block field-block--wide"
   }, /*#__PURE__*/React.createElement("label", {
-    className: "field-label"
+    className: "field-label",
+    htmlFor: "field-9"
   }, "\u5173\u952E\u8BCD ", /*#__PURE__*/React.createElement("span", {
     className: "field-required"
   }, "*")), /*#__PURE__*/React.createElement("div", {
     className: "field-shell"
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "field-icon material-symbols-outlined"
   }, "key"), /*#__PURE__*/React.createElement("input", {
+    id: "field-9",
     type: "text",
     className: "field-input",
     placeholder: "\u5982 \u6EF4\u6EF4\u3001\u661F\u5DF4\u514B\u3001\u67D0\u67D0\u9152\u5E97",
@@ -2539,10 +2867,12 @@ function RuleEditor({
   }, "\u53D1\u7968\u7684\u9500\u552E\u65B9\u6216\u660E\u7EC6\u5305\u542B\u8BE5\u5173\u952E\u8BCD\u65F6\u547D\u4E2D\u672C\u89C4\u5219\u3002")), /*#__PURE__*/React.createElement("div", {
     className: "field-block"
   }, /*#__PURE__*/React.createElement("label", {
-    className: "field-label"
+    className: "field-label",
+    htmlFor: "field-10"
   }, "\u91D1\u989D\u4E0B\u9650"), /*#__PURE__*/React.createElement("div", {
     className: "field-shell"
   }, /*#__PURE__*/React.createElement("input", {
+    id: "field-10",
     type: "text",
     inputMode: "decimal",
     className: "field-input u-tabular",
@@ -2554,10 +2884,12 @@ function RuleEditor({
   }))), /*#__PURE__*/React.createElement("div", {
     className: "field-block"
   }, /*#__PURE__*/React.createElement("label", {
-    className: "field-label"
+    className: "field-label",
+    htmlFor: "field-11"
   }, "\u91D1\u989D\u4E0A\u9650"), /*#__PURE__*/React.createElement("div", {
     className: "field-shell"
   }, /*#__PURE__*/React.createElement("input", {
+    id: "field-11",
     type: "text",
     inputMode: "decimal",
     className: "field-input u-tabular",
@@ -2569,10 +2901,12 @@ function RuleEditor({
   }))), /*#__PURE__*/React.createElement("div", {
     className: "field-block"
   }, /*#__PURE__*/React.createElement("label", {
-    className: "field-label"
+    className: "field-label",
+    htmlFor: "field-12"
   }, "\u542F\u7528"), /*#__PURE__*/React.createElement("label", {
     className: "toggle-row"
   }, /*#__PURE__*/React.createElement("input", {
+    id: "field-12",
     type: "checkbox",
     checked: editor.enabled !== false,
     onChange: event => onChange({
@@ -2585,6 +2919,7 @@ function RuleEditor({
   }, "\u5F52\u6863\u5230"), /*#__PURE__*/React.createElement("div", {
     className: "rule-archive-summary"
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined"
   }, "folder"), /*#__PURE__*/React.createElement("span", null, previewFolder ? `归档到：${previewFolder}` : "请选择目标票种，并填写关键词和金额范围")), /*#__PURE__*/React.createElement("p", {
     className: "field-help"
@@ -2597,12 +2932,14 @@ function RuleEditor({
     className: "btn btn--primary btn--sm",
     onClick: onCommit
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined"
   }, "check"), /*#__PURE__*/React.createElement("span", null, editor.mode === "new" ? "添加规则" : "保存修改")), /*#__PURE__*/React.createElement("button", {
     type: "button",
     className: "btn btn--ghost btn--sm",
     onClick: onCancel
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined"
   }, "close"), /*#__PURE__*/React.createElement("span", null, "\u53D6\u6D88"))));
 }
@@ -2719,10 +3056,12 @@ function RuleDictionarySection({
   }, /*#__PURE__*/React.createElement("div", {
     className: "field-block"
   }, /*#__PURE__*/React.createElement("label", {
-    className: "field-label"
+    className: "field-label",
+    htmlFor: "field-13"
   }, "\u9500\u552E\u65B9\u540D\u79F0\u6216\u7A0E\u53F7"), /*#__PURE__*/React.createElement("div", {
     className: "field-shell"
   }, /*#__PURE__*/React.createElement("input", {
+    id: "field-13",
     type: "text",
     className: "field-input",
     placeholder: "\u5982 \u67D0\u67D0\u9910\u996E\u7BA1\u7406\u6709\u9650\u516C\u53F8",
@@ -2750,6 +3089,7 @@ function RuleDictionarySection({
     className: "btn btn--secondary btn--sm",
     onClick: handleAdd
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined"
   }, "add_circle"), /*#__PURE__*/React.createElement("span", null, "\u6DFB\u52A0\u8BCD\u5178")), /*#__PURE__*/React.createElement("span", {
     className: "field-help"
@@ -2776,6 +3116,7 @@ function RuleDictionarySection({
     "aria-label": `删除 ${term.term}`,
     onClick: () => onDeleteTerm(index)
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined"
   }, "delete"))))));
 }
@@ -2813,6 +3154,7 @@ function RuleUnclassifiedSection({
     className: "btn btn--secondary btn--sm",
     onClick: () => onPrefill(row)
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined"
   }, "add_circle"), /*#__PURE__*/React.createElement("span", null, "\u636E\u6B64\u65B0\u5EFA\u89C4\u5219"))))), rows.length > 20 ? /*#__PURE__*/React.createElement("p", {
     className: "field-help"
@@ -2847,6 +3189,7 @@ function RuleBuiltinSection({
     onClick: onRestoreAll,
     disabled: busy
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined"
   }, "restart_alt"), /*#__PURE__*/React.createElement("span", null, "\u5168\u90E8\u6062\u590D\u9ED8\u8BA4"))), items.length === 0 ? /*#__PURE__*/React.createElement("p", {
     className: "field-help"
@@ -2862,6 +3205,7 @@ function RuleBuiltinSection({
       className: "rules-builtin-row__folder u-truncate",
       title: folderText
     }, /*#__PURE__*/React.createElement("span", {
+      "aria-hidden": "true",
       className: "material-symbols-outlined"
     }, "folder"), /*#__PURE__*/React.createElement("span", {
       className: "u-truncate"
@@ -2888,6 +3232,7 @@ function RuleBuiltinSection({
       "aria-label": `${row.enabled !== false ? "停用" : "启用"}内置规则 ${folderText}`,
       onClick: () => onToggle(row)
     }, /*#__PURE__*/React.createElement("span", {
+      "aria-hidden": "true",
       className: "material-symbols-outlined"
     }, row.enabled !== false ? "toggle_on" : "toggle_off")), /*#__PURE__*/React.createElement("button", {
       type: "button",
@@ -2896,6 +3241,7 @@ function RuleBuiltinSection({
       "aria-label": `编辑内置规则 ${folderText}`,
       onClick: () => onEdit(row)
     }, /*#__PURE__*/React.createElement("span", {
+      "aria-hidden": "true",
       className: "material-symbols-outlined"
     }, "edit")), /*#__PURE__*/React.createElement("button", {
       type: "button",
@@ -2904,6 +3250,7 @@ function RuleBuiltinSection({
       "aria-label": `恢复默认内置规则 ${folderText}`,
       onClick: () => onRestore(row)
     }, /*#__PURE__*/React.createElement("span", {
+      "aria-hidden": "true",
       className: "material-symbols-outlined"
     }, "restart_alt"))));
   }))));
@@ -2924,6 +3271,7 @@ function RuleBuiltinEditor({
     return /*#__PURE__*/React.createElement("div", {
       className: "rules-empty-state"
     }, /*#__PURE__*/React.createElement("span", {
+      "aria-hidden": "true",
       className: "material-symbols-outlined"
     }, "inventory_2"), /*#__PURE__*/React.createElement("p", null, "\u4ECE\u5185\u7F6E\u9ED8\u8BA4\u89C4\u5219\u4E2D\u9009\u62E9\u4E00\u6761\u8FDB\u884C\u8986\u76D6\u7F16\u8F91\u3002"));
   }
@@ -2994,6 +3342,7 @@ function RuleBuiltinEditor({
       setTypeError("");
     }
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined"
   }, "add"), /*#__PURE__*/React.createElement("span", null, "\u65B0\u5EFA\u7968\u79CD"))), creatingType ? /*#__PURE__*/React.createElement("div", {
     className: "rule-type-create"
@@ -3004,6 +3353,7 @@ function RuleBuiltinEditor({
       minWidth: 140
     }
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "field-icon material-symbols-outlined"
   }, "category"), /*#__PURE__*/React.createElement("input", {
     type: "text",
@@ -3021,6 +3371,7 @@ function RuleBuiltinEditor({
     onClick: handleCreateType,
     disabled: typeBusy
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined"
   }, typeBusy ? "sync" : "check"), /*#__PURE__*/React.createElement("span", null, typeBusy ? "创建中..." : "确认新建")), /*#__PURE__*/React.createElement("button", {
     type: "button",
@@ -3034,8 +3385,10 @@ function RuleBuiltinEditor({
   }, RULE_TARGET_TYPE_HELP)), /*#__PURE__*/React.createElement("div", {
     className: "field-block field-block--wide"
   }, /*#__PURE__*/React.createElement("label", {
-    className: "field-label"
+    className: "field-label",
+    htmlFor: "field-14"
   }, "\u5173\u952E\u8BCD"), /*#__PURE__*/React.createElement("textarea", {
+    id: "field-14",
     className: "rule-textarea",
     placeholder: "\u591A\u4E2A\u5173\u952E\u8BCD\u7528\u9017\u53F7\u6216\u6362\u884C\u5206\u9694",
     value: editor.keywordsText,
@@ -3047,10 +3400,12 @@ function RuleBuiltinEditor({
   }, "\u547D\u4E2D\u4EFB\u4E00\u5173\u952E\u8BCD\u65F6\u4F7F\u7528\u8FD9\u6761\u5185\u7F6E\u89C4\u5219\uFF1B\u7559\u7A7A\u8868\u793A\u8BE5\u89C4\u5219\u53EA\u6309\u7968\u79CD\u515C\u5E95\u3002")), /*#__PURE__*/React.createElement("div", {
     className: "field-block"
   }, /*#__PURE__*/React.createElement("label", {
-    className: "field-label"
+    className: "field-label",
+    htmlFor: "field-15"
   }, "\u91D1\u989D\u4E0B\u9650"), /*#__PURE__*/React.createElement("div", {
     className: "field-shell"
   }, /*#__PURE__*/React.createElement("input", {
+    id: "field-15",
     type: "text",
     inputMode: "decimal",
     className: "field-input u-tabular",
@@ -3062,10 +3417,12 @@ function RuleBuiltinEditor({
   }))), /*#__PURE__*/React.createElement("div", {
     className: "field-block"
   }, /*#__PURE__*/React.createElement("label", {
-    className: "field-label"
+    className: "field-label",
+    htmlFor: "field-16"
   }, "\u91D1\u989D\u4E0A\u9650"), /*#__PURE__*/React.createElement("div", {
     className: "field-shell"
   }, /*#__PURE__*/React.createElement("input", {
+    id: "field-16",
     type: "text",
     inputMode: "decimal",
     className: "field-input u-tabular",
@@ -3077,10 +3434,12 @@ function RuleBuiltinEditor({
   }))), /*#__PURE__*/React.createElement("div", {
     className: "field-block"
   }, /*#__PURE__*/React.createElement("label", {
-    className: "field-label"
+    className: "field-label",
+    htmlFor: "field-17"
   }, "\u542F\u7528"), /*#__PURE__*/React.createElement("label", {
     className: "toggle-row"
   }, /*#__PURE__*/React.createElement("input", {
+    id: "field-17",
     type: "checkbox",
     checked: editor.enabled !== false,
     onChange: event => onChange({
@@ -3093,6 +3452,7 @@ function RuleBuiltinEditor({
   }, "\u5F52\u6863\u5230"), /*#__PURE__*/React.createElement("div", {
     className: "rule-archive-summary"
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined"
   }, "folder"), /*#__PURE__*/React.createElement("span", null, previewFolder ? `归档到：${previewFolder}` : "请选择目标票种，并填写关键词和金额范围")), /*#__PURE__*/React.createElement("p", {
     className: "field-help"
@@ -3105,12 +3465,14 @@ function RuleBuiltinEditor({
     className: "btn btn--primary btn--sm",
     onClick: onCommit
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined"
   }, "check"), /*#__PURE__*/React.createElement("span", null, "\u4FDD\u5B58\u8986\u76D6")), /*#__PURE__*/React.createElement("button", {
     type: "button",
     className: "btn btn--ghost btn--sm",
     onClick: onCancel
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined"
   }, "close"), /*#__PURE__*/React.createElement("span", null, "\u53D6\u6D88"))));
 }
@@ -3127,28 +3489,43 @@ function RuleRestoreDialog({
   onConfirm,
   onCancel
 }) {
+  const cardRef = useRef(null);
+  const titleId = "restore-dialog-title";
+  const open = !!dialog;
+  useEffect(() => {
+    if (!open) return undefined;
+    const previouslyFocused = document.activeElement;
+    if (cardRef.current && cardRef.current.focus) cardRef.current.focus();
+    return () => {
+      if (previouslyFocused && previouslyFocused.focus) previouslyFocused.focus();
+    };
+  }, [open]);
   if (!dialog) return null;
   return /*#__PURE__*/React.createElement("div", {
     className: "modal-overlay",
     onClick: onCancel
   }, /*#__PURE__*/React.createElement("div", {
     className: "modal-card restore-dialog",
+    role: "dialog",
+    "aria-modal": "true",
+    "aria-labelledby": titleId,
+    tabIndex: -1,
+    ref: cardRef,
     onClick: event => event.stopPropagation()
   }, /*#__PURE__*/React.createElement("div", {
     className: "modal-head"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("p", {
     className: "page-eyebrow"
   }, "\u6062\u590D\u9ED8\u8BA4"), /*#__PURE__*/React.createElement("h2", {
-    className: "page-title",
-    style: {
-      fontSize: 26
-    }
+    id: titleId,
+    className: "sheet-title"
   }, dialog.title)), /*#__PURE__*/React.createElement("button", {
     type: "button",
     className: "btn btn--ghost btn--sm",
     onClick: onCancel,
     "aria-label": "\u5173\u95ED"
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined"
   }, "close"))), /*#__PURE__*/React.createElement("div", {
     className: "modal-body"
@@ -3201,6 +3578,7 @@ function RuleRestoreDialog({
     onClick: onConfirm,
     disabled: busy
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined"
   }, busy ? "sync" : "restart_alt"), /*#__PURE__*/React.createElement("span", null, busy ? "恢复中..." : "确认恢复")))));
 }
@@ -3252,6 +3630,7 @@ function RuleTypesManager({
   }) : null, customTypes.length === 0 ? /*#__PURE__*/React.createElement("div", {
     className: "rules-empty-state"
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined"
   }, "category"), /*#__PURE__*/React.createElement("p", null, "\u8FD8\u6CA1\u6709\u81EA\u5B9A\u4E49\u7968\u79CD\uFF0C\u53EF\u5728\u89C4\u5219\u7F16\u8F91\u5668\u4E2D\u65B0\u5EFA\u3002")) : /*#__PURE__*/React.createElement("div", {
     className: "rules-type-rows"
@@ -3271,10 +3650,13 @@ function RuleTypesManager({
     disabled: busy,
     onClick: () => onDeleteType(name)
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined"
   }, "delete"))))))));
 }
 function AnalysisPage({
+  theme,
+  onToggleTheme,
   onOpenDisclaimer
 }) {
   const navigate = useNavigate();
@@ -3443,7 +3825,7 @@ function AnalysisPage({
     icon: "inventory_2",
     label: "暂存记录",
     value: retentionCount,
-    helper: retentionCount > 0 ? "系统已保全但未纳入成功归档，可按需导出查看。" : "当前没有暂存记录。",
+    helper: retentionCount > 0 ? "已保留但未成功归档，可按需导出查看。" : "当前没有暂存记录。",
     tone: "info"
   }, {
     key: "manual",
@@ -3454,13 +3836,16 @@ function AnalysisPage({
     tone: manualCheckCount > 0 ? "warning" : "info"
   }];
   return /*#__PURE__*/React.createElement(AppShell, {
-    active: "analysis",
+    active: "results",
+    theme: theme,
+    onToggleTheme: onToggleTheme,
     onOpenDisclaimer: onOpenDisclaimer,
     footerLeft: /*#__PURE__*/React.createElement("button", {
       type: "button",
       className: "btn btn--ghost",
       onClick: () => navigate("/")
     }, /*#__PURE__*/React.createElement("span", {
+      "aria-hidden": "true",
       className: "material-symbols-outlined"
     }, "add_circle"), /*#__PURE__*/React.createElement("span", null, "\u5F00\u59CB\u65B0\u6279\u6B21")),
     footerRight: lastExportPath ? /*#__PURE__*/React.createElement("p", {
@@ -3469,7 +3854,6 @@ function AnalysisPage({
   }, /*#__PURE__*/React.createElement("div", {
     className: "page-wrap page-wrap--analysis"
   }, /*#__PURE__*/React.createElement(PageHeader, {
-    eyebrow: UI_COPY.pages.analysis.eyebrow,
     title: UI_COPY.pages.analysis.title
   }), completionBanner ? /*#__PURE__*/React.createElement(ResultActionBanner, {
     tone: "neutral",
@@ -3484,30 +3868,19 @@ function AnalysisPage({
   }) : null, /*#__PURE__*/React.createElement("section", {
     className: "surface-card surface-card--hero"
   }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      padding: 18,
-      display: "flex",
-      flexDirection: "column",
-      gap: 16
-    }
+    className: "hero-body"
   }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "flex-start",
-      gap: 16,
-      flexWrap: "wrap"
-    }
+    className: "hero-head"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("p", {
     className: "progress-kicker"
   }, UI_COPY.pages.analysis.statusSummary), /*#__PURE__*/React.createElement("h2", {
-    className: "progress-title"
+    className: "result-headline"
   }, resultHeadline), isFetchResult ? /*#__PURE__*/React.createElement("p", {
-    className: "progress-meta"
+    className: "result-meta"
   }, "\u672C\u8F6E\u5171\u63D0\u53D6 ", /*#__PURE__*/React.createElement("strong", {
     className: "u-tabular"
   }, fetchAttachments), " \u4E2A\u9644\u4EF6\uFF0C\u6E05\u5355\u5DF2\u5199\u5165 inbox \u6587\u4EF6\u5939\u3002") : /*#__PURE__*/React.createElement("p", {
-    className: "progress-meta"
+    className: "result-meta"
   }, "\u5171\u6574\u7406 ", /*#__PURE__*/React.createElement("strong", {
     className: "u-tabular"
   }, totalResultCount), " \u6761\u7ED3\u679C\u8BB0\u5F55\u3002", statusText)), /*#__PURE__*/React.createElement("div", {
@@ -3527,6 +3900,7 @@ function AnalysisPage({
   }, /*#__PURE__*/React.createElement("div", {
     className: "classification-summary__head"
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined"
   }, "category"), /*#__PURE__*/React.createElement("span", null, UI_COPY.pages.analysis.classificationTitle)), classificationEntries.length > 0 ? /*#__PURE__*/React.createElement("div", {
     className: "group-strip group-strip--inline"
@@ -3551,7 +3925,11 @@ function AnalysisPage({
     title: `检测到 ${unclassifiedCount} 张发票未归类`,
     text: "\u8FD9\u4E9B\u53D1\u7968\u6CA1\u6709\u547D\u4E2D\u4EFB\u4F55\u5DF2\u542F\u7528\u7C7B\u76EE\uFF0C\u6574\u7406\u540E\u4F1A\u8FDB\u5165\u5F85\u4EBA\u5DE5\u590D\u6838\u3002\u8865\u5145\u5F52\u7C7B\u89C4\u5219\u540E\u91CD\u65B0\u6574\u7406\u5373\u53EF\u81EA\u52A8\u5F52\u6863\u3002",
     buttonLabel: "\u7BA1\u7406\u5F52\u7C7B\u89C4\u5219",
-    onClick: () => navigate("/rules")
+    onClick: () => navigate("/settings", {
+      state: {
+        settingsSection: "rules"
+      }
+    })
   }) : null, manualCheckCount > 0 ? /*#__PURE__*/React.createElement(ResultActionBanner, {
     icon: "folder_open",
     eyebrow: UI_COPY.pages.analysis.reviewTitle,
@@ -3580,8 +3958,8 @@ function AnalysisPage({
     disabled: !outputBanner.openPath
   })));
 }
-function RulesPage({
-  onOpenDisclaimer
+function RulesWorkspace({
+  prepare
 }) {
   const [rulesData, setRulesData] = useState(null);
   const [libraryDir, setLibraryDir] = useState("");
@@ -3752,6 +4130,7 @@ function RulesPage({
     let active = true;
     (async () => {
       try {
+        if (prepare) await prepare();
         const data = await callApi("load_classification_rules", "");
         if (!active) return;
         applyRulesData(data);
@@ -4379,51 +4758,50 @@ function RulesPage({
       [field]: value
     }));
   }
-  return /*#__PURE__*/React.createElement(AppShell, {
-    active: "rules",
-    onOpenDisclaimer: onOpenDisclaimer,
-    footerLeft: /*#__PURE__*/React.createElement("div", {
-      className: "footer-cluster"
-    }, /*#__PURE__*/React.createElement("button", {
-      type: "button",
-      className: "btn btn--ghost btn--sm",
-      onClick: () => reloadRules(),
-      disabled: busyAction === "reload"
-    }, /*#__PURE__*/React.createElement("span", {
-      className: "material-symbols-outlined"
-    }, busyAction === "reload" ? "sync" : "refresh"), /*#__PURE__*/React.createElement("span", null, busyAction === "reload" ? "加载中..." : "重新加载")), /*#__PURE__*/React.createElement("button", {
-      type: "button",
-      className: "btn btn--ghost btn--sm",
-      onClick: handleOpenRulesFolder,
-      disabled: busyAction === "folder"
-    }, /*#__PURE__*/React.createElement("span", {
-      className: "material-symbols-outlined"
-    }, "folder_open"), /*#__PURE__*/React.createElement("span", null, "\u6253\u5F00\u89C4\u5219\u76EE\u5F55")), /*#__PURE__*/React.createElement("button", {
-      type: "button",
-      className: "btn btn--ghost btn--sm",
-      onClick: handleResetScope,
-      disabled: busyAction === "reset"
-    }, /*#__PURE__*/React.createElement("span", {
-      className: "material-symbols-outlined"
-    }, "restart_alt"), /*#__PURE__*/React.createElement("span", null, busyAction === "reset" ? "恢复中..." : "恢复默认"))),
-    footerRight: /*#__PURE__*/React.createElement("button", {
-      type: "button",
-      className: "btn btn--primary",
-      onClick: handleSaveRules,
-      disabled: saving || loading || missingTargetCount > 0 || missingBuiltinTargetCount > 0
-    }, /*#__PURE__*/React.createElement("span", {
-      className: "material-symbols-outlined"
-    }, saving ? "sync" : "save"), /*#__PURE__*/React.createElement("span", null, saving ? "保存中..." : "保存规则"))
+  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "rules-workspace"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "page-wrap page-wrap--rules"
-  }, /*#__PURE__*/React.createElement(PageHeader, {
-    title: UI_COPY.pages.rules.title,
-    description: UI_COPY.pages.rules.description,
-    badge: /*#__PURE__*/React.createElement(StatusPill, {
-      tone: dirty ? "warning" : "success",
-      icon: dirty ? "edit" : "task_alt"
-    }, dirty ? "有未保存修改" : "规则已加载")
-  }), loading && !rulesData ? /*#__PURE__*/React.createElement(NoticeBox, {
+    className: "rules-action-bar"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "footer-cluster"
+  }, /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn--ghost btn--sm",
+    onClick: () => reloadRules(),
+    disabled: busyAction === "reload"
+  }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
+    className: "material-symbols-outlined"
+  }, busyAction === "reload" ? "sync" : "refresh"), /*#__PURE__*/React.createElement("span", null, busyAction === "reload" ? "加载中..." : "重新加载")), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn--ghost btn--sm",
+    onClick: handleOpenRulesFolder,
+    disabled: busyAction === "folder"
+  }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
+    className: "material-symbols-outlined"
+  }, "folder_open"), /*#__PURE__*/React.createElement("span", null, "\u6253\u5F00\u89C4\u5219\u76EE\u5F55")), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn--ghost btn--sm",
+    onClick: handleResetScope,
+    disabled: busyAction === "reset"
+  }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
+    className: "material-symbols-outlined"
+  }, "restart_alt"), /*#__PURE__*/React.createElement("span", null, busyAction === "reset" ? "恢复中..." : "恢复默认"))), /*#__PURE__*/React.createElement("div", {
+    className: "footer-cluster"
+  }, /*#__PURE__*/React.createElement(StatusPill, {
+    tone: dirty ? "warning" : "success",
+    icon: dirty ? "edit" : "task_alt"
+  }, dirty ? "有未保存修改" : "规则已加载"), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "btn btn--primary btn--sm",
+    onClick: handleSaveRules,
+    disabled: saving || loading || missingTargetCount > 0 || missingBuiltinTargetCount > 0
+  }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
+    className: "material-symbols-outlined"
+  }, saving ? "sync" : "save"), /*#__PURE__*/React.createElement("span", null, saving ? "保存中..." : "保存规则")))), loading && !rulesData ? /*#__PURE__*/React.createElement(NoticeBox, {
     tone: "info"
   }, "\u6B63\u5728\u52A0\u8F7D\u5F52\u7C7B\u89C4\u5219...") : null, loadError ? /*#__PURE__*/React.createElement(NoticeBox, {
     tone: "error"
@@ -4465,14 +4843,16 @@ function RulesPage({
     }, option.label);
   })), /*#__PURE__*/React.createElement("p", {
     className: "field-help"
-  }, ruleScopeDescription(scope)), /*#__PURE__*/React.createElement("p", {
+  }, ruleScopeDescription(scope)), /*#__PURE__*/React.createElement("div", {
+    className: "field-help-group"
+  }, /*#__PURE__*/React.createElement("p", {
     className: "field-help field-help--subtle u-mono u-truncate",
     title: directoryText
   }, "\u89C4\u5219\u6587\u4EF6\uFF1A", directoryText), /*#__PURE__*/React.createElement("p", {
     className: "field-help"
   }, "\u5728\u754C\u9762\u4FDD\u5B58\u4F1A\u91CD\u5199\u5F53\u524D\u4F5C\u7528\u8303\u56F4\u7684\u89C4\u5219\u6587\u4EF6\uFF1B\u5982\u9700\u4FDD\u7559 YAML \u6CE8\u91CA\uFF0C\u8BF7\u76F4\u63A5\u7F16\u8F91\u89C4\u5219\u6587\u4EF6\u3002"), !libraryAvailable ? /*#__PURE__*/React.createElement("p", {
     className: "field-help"
-  }, "\u6682\u672A\u8BC6\u522B\u5230\u5F53\u524D\u53D1\u7968\u5E93\uFF1A\u5148\u5B8C\u6210\u4E00\u6B21\u672C\u5730\u6574\u7406\u6216\u9009\u62E9\u8F93\u51FA\u76EE\u5F55\u540E\uFF0C\u624D\u80FD\u5207\u6362\u300C\u5F53\u524D\u53D1\u7968\u5E93\u300D\u5E76\u4FDD\u5B58\u5E93\u5185\u89C4\u5219\u3002") : null)), /*#__PURE__*/React.createElement("div", {
+  }, "\u6682\u672A\u8BC6\u522B\u5230\u5F53\u524D\u53D1\u7968\u5E93\uFF1A\u5148\u5B8C\u6210\u4E00\u6B21\u672C\u5730\u6574\u7406\u6216\u9009\u62E9\u8F93\u51FA\u76EE\u5F55\u540E\uFF0C\u624D\u80FD\u5207\u6362\u300C\u5F53\u524D\u53D1\u7968\u5E93\u300D\u5E76\u4FDD\u5B58\u5E93\u5185\u89C4\u5219\u3002") : null))), /*#__PURE__*/React.createElement("div", {
     className: "rules-tabbar",
     role: "tablist",
     "aria-label": "\u5F52\u7C7B\u89C4\u5219\u5206\u533A"
@@ -4504,10 +4884,12 @@ function RulesPage({
   }, /*#__PURE__*/React.createElement("div", {
     className: "field-block"
   }, /*#__PURE__*/React.createElement("label", {
-    className: "field-label"
+    className: "field-label",
+    htmlFor: "field-18"
   }, "\u9500\u552E\u65B9"), /*#__PURE__*/React.createElement("div", {
     className: "field-shell"
   }, /*#__PURE__*/React.createElement("input", {
+    id: "field-18",
     type: "text",
     className: "field-input",
     placeholder: "\u5982 \u67D0\u67D0\u9910\u996E\u7BA1\u7406\u6709\u9650\u516C\u53F8",
@@ -4516,10 +4898,12 @@ function RulesPage({
   }))), /*#__PURE__*/React.createElement("div", {
     className: "field-block"
   }, /*#__PURE__*/React.createElement("label", {
-    className: "field-label"
+    className: "field-label",
+    htmlFor: "field-19"
   }, "\u9500\u552E\u65B9\u7A0E\u53F7"), /*#__PURE__*/React.createElement("div", {
     className: "field-shell"
   }, /*#__PURE__*/React.createElement("input", {
+    id: "field-19",
     type: "text",
     className: "field-input u-mono",
     placeholder: "\u53EF\u9009",
@@ -4528,10 +4912,12 @@ function RulesPage({
   }))), /*#__PURE__*/React.createElement("div", {
     className: "field-block"
   }, /*#__PURE__*/React.createElement("label", {
-    className: "field-label"
+    className: "field-label",
+    htmlFor: "field-20"
   }, "\u53D1\u7968\u660E\u7EC6"), /*#__PURE__*/React.createElement("div", {
     className: "field-shell"
   }, /*#__PURE__*/React.createElement("input", {
+    id: "field-20",
     type: "text",
     className: "field-input",
     placeholder: "\u5982 \u9910\u996E\u670D\u52A1",
@@ -4555,10 +4941,12 @@ function RulesPage({
   })), /*#__PURE__*/React.createElement("div", {
     className: "field-block"
   }, /*#__PURE__*/React.createElement("label", {
-    className: "field-label"
+    className: "field-label",
+    htmlFor: "field-21"
   }, "\u91D1\u989D"), /*#__PURE__*/React.createElement("div", {
     className: "field-shell"
   }, /*#__PURE__*/React.createElement("input", {
+    id: "field-21",
     type: "text",
     inputMode: "decimal",
     className: "field-input u-tabular",
@@ -4573,6 +4961,7 @@ function RulesPage({
     onClick: handleTestRules,
     disabled: testState.status === "testing"
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined"
   }, testState.status === "testing" ? "sync" : "play_arrow"), /*#__PURE__*/React.createElement("span", null, testState.status === "testing" ? "测试中..." : "测试归类结果")), /*#__PURE__*/React.createElement("button", {
     type: "button",
@@ -4584,6 +4973,7 @@ function RulesPage({
       message: ""
     })
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined"
   }, "clear_all"), /*#__PURE__*/React.createElement("span", null, "\u6E05\u7A7A\u7ED3\u679C"))), testState.message ? /*#__PURE__*/React.createElement(NoticeBox, {
     tone: testState.status === "error" ? "error" : "info"
@@ -4647,10 +5037,12 @@ function RulesPage({
     className: "btn btn--secondary btn--sm",
     onClick: handleAddRule
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined"
   }, "add"), /*#__PURE__*/React.createElement("span", null, "\u65B0\u589E\u89C4\u5219"))), ruleRows.length === 0 ? /*#__PURE__*/React.createElement("div", {
     className: "rules-empty-state"
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined"
   }, "rule"), /*#__PURE__*/React.createElement("p", null, "\u5F53\u524D\u4F5C\u7528\u8303\u56F4\u8FD8\u6CA1\u6709\u81EA\u5B9A\u4E49\u89C4\u5219\uFF0C\u70B9\u51FB\u300C\u65B0\u589E\u89C4\u5219\u300D\u521B\u5EFA\u7B2C\u4E00\u6761\u89C4\u5219\u3002")) : /*#__PURE__*/React.createElement("div", {
     className: "rules-category-list"
@@ -4662,6 +5054,7 @@ function RulesPage({
   }, /*#__PURE__*/React.createElement("div", {
     className: "rule-category-row__title"
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "rule-category-row__folder-icon material-symbols-outlined"
   }, "folder"), /*#__PURE__*/React.createElement("span", {
     className: joinClasses("rule-category-row__name", "u-truncate", !row.previewFolder && "rule-category-row__name--missing"),
@@ -4686,6 +5079,7 @@ function RulesPage({
     "aria-label": `${row.enabled !== false ? "停用" : "启用"} ${row.previewFolder || "规则"}`,
     onClick: () => handleToggleRule(row.index)
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined"
   }, row.enabled !== false ? "toggle_on" : "toggle_off")), /*#__PURE__*/React.createElement("button", {
     type: "button",
@@ -4695,6 +5089,7 @@ function RulesPage({
     disabled: row.index === 0,
     onClick: () => handleMoveRule(row.index, -1)
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined"
   }, "arrow_upward")), /*#__PURE__*/React.createElement("button", {
     type: "button",
@@ -4704,6 +5099,7 @@ function RulesPage({
     disabled: row.index === ruleRows.length - 1,
     onClick: () => handleMoveRule(row.index, 1)
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined"
   }, "arrow_downward")), /*#__PURE__*/React.createElement("button", {
     type: "button",
@@ -4712,6 +5108,7 @@ function RulesPage({
     "aria-label": `编辑 ${row.previewFolder || "规则"}`,
     onClick: () => handleEditRule(row.index)
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined"
   }, "edit")), /*#__PURE__*/React.createElement("button", {
     type: "button",
@@ -4720,6 +5117,7 @@ function RulesPage({
     "aria-label": `删除 ${row.previewFolder || "规则"}`,
     onClick: () => handleDeleteRule(row.index)
   }, /*#__PURE__*/React.createElement("span", {
+    "aria-hidden": "true",
     className: "material-symbols-outlined"
   }, "delete"))))))))), /*#__PURE__*/React.createElement("div", {
     className: "rules-column rules-column--side"
@@ -4861,25 +5259,47 @@ if (typeof window.addEventListener === "function") {
 }
 function App() {
   const [showDisclaimer, setShowDisclaimer] = useState(false);
-  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(MemoryRouter, null, /*#__PURE__*/React.createElement(Routes, null, /*#__PURE__*/React.createElement(Route, {
+  const {
+    theme,
+    toggleTheme
+  } = useTheme();
+  const shell = useShellSettings();
+  const openDisclaimer = () => setShowDisclaimer(true);
+  const bootstrapping = shell.bootstrapState !== "bootstrapped";
+  const bootstrapFailed = shell.bootstrapState === "bootstrap_failed";
+  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(MemoryRouter, null, bootstrapping ? /*#__PURE__*/React.createElement(BootstrapStatePage, {
+    active: "home",
+    theme: theme,
+    onToggleTheme: toggleTheme,
+    onOpenDisclaimer: openDisclaimer,
+    eyebrow: UI_COPY.pages.home.eyebrow,
+    title: UI_COPY.pages.home.bootstrapTitle,
+    description: bootstrapFailed ? UI_COPY.pages.home.errorDescription : UI_COPY.pages.home.bootstrapDescription,
+    tone: bootstrapFailed ? "error" : "info",
+    message: bootstrapFailed ? shell.bootstrapError || UI_COPY.pages.home.errorMessage : UI_COPY.pages.home.bootstrapMessage,
+    footerText: "\u6B63\u5728\u8F7D\u5165"
+  }) : /*#__PURE__*/React.createElement(Routes, null, /*#__PURE__*/React.createElement(Route, {
     path: "/",
-    element: /*#__PURE__*/React.createElement(SettingsPage, {
-      onOpenDisclaimer: () => setShowDisclaimer(true)
+    element: /*#__PURE__*/React.createElement(HomePage, {
+      shell: shell,
+      theme: theme,
+      onToggleTheme: toggleTheme,
+      onOpenDisclaimer: openDisclaimer
     })
   }), /*#__PURE__*/React.createElement(Route, {
-    path: "/processing",
-    element: /*#__PURE__*/React.createElement(ProcessingPage, {
-      onOpenDisclaimer: () => setShowDisclaimer(true)
-    })
-  }), /*#__PURE__*/React.createElement(Route, {
-    path: "/analysis",
+    path: "/results",
     element: /*#__PURE__*/React.createElement(AnalysisPage, {
-      onOpenDisclaimer: () => setShowDisclaimer(true)
+      theme: theme,
+      onToggleTheme: toggleTheme,
+      onOpenDisclaimer: openDisclaimer
     })
   }), /*#__PURE__*/React.createElement(Route, {
-    path: "/rules",
-    element: /*#__PURE__*/React.createElement(RulesPage, {
-      onOpenDisclaimer: () => setShowDisclaimer(true)
+    path: "/settings",
+    element: /*#__PURE__*/React.createElement(SettingsPage, {
+      shell: shell,
+      theme: theme,
+      onToggleTheme: toggleTheme,
+      onOpenDisclaimer: openDisclaimer
     })
   }))), /*#__PURE__*/React.createElement(DisclaimerDialog, {
     open: showDisclaimer,

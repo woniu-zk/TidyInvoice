@@ -2237,7 +2237,7 @@ class InvoiceAppAPI(AdmissionMixin, SettingsRulesMixin, DiagnosticsMixin):
 
     def test_connection(self, email, auth_code, api_key="", ai_provider="glm"):
 
-        """前端测试连接时调用；无 API Key 时只验证邮箱并确认本地识别引擎可用。"""
+        """前端测试连接时调用；无 API Key 时只验证邮箱连接。"""
         api_key = str(api_key or "")
         provider = normalize_provider(ai_provider)
         is_deepseek = provider == DEEPSEEK_PROVIDER
@@ -2287,7 +2287,7 @@ class InvoiceAppAPI(AdmissionMixin, SettingsRulesMixin, DiagnosticsMixin):
             if auth_code:
                 return {
                     "success": True,
-                    "message": "连接成功 - 邮箱验证通过，本地识别引擎已就绪（无需 API Key）",
+                    "message": "连接成功 - 邮箱验证通过",
                 }
             return {"success": False, "message": "请填写邮箱地址和授权码"}
 

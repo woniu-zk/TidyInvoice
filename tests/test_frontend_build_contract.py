@@ -122,12 +122,17 @@ def test_settings_ui_no_longer_exposes_api_key_or_provider_fields():
     for fragment in removed_fragments:
         assert fragment not in source, f"settings UI still references {fragment!r}"
 
-    # Local recognition engine block replaces the former AI provider card.
-    assert 'title="本地识别引擎"' in source
-    assert "PDF 文本解析" in source
-    assert "OFD 解析" in source
-    assert "本地 OCR" in source
-    assert "无需联网" in source
+    # The local recognition engine card was removed from the GUI.
+    for removed in (
+        "本地识别引擎",
+        "LOCAL_ENGINE_ITEMS",
+        "engine-item",
+        "PDF 文本解析",
+        "OFD 解析",
+        "本地 OCR",
+        "无需联网",
+    ):
+        assert removed not in source, f"removed local-engine UI still present: {removed!r}"
 
     assert 'callApi("start_processing", "", settings.save_path, runSettings.date_from, runSettings.date_to, String(settings.email).trim(), settings.auth_code)' in source
     assert re.search(
@@ -205,18 +210,15 @@ def _decode_js_unicode_escapes(text: str) -> str:
     return _JS_UNICODE_ESCAPE.sub(lambda match: chr(int(match.group(1), 16)), text)
 
 
-def test_task_mode_ui_follows_organize_frontend_contract():
-    """三种任务模式（mail / fetch / local）必须按本地整理契约实现。"""
+def test_home_task_actions_follow_organize_frontend_contract():
+    """首页三种任务动作（fetch / local / mail）必须按本地整理契约实现。"""
     source = _read(SOURCE_PATH)
     built = _decode_js_unicode_escapes(_read(BUILT_PATH))
 
-
     mode_copy = (
+        "邮箱提取",
+        "本地整理",
         "邮箱提取并整理",
-        "仅提取到 inbox",
-        "本地文件夹整理",
-        "开始整理",
-        "整理进目录",
         "按分类分目录",
         "仅提取完成",
         "本地整理完成",
@@ -227,6 +229,8 @@ def test_task_mode_ui_follows_organize_frontend_contract():
         "已按命名规则整理本地发票（未建分类子目录）；原始文件保留在发票文件夹，未移动。",
         "默认同发票文件夹",
         "恢复默认（发票文件夹）",
+        "处理进度",
+        "查看结果",
     )
     persistence_fields = ("task_mode", "local_input_dir", "local_output_dir", "local_split_by_category")
     for marker in mode_copy + persistence_fields:
@@ -264,49 +268,59 @@ def test_task_mode_ui_follows_organize_frontend_contract():
 
 
 def test_settings_top_level_cards_never_flex_shrink_into_slivers():
-    """Regression: the 任务类型 card must not be flex-shrunk to a 1px sliver.
+    """Regression: top-level page cards must not flex-shrink into 1px slivers.
 
-    The settings page is a flex column; a new top-level card without an explicit
-    ``flex: 0 0 auto`` was shrunk to one pixel by the page layout, so the whole
-    mode selector was invisible while still present in the DOM.
+    Settings and the new home page are flex columns; a top-level card without an
+    explicit ``flex: 0 0 auto`` was shrunk to one pixel by the page layout.
     """
     html = _read(HTML_PATH)
     normalized = " ".join(html.split())
-    assert ".page-wrap--settings > .surface-card" in normalized, (
+    assert ".page-wrap--settings > .surface-card," in normalized, (
         "top-level settings cards need an explicit flex-shrink opt-out"
     )
-    assert ".page-wrap--settings { min-height: 100%; height: auto; justify-content: flex-start;" in normalized
+    assert ".page-wrap--home > .surface-card," in normalized, (
+        "top-level home cards need an explicit flex-shrink opt-out"
+    )
+    assert ".page-wrap--settings, .page-wrap--home { min-height: 100%; height: auto; justify-content: flex-start;" in normalized
     assert normalized.count("flex: 0 0 auto") >= 2
 
 
-def test_toggle_checkboxes_keep_a_visible_native_box():
-    """Regression: the global input reset stripped the native checkbox glyph.
+def test_toggle_rows_draw_a_visible_switch():
+    """Regression: the global input reset must never leave an invisible control.
 
-    ``input:not([type="date"]) { appearance: none }`` removed the box and tick,
-    so 「按分类分目录」/「自动记住当前配置」 rendered as invisible 18x18 hit
-    areas while the label text stayed visible.
+    Apple/macOS 版本把复选画成 UISwitch：显式取消原生外观（``appearance: none``）
+    之后，必须自己画出轨道与圆点，并保持可点击尺寸；否则「按分类分目录」/
+    「自动记住当前配置」会退化成看不见的命中区。
     """
     html = " ".join(_read(HTML_PATH).split())
     assert '.toggle-row input[type="checkbox"]' in html
     rule_start = html.index('.toggle-row input[type="checkbox"]')
-    rule = html[rule_start:rule_start + 320]
-    assert "appearance: auto" in rule
-    assert "-webkit-appearance: auto" in rule
-    # The global reset stays for the text inputs; the toggle rule must override it.
+    rule = html[rule_start:rule_start + 620]
+    assert "appearance: none" in rule
+    assert "-webkit-appearance: none" in rule
+    assert "width: 38px" in rule and "height: 22px" in rule
+    # 轨道要有开启态，圆点由 ::before 画出。
+    assert '.toggle-row input[type="checkbox"]:checked' in html
+    assert '.toggle-row input[type="checkbox"]::before' in html
+    # 全局复位仍然作用于文本输入。
     assert 'input:not([type="date"]), select { appearance: none' in html
 
 
 # --------------------------------------------------------------------------- #
-# Expense classification rules page (/rules) - target types redesign
+# Three-tab shell + embedded expense classification rules (settings)
 # --------------------------------------------------------------------------- #
 
-RULES_NAV_ITEM = (
-    '{ key: "rules", label: "归类规则", description: "目标票种、关键词与金额", '
-    'icon: "rule", path: "/rules" }'
+HOME_NAV_ITEM = (
+    '{ key: "home", label: "首页", description: "提取与整理", '
+    'icon: "space_dashboard", path: "/" }'
 )
-RULES_ROUTE = (
-    '<Route path="/rules" element={<RulesPage onOpenDisclaimer={() => '
-    "setShowDisclaimer(true)} />} />"
+RESULTS_NAV_ITEM = (
+    '{ key: "results", label: "结果", description: "汇总与导出", '
+    'icon: "assessment", path: "/results" }'
+)
+SETTINGS_NAV_ITEM = (
+    '{ key: "settings", label: "设置", description: "邮箱与规则", '
+    'icon: "settings", path: "/settings" }'
 )
 RULES_VISIBLE_COPY = (
     "归类规则",
@@ -347,7 +361,7 @@ RULES_VISIBLE_COPY = (
     "重新加载",
     "恢复默认",
     "打开规则目录",
-    "费用归类规则",
+    "规则设置",
     "管理归类规则",
     "分类汇总",
     "在界面保存会重写当前作用范围的规则文件",
@@ -489,13 +503,24 @@ globalThis.__probeResult = (function () {
 '''
 
 
-def test_rules_route_navigation_and_backend_calls():
+def test_three_tab_navigation_and_embedded_rules_calls():
     source = _read(SOURCE_PATH)
-    assert RULES_NAV_ITEM in source, "navigation is missing the /rules entry"
-    assert RULES_ROUTE in source, "App routes are missing the /rules RulesPage route"
-    assert "function RulesPage(" in source
+    for item in (HOME_NAV_ITEM, RESULTS_NAV_ITEM, SETTINGS_NAV_ITEM):
+        assert item in source, f"navigation is missing {item!r}"
+    assert 'path: "/rules"' not in source, "the standalone rules tab must be gone"
+    assert 'path: "/processing"' not in source, "the standalone processing tab must be gone"
+    assert '<Route path="/rules"' not in source
+    assert '<Route path="/processing"' not in source
+    assert "function ProcessingPage(" not in source
+    assert "function RulesPage(" not in source
+    assert "function RulesWorkspace(" in source
+    assert "<RulesWorkspace prepare={() => persistNow()} />" in source
+    assert "function HomePage(" in source
+    assert '<Route path="/" element={<HomePage' in source
+    assert '<Route path="/results" element={<AnalysisPage' in source
+    assert '<Route path="/settings" element={<SettingsPage' in source
 
-    # Exactly one startup status probe (Settings bootstrap), never the 3s polling.
+    # Exactly one startup status probe (shared shell), never the 3s polling.
     assert source.count('callApi("get_classification_rules_status")') == 1
     assert "setInterval(loadResults, 3000)" in source, "analysis polling contract changed"
 
@@ -900,17 +925,32 @@ def test_rules_auto_folder_preview_formats_match_contract(tmp_path):
     ]
 
 
-def test_settings_page_cards_the_classification_rules_entry():
+def test_settings_page_embeds_email_and_rules_sections():
     source = _read(SOURCE_PATH)
-    assert 'title="费用归类规则"' in source
-    assert 'onClick={() => navigate("/rules")}' in source
-    assert "按目标票种、关键词与金额范围生成归档文件夹" in source
-    assert 'callApi("get_classification_rules_status").catch(() => ({}))' in source
-    assert "rulesStatus: rulesStatusRes || {}" in source
-    assert "const [rulesStatus, setRulesStatus] = useState({});" in source
-    assert "setRulesStatus(state.rulesStatus || {});" in source
-    assert "const rulesIssues = normalizeRuleIssues(rulesStatus && rulesStatus.issues);" in source
-    assert "归类规则配置需要确认" in source
+    built = _decode_js_unicode_escapes(_read(BUILT_PATH))
+    for marker in (
+        'emailSection: "邮箱配置"',
+        'rulesSection: "规则设置"',
+        'emailCardTitle: "邮箱源配置"',
+        'companyCardTitle: "公司配置"',
+        "function RulesWorkspace(",
+        "<RulesWorkspace prepare={() => persistNow()} />",
+        "settingsSection",
+        "useLocation",
+        "settings-tabbar",
+        "settings-section",
+        "规则保存后在下一次整理时生效",
+        'callApi("get_classification_rules_status").catch(() => ({}))',
+        "rulesStatus: rulesStatusRes || {}",
+        "const [rulesStatus, setRulesStatus] = useState({});",
+        "setRulesStatus(state.rulesStatus || {});",
+        "const rulesIssues = normalizeRuleIssues(rulesStatus && rulesStatus.issues);",
+    ):
+        assert marker in source, f"settings page is missing {marker!r}"
+    assert 'onClick={() => navigate("/rules")}' not in source
+    assert 'title="费用归类规则"' not in source
+    for marker in ("邮箱配置", "规则设置"):
+        assert marker in built, f"compiled bundle is missing settings copy {marker!r}"
 
 
 def test_analysis_page_shows_classification_summary_and_rules_banner():
@@ -935,16 +975,14 @@ def test_analysis_page_shows_classification_summary_and_rules_banner():
         assert marker in built, f"compiled bundle is missing analysis copy {marker!r}"
 
 
-def test_rules_page_top_level_cards_never_flex_shrink_into_slivers():
+def test_embedded_rules_styles_do_not_flex_shrink():
     html = " ".join(_read(HTML_PATH).split())
-    assert ".page-wrap--rules { min-height: 100%; height: auto; justify-content: flex-start;" in html, (
-        "the rules page wrap needs the same flex guard as the settings page"
-    )
-    assert ".page-wrap--rules > .surface-card { flex: 0 0 auto; min-height: auto; }" in html
-    assert ".page-wrap--rules > .rules-panel," in html
-    assert ".page-wrap--rules > .rules-builtin," in html
-    assert ".page-wrap--rules > .rules-types-layout," in html
-    assert ".page-wrap--analysis, .page-wrap--rules {" in html, "rules page must join the flex-column page-wrap group"
+    assert ".page-wrap--settings .settings-section, .page-wrap--settings .rules-workspace { flex: 0 0 auto; }" in html
+    assert ".rules-workspace > * { flex: 0 0 auto; }" in html
+    assert ".rules-action-bar {" in html
+    assert ".settings-tabbar {" in html
+    assert ".settings-section {" in html
+    assert ".page-wrap--settings, .page-wrap--analysis, .page-wrap--home {" in html
     # The analysis page carries the classification summary + unclassified banner;
     # its hero card must not be flex-shrunk into clipping its own content.
     assert ".page-wrap--analysis { min-height: 100%; height: auto; justify-content: flex-start;" in html
@@ -987,6 +1025,89 @@ def test_rules_page_top_level_cards_never_flex_shrink_into_slivers():
     assert ".rules-layout, .rules-tools-layout, .rules-types-layout { grid-template-columns: 1fr; }" in html
     assert ".rules-editor-grid, .rules-test-grid, .rules-kv-list, .rule-dictionary-form, .rules-builtin-row { grid-template-columns: 1fr; }" in html
     assert html.count("flex: 0 0 auto") >= 5
+
+
+def test_home_page_contract():
+    source = _read(SOURCE_PATH)
+    built = _decode_js_unicode_escapes(_read(BUILT_PATH))
+    for marker in (
+        "function HomePage(",
+        'active="home"',
+        "readonlyBadge: \"只读\"",
+        "emailLabel: \"提取邮箱\"",
+        "companyLabel: \"公司配置\"",
+        "unconfigured: \"尚未配置\"",
+        "outputTitle: \"输出目录设置\"",
+        "dateTitle: \"提取时间\"",
+        "localInputLabel: \"本地发票文件夹\"",
+        "localOutputLabel: \"归档目录\"",
+        "splitByCategory: \"按分类分目录\"",
+        "actionsTitle: \"开始处理\"",
+        "progressTitle: \"处理进度\"",
+        "startTimeLabel: \"开始时间\"",
+        "elapsedLabel: \"已运行\"",
+        "updatedLabel: \"最近更新\"",
+        "runInfoTitle: \"处理信息\"",
+        "viewResults: \"查看结果\"",
+        "stop: \"停止运行\"",
+        "邮箱提取",
+        "本地整理",
+        "邮箱提取并整理",
+    ):
+        assert marker in source, f"home page is missing {marker!r}"
+    assert 'callApi("get_progress")' in source
+    assert "setPollNonce" in source
+    assert "runStartedAtRef" in source
+    assert "run-log" in source
+    for marker in ("邮箱提取", "本地整理", "邮箱提取并整理", "处理进度", "查看结果"):
+        assert marker in built, f"compiled bundle is missing home copy {marker!r}"
+
+
+def test_theme_toggle_contract():
+    source = _read(SOURCE_PATH)
+    built = _decode_js_unicode_escapes(_read(BUILT_PATH))
+    html = _read(HTML_PATH)
+
+    assert "THEME_STORAGE_KEY" in source
+    assert "localStorage" in source
+    assert "matchMedia(\"(prefers-color-scheme: light)\")" in source
+    assert "document.documentElement.dataset.theme" in source
+    for marker in ("浅色模式", "深色模式"):
+        assert marker in source, f"theme toggle copy is missing {marker!r}"
+        assert marker in built, f"compiled bundle is missing theme copy {marker!r}"
+    assert ':root[data-theme="light"]' in html
+    assert "color-scheme: light;" in html
+    # main.py keeps this structural marker; the light palette is additive.
+    assert "color-scheme: dark;" in html
+    assert "--text-main: #182234;" in html
+    assert "prefers-color-scheme: light" in html
+
+
+def test_no_processing_page_or_local_engine_gui():
+    source = _read(SOURCE_PATH)
+    html = _read(HTML_PATH)
+    for removed in (
+        "function ProcessingPage(",
+        "本地识别引擎",
+        "LOCAL_ENGINE_ITEMS",
+        "engine-item",
+        "path: \"/processing\"",
+        "path: \"/rules\"",
+    ):
+        assert removed not in source, f"removed UI still present: {removed!r}"
+    for removed in (".engine-item", ".engine-list", ".terminal-body", ".page-wrap--rules"):
+        assert removed not in html, f"removed style still present: {removed!r}"
+
+
+def test_results_page_keeps_analysis_structure_and_rules_entry():
+    source = _read(SOURCE_PATH)
+    assert 'active="results"' in source
+    assert 'callApi("get_results_delta", successCursorRef.current, errorCursorRef.current)' in source
+    assert "setInterval(loadResults, 3000)" in source
+    assert 'navigate("/settings", { state: { settingsSection: "rules" } })' in source
+    assert "summary.classification_breakdown" in source
+    assert "summary.classification_source_breakdown" in source
+    assert "summary.unclassified_count" in source
 
 
 def test_root_render_is_wrapped_in_an_error_boundary():
