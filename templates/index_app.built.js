@@ -1418,6 +1418,74 @@ function AppWindowChrome({
     className: "window-traffic-button__glyph"
   })));
 }
+const WINDOW_RESIZE_EDGES = ["n", "s", "e", "w", "ne", "nw", "se", "sw"];
+function WindowResizeHandles() {
+  function startResize(edge, event) {
+    if (event.button !== 0 || event.isPrimary === false) return;
+    event.preventDefault();
+    const handle = event.currentTarget;
+    const startX = event.screenX;
+    const startY = event.screenY;
+    let active = false;
+    let finished = false;
+    let frame = 0;
+    let deltaX = 0;
+    let deltaY = 0;
+    function flush() {
+      frame = 0;
+      if (!active) return;
+      callApi("update_window_resize", deltaX, deltaY).catch(() => {});
+    }
+    function handlePointerMove(moveEvent) {
+      if (!active) return;
+      deltaX = moveEvent.screenX - startX;
+      deltaY = moveEvent.screenY - startY;
+      if (!frame) frame = window.requestAnimationFrame(flush);
+    }
+    function finish() {
+      if (finished) return;
+      finished = true;
+      if (frame) {
+        window.cancelAnimationFrame(frame);
+        frame = 0;
+      }
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+      try {
+        handle.releasePointerCapture(event.pointerId);
+      } catch (error) {
+        // 指针已释放时无事可做
+      }
+      const settle = active ? callApi("update_window_resize", deltaX, deltaY).catch(() => {}) : Promise.resolve();
+      settle.finally(() => callApi("end_window_resize").catch(() => {}));
+    }
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", finish);
+    try {
+      handle.setPointerCapture(event.pointerId);
+    } catch (error) {
+      // 合成事件没有可捕获的指针，退回普通鼠标事件
+    }
+    callApi("begin_window_resize", edge).then(result => {
+      if (!result || !result.success) {
+        finish();
+        return;
+      }
+      if (finished) return;
+      active = true;
+    }).catch(() => finish());
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    className: "window-resize-layer",
+    "aria-hidden": "true"
+  }, WINDOW_RESIZE_EDGES.map(edge => /*#__PURE__*/React.createElement("span", {
+    key: edge,
+    className: `window-resize-handle window-resize-handle--${edge}`,
+    onPointerDown: event => startResize(edge, event)
+  })));
+}
 function AppSidebar({
   active,
   theme,
@@ -1431,6 +1499,9 @@ function AppSidebar({
   return /*#__PURE__*/React.createElement("aside", {
     className: "app-sidebar"
   }, /*#__PURE__*/React.createElement("div", {
+    className: "sidebar-topbar pywebview-drag-region",
+    "aria-hidden": "true"
+  }), /*#__PURE__*/React.createElement("div", {
     className: "sidebar-brand pywebview-drag-region"
   }, /*#__PURE__*/React.createElement("span", {
     className: "sidebar-brand__name"
@@ -1502,7 +1573,7 @@ function AppShell({
   }, children), /*#__PURE__*/React.createElement(PageFooter, {
     left: footerLeft,
     right: footerRight
-  })));
+  })), /*#__PURE__*/React.createElement(WindowResizeHandles, null));
 }
 function BootstrapStatePage({
   active,

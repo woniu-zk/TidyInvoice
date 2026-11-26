@@ -53,6 +53,7 @@ from user_settings import (
     get_default_debug_trace_path,
     get_output_state_dir,
 )
+import window_chrome
 
 
 DEFAULT_TRUTH_AUDIT_FINALIZE_TIMEOUT_SECONDS = 120.0
@@ -3313,6 +3314,40 @@ class InvoiceAppAPI(AdmissionMixin, SettingsRulesMixin, DiagnosticsMixin):
             return {"success": True, "message": "窗口已最大化"}
         except Exception as exc:
             return {"success": False, "message": f"窗口最大化失败: {exc}"}
+
+    def begin_window_resize(self, edge):
+        """开始拖动窗口边缘/角落缩放；最大化时不可用。
+
+        无边框窗口在 WinForms + WebView2 下没有系统缩放边缘（子窗口铺满客户区），
+        缩放由前端指针事件驱动，这里只记录起点。
+        """
+        if not window_chrome.SUPPORTS_NATIVE_CHROME:
+            return {"success": False, "message": "当前平台不支持窗口缩放"}
+        chrome = window_chrome.current()
+        if chrome is None:
+            return {"success": False, "message": "窗口缩放接口未就绪"}
+        try:
+            return {"success": bool(chrome.begin_resize(edge))}
+        except Exception as exc:  # noqa: BLE001 - 前端按失败处理即可
+            return {"success": False, "message": f"窗口缩放失败: {exc}"}
+
+    def update_window_resize(self, delta_x, delta_y):
+        """按指针位移（CSS 像素）更新窗口大小。"""
+        chrome = window_chrome.current()
+        if chrome is None:
+            return {"success": False, "message": "窗口缩放接口未就绪"}
+        try:
+            rect = chrome.update_resize(delta_x, delta_y)
+        except Exception as exc:  # noqa: BLE001 - 前端按失败处理即可
+            return {"success": False, "message": f"窗口缩放失败: {exc}"}
+        return {"success": rect is not None, "rect": list(rect) if rect else None}
+
+    def end_window_resize(self):
+        """结束窗口缩放。"""
+        chrome = window_chrome.current()
+        if chrome is not None:
+            chrome.end_resize()
+        return {"success": True}
 
     def open_manual_check_folder(self):
         manual_path = self._manual_check_path()

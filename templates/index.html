@@ -196,7 +196,11 @@
             background: var(--sidebar);
             backdrop-filter: saturate(180%) blur(24px);
             -webkit-backdrop-filter: saturate(180%) blur(24px);
+            position: relative;
         }
+
+        /* 侧栏顶部留白：窗口拖动区（交通灯按钮在其上方，不参与拖动） */
+        .sidebar-topbar { position: absolute; top: 0; left: 0; right: 0; height: 44px; }
 
         .sidebar-brand {
             display: flex;
@@ -314,6 +318,18 @@
         :root[data-controls="win"] .window-traffic-button__glyph::before,
         :root[data-controls="win"] .window-traffic-button__glyph::after { background: currentColor; opacity: 1; }
         :root[data-controls="win"] .app-sidebar { padding-top: 12px; }
+
+        /* 窗口缩放条：无边框窗口没有系统缩放边缘，用 8 条透明手势区接管 */
+        .window-resize-layer { position: fixed; inset: 0; z-index: 50; pointer-events: none; }
+        .window-resize-handle { position: fixed; pointer-events: auto; }
+        .window-resize-handle--n { top: 0; left: 10px; right: 10px; height: 5px; cursor: ns-resize; }
+        .window-resize-handle--s { bottom: 0; left: 10px; right: 10px; height: 5px; cursor: ns-resize; }
+        .window-resize-handle--w { top: 10px; bottom: 10px; left: 0; width: 5px; cursor: ew-resize; }
+        .window-resize-handle--e { top: 10px; bottom: 10px; right: 0; width: 5px; cursor: ew-resize; }
+        .window-resize-handle--nw { top: 0; left: 0; width: 12px; height: 12px; cursor: nwse-resize; }
+        .window-resize-handle--ne { top: 0; right: 0; width: 12px; height: 12px; cursor: nesw-resize; }
+        .window-resize-handle--sw { bottom: 0; left: 0; width: 12px; height: 12px; cursor: nesw-resize; }
+        .window-resize-handle--se { bottom: 0; right: 0; width: 12px; height: 12px; cursor: nwse-resize; }
 
         .app-main {
             flex: 1;

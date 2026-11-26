@@ -104,7 +104,9 @@
 ## 6. 窗口语汇
 
 - 无边框窗口，**左上角交通灯**（12px 圆、间距 8px、悬停整组显示 ×/−/+）。
-- 拖动区：`.sidebar-brand` 与 `.sidebar-spacer` 带 `pywebview-drag-region`（pywebview 默认选择器）。
+- **居中**：启动时按主显示器工作区与 DPI 居中，窗口尺寸上限为工作区减去 24px 边距；`main.py` 在 `before_show` 里调用 `window_chrome.attach`，窗口第一次出现就在最终位置，不会先出现在别处再跳。
+- 拖动区：`.sidebar-topbar`（顶部 44px 留白，交通灯在它上层）、`.sidebar-brand` 与 `.sidebar-spacer` 带 `pywebview-drag-region`（pywebview 默认选择器，`main.py` 的 `DRAG_REGION_SELECTOR` 必须与之一致）。
+- **缩放**：无边框窗口没有系统缩放边缘（WebView2 子窗口铺满客户区，`WM_NCHITTEST` 到不了顶层窗口），因此用 `.window-resize-layer` 的 8 条透明手势区（边 5px、角 12px）接管：指针按下 → `begin_window_resize`，移动 → `update_window_resize`，抬起 → `end_window_resize`，后端按 DPI 换算后 SetWindowPos。
 - **可一键切回 Windows 控件**：在 `<html>` 上加 `data-controls="win"`，交通灯变为右上角 46×46 的线条按钮（`⌗` 覆盖块在样式表内已就绪）。
 
 ## 7. 可访问性

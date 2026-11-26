@@ -18,6 +18,8 @@ from brand_generated import (
 from frontend_run_context import set_explicit_run_context_path
 from user_settings import get_runtime_data_dir, get_runtime_diagnostics_dir
 
+import window_chrome
+
 
 WINDOW_BASELINE_WIDTH = 1360
 WINDOW_BASELINE_HEIGHT = 840
@@ -499,62 +501,31 @@ def _configure_webview_runtime(webview_module, current_dir, requested_mode=""):
     return {"mode": "evergreen", "runtime_dir": "", **runtime_info}
 
 
-def _resolve_working_area(screen):
-    frame = getattr(screen, "frame", None)
-    if frame is not None:
-        width = int(getattr(frame, "Width", 0) or 0)
-        height = int(getattr(frame, "Height", 0) or 0)
-        if width > 0 and height > 0:
-            return {
-                "x": int(getattr(frame, "X", getattr(screen, "x", 0)) or 0),
-                "y": int(getattr(frame, "Y", getattr(screen, "y", 0)) or 0),
-                "width": width,
-                "height": height,
-                "screen": screen,
-            }
+def _apply_window_chrome(window):
+    """窗口显示前摆好位置：居中到主显示器工作区，并登记缩放状态。
 
-    width = int(getattr(screen, "width", 0) or 0)
-    height = int(getattr(screen, "height", 0) or 0)
-    if width > 0 and height > 0:
-        return {
-            "x": int(getattr(screen, "x", 0) or 0),
-            "y": int(getattr(screen, "y", 0) or 0),
-            "width": width,
-            "height": height,
-            "screen": screen,
-        }
+    pywebview 的 WinForms 后端在 frameless 模式下会丢掉可拖拽的缩放边缘，还会按系统
+    DPI 重复缩放窗口坐标，因此窗口几何由 ``window_chrome`` 直接接管。
+    """
+    try:
+        chrome = window_chrome.attach(
+            window,
+            WINDOW_BASELINE_WIDTH,
+            WINDOW_BASELINE_HEIGHT,
+            margin=WINDOW_MARGIN,
+            min_width=WINDOW_MIN_WIDTH,
+            min_height=WINDOW_MIN_HEIGHT,
+        )
+    except Exception as exc:  # noqa: BLE001 - 窗口装饰失败不应挡住启动
+        _write_startup_diagnostic("window_chrome_failed", error=f"{type(exc).__name__}: {exc}")
+        return None
 
-    return None
-
-
-def _resolve_window_geometry(webview_module):
-    screens = list(getattr(webview_module, "screens", []) or [])
-    working_area = _resolve_working_area(screens[0]) if screens else None
-    if not working_area:
-        return {
-            "width": WINDOW_BASELINE_WIDTH,
-            "height": WINDOW_BASELINE_HEIGHT,
-            "min_size": (WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT),
-        }
-
-    available_width = max(working_area["width"] - WINDOW_MARGIN, 760)
-    available_height = max(working_area["height"] - WINDOW_MARGIN, 560)
-
-    width = min(WINDOW_BASELINE_WIDTH, available_width)
-    height = min(WINDOW_BASELINE_HEIGHT, available_height)
-    min_width = min(WINDOW_MIN_WIDTH, width)
-    min_height = min(WINDOW_MIN_HEIGHT, height)
-    x = working_area["x"] + max((working_area["width"] - width) // 2, 0)
-    y = working_area["y"] + max((working_area["height"] - height) // 2, 0)
-
-    return {
-        "screen": working_area["screen"],
-        "x": int(x),
-        "y": int(y),
-        "width": int(width),
-        "height": int(height),
-        "min_size": (int(min_width), int(min_height)),
-    }
+    if chrome is not None:
+        _write_startup_diagnostic(
+            "window_chrome_ready",
+            rect=list(chrome.applied_rect or ()),
+        )
+    return chrome
 
 
 def _ensure_expected_frontend_assets(current_dir):
@@ -647,7 +618,8 @@ def main(argv=None):
 
     from app_api import InvoiceAppAPI
 
-    webview.settings["DRAG_REGION_SELECTOR"] = ".window-drag-region"
+    # 与 templates/index_app.js 中拖动区的类名保持一致（pywebview 默认选择器）。
+    webview.settings["DRAG_REGION_SELECTOR"] = ".pywebview-drag-region"
 
     runtime_info = _configure_webview_runtime(
         webview, current_dir, requested_mode=str(getattr(args, "webview2_mode", "") or "")
@@ -662,22 +634,19 @@ def main(argv=None):
     html_path = _ensure_expected_frontend_assets(current_dir)
 
     api = InvoiceAppAPI()
-    window_geometry = _resolve_window_geometry(webview)
 
-    webview.create_window(
+    window = webview.create_window(
         title=WINDOW_TITLE,
         url=str(html_path),
         js_api=api,
-        width=window_geometry["width"],
-        height=window_geometry["height"],
-        x=window_geometry.get("x"),
-        y=window_geometry.get("y"),
-        screen=window_geometry.get("screen"),
-        min_size=window_geometry["min_size"],
+        width=WINDOW_BASELINE_WIDTH,
+        height=WINDOW_BASELINE_HEIGHT,
+        min_size=(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT),
         resizable=True,
         frameless=True,
         easy_drag=False,
     )
+    window.events.before_show += lambda *_: _apply_window_chrome(window)
 
     def _record_renderer():
         _write_startup_diagnostic(
