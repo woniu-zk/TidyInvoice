@@ -44,6 +44,7 @@ design/
 # OS/editor noise
 .DS_Store
 Thumbs.db
+*.lnk
 
 # Local worktree metadata
 .claude/worktrees/
